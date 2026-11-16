@@ -1,0 +1,28 @@
+name: "Setup Pixi workspace"
+description: "Install a locked Pixi environment."
+
+inputs:
+  environment:
+    description: "Pixi environment name to install (default, sandbox)."
+    required: false
+    default: "default"
+  locked:
+    description: "Install from the committed pixi.lock."
+    required: false
+    default: "true"
+  pixi-version:
+    description: "Pinned Pixi CLI version."
+    required: false
+    default: "v0.84.2"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Pixi environment
+      uses: prefix-dev/setup-pixi@9936258fee697aff89b3fed6ca1f80a382ef694e # v0.11.3
+      with:
+        pixi-version: ${{ inputs.pixi-version }}
+        environments: ${{ inputs.environment }}
+        locked: ${{ inputs.locked }}
+        cache: true
+        cache-write: ${{ github.ref == 'refs/heads/main' || github.event_name == 'push' }}

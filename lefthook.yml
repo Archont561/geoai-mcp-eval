@@ -1,0 +1,27 @@
+# Lefthook v2 Git hooks — all checks route through the single `pixi run tools` entrypoint.
+# Install once with: `pixi run tools run hooks`
+# Validate syntax with: `pixi run tools run hooks_validate`
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: lint-python
+      glob: "**/*.py"
+      run: pixi run tools run lint
+
+    - name: lint-repo
+      run: pixi run tools run alint
+
+    - name: lint-md
+      glob: "**/*.md"
+      run: pixi run tools run md
+
+pre-push:
+  parallel: false
+  jobs:
+    - name: test
+      run: pixi run tools run test
+
+    - name: actions
+      glob: ".github/workflows/**/*.yml"
+      run: pixi run tools run actions

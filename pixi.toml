@@ -1,0 +1,70 @@
+# pixi workspace — https://pixi.sh
+#
+# geoai-mcp-eval: thesis experiment code (MCP typed tools vs PyQGIS code
+# generation for LLM agents in GIS). The runtime GIS/experiment stack is
+# DELIBERATELY not pinned here yet — see [feature.experiment] below.
+#
+# Only one task is allowed here, enforced by convention and review: `tools`
+# (the Python-native Tasknest runner from the Archont561 toolchain).
+# CI and hooks call `pixi run tools ...` exclusively.
+
+[workspace]
+name = "geoai-mcp-eval"
+version = "0.1.0"
+description = "Thesis experiment: MCP typed tools vs PyQGIS code generation for LLM agents in GIS"
+license = "MIT"
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-arm64", "win-64"]
+
+[tasks]
+tools = "tasknest"
+
+[feature.python.dependencies]
+python = ">=3.12,<3.14"
+ruff = "*"
+pytest = "*"
+pytest-cov = "*"
+
+# THE EXPERIMENT RUNTIME GOES HERE — intentionally empty until the design is
+# pinned. When it is, add the analysis/GIS stack under
+# [feature.experiment.dependencies], e.g.:
+#   geopandas = "*"
+#   shapely = "*"
+#   pyogrio = "*"
+#   pyproj = "*"
+# If the native GIS stack grows heavy (GDAL/QGIS), give it its own
+# solve-group, mirroring the workspace-root manifest's separation between the
+# measurement solve group and the tooling environment.
+[feature.experiment]
+
+[feature.lint.dependencies]
+actionlint = "*"
+lychee = "*"
+# conda-forge ships the real `vale` binary; the PyPI `vale` is only a stub.
+vale = "=3.27.0"
+
+[feature.lint.target.unix.dependencies]
+lefthook = "*"
+shellcheck = "*"
+
+[feature.lint.pypi-dependencies]
+alint = "==0.22.1"
+gherlint = "==0.5.0"
+rumdl = "==0.3.4"
+
+[feature.automation.pypi-dependencies]
+tasknest = "==0.4.0"
+
+# NOTE: `pixi-sandbox` is NOT on conda-forge. The template pins it from the
+# channel https://prefix.dev/archont561/archont561, which answered 404 from this
+# workspace — an unsolvable environment poisons every fresh `pixi run`, so it is
+# not configured here. Re-add this feature + the channel (or a verified mirror)
+# together when access is available:
+# [feature.sandbox.dependencies]
+# pixi-sandbox = "=0.9.0"
+# [environments]
+# sandbox = { features = ["python", "sandbox", "automation"], solve-group = "default" }
+# pixi-sandbox.toml ships in the repo and stays inert until then.
+
+[environments]
+default = { features = ["python", "experiment", "lint", "automation"], solve-group = "default" }

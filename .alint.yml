@@ -1,0 +1,86 @@
+# alint — declarative repository layout & policy rules (PyPI: alint==0.22.1).
+#
+# Run with `pixi run tools run alint`.
+# Extended from the Archont561 template set; rules that require a git checkout or
+# product code we do not have yet are intentionally not included.
+
+version: 1
+
+extends:
+  # Open-source hygiene. Codes-of-conduct / CODEOWNERS / security policy are not
+  # required for a single-maintainer research repo; drop these exceptions when publishing.
+  - url: alint://bundled/oss-baseline@v1
+    except:
+      - oss-security-policy-exists
+      - oss-codeowners-exists
+      - oss-code-of-conduct-exists
+  - alint://bundled/hygiene/no-tracked-artifacts@v1
+  - alint://bundled/hygiene/lockfiles@v1
+  - alint://bundled/agent-hygiene@v1
+  - alint://bundled/agent-context@v1
+  - alint://bundled/tooling/editorconfig@v1
+  - alint://bundled/ci/github-actions@v1
+
+rules:
+  - id: require-root-readme
+    kind: file_exists
+    paths: README.md
+    level: error
+    message: "Repository root README.md is required."
+
+  - id: require-agent-instructions
+    kind: file_exists
+    paths: AGENTS.md
+    level: error
+    message: "AGENTS.md with standing contributor/agent conventions is required."
+
+  - id: require-pixi-manifest
+    kind: file_exists
+    paths: pixi.toml
+    level: error
+    message: "pixi.toml is the only allowed environment manifest; keep it at the root."
+
+  - id: require-tasknest-manifest
+    kind: file_exists
+    paths: tasknest.toml
+    level: error
+    message: "tasknest.toml declares the single `tools` automation entrypoint."
+
+  - id: require-tools-entrypoint
+    kind: toml_path_equals
+    paths: pixi.toml
+    path: "$.tasks.tools"
+    equals: "tasknest"
+    level: error
+    message: "pixi.toml must define exactly the `tools` task pointing at the Python-native tasknest runner."
+
+  - id: require-experiment-package
+    kind: file_exists
+    paths: experiment/__init__.py
+    level: error
+    message: "experiment/ is the Python source root for the study; do not move it."
+
+  - id: require-smoke-tests
+    kind: file_exists
+    paths: tests/test_smoke.py
+    level: error
+    message: "A smoke test must always exist so `pytest` is meaningful from day one."
+
+  - id: forbid-pyproject-as-env-manifest
+    kind: file_absent
+    paths: uv.lock
+    level: error
+    message: "pixi is the environment manager; do not introduce uv/pip-tools lockfiles."
+
+  - id: require-ci-workflow
+    kind: file_exists
+    paths: .github/workflows/ci.yml
+    level: error
+    message: "CI must run the alint/ruff/pytest gates on every push and PR."
+
+  - id: gitignore-has-pixi
+    kind: file_content_matches
+    paths: .gitignore
+    pattern: "(?m)^\\.pixi/$"
+    level: error
+    message: ".gitignore must exclude .pixi/ (solve-group environments)."

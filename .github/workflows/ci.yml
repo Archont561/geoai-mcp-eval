@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repo:
+    name: Repo Policies (alint, Markdown, Actions)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Pixi workspace
+        uses: ./.github/actions/setup
+        with:
+          environment: default
+
+      - name: Lint workflow files (actionlint)
+        run: pixi run tools run actions
+
+      - name: Run repository policies (alint)
+        run: pixi run tools run alint
+
+      - name: Lint Markdown (rumdl)
+        run: pixi run tools run md
+
+  python:
+    name: Python Lint & Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Pixi workspace
+        uses: ./.github/actions/setup
+        with:
+          environment: default
+
+      - name: Ruff check & format check
+        run: pixi run tools run lint
+
+      - name: Run pytest
+        run: pixi run tools run test

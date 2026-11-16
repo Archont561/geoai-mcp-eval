@@ -1,0 +1,44 @@
+# Tasknest 0.4.0 — Python-native file-based task runner.
+# All repository and agent automation runs through `pixi run tools ...`.
+# Discover tasks with `pixi run tools ls`; validate with `pixi run tools check`.
+
+[tasknest]
+config_version = 1
+
+[discovery]
+workspaces = false
+
+[[discovery.roots]]
+path = "tools"
+namespace = ""
+project_root = "."
+
+[checks]
+strict = true
+require_description = true
+require_tests = false
+require_features = false
+unknown_marks = "error"
+
+[marks]
+fast = "Fast local check suitable for tight feedback loops"
+offline = "Runs fully offline without network access"
+lint = "Static analysis, formatting, schema, or boundary verification"
+test = "Automated test suite"
+ci = "Included in CI"
+writes = "May modify project files"
+setup = "Workspace dependency bootstrap"
+workflow = "Repository workflow utility"
+dev = "Long-running development server or watcher"
+codegen = "Generated contract or artifact emitter"
+build = "Compile or package artifacts"
+release = "Packaging or deployment workflow"
+security = "Supply-chain license, ban, or vulnerability audit"
+docs = "Documentation verification"
+
+[execution]
+jobs = 1
+
+[skill]
+output = ".agents/skills/project-tools/SKILL.md"
+command = "pixi run tools"
