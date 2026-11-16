@@ -1,0 +1,29 @@
+# rumdl — fast Rust Markdown linter/formatter (PyPI: rumdl).
+# Run via `pixi run tools run md` (check) or `rumdl fmt .` to fix.
+
+[global]
+flavor = "gfm"
+line-length = 100
+respect-gitignore = true
+cache = true
+cache-dir = ".rumdl_cache"
+exclude = [
+  ".pixi/**",
+  "coverage/**",
+  # PR/issue templates intentionally start at H2 (GitHub renders them in a form)
+  ".github/**",
+]
+disable = [
+  # Prose paragraphs and wide tables often exceed 100 chars;
+  # keep structural rules strict, let MD013 stay off globally.
+  "MD013",
+]
+
+[MD004]
+style = "dash"
+
+[MD049]
+style = "asterisk"
+
+[MD050]
+style = "asterisk"
