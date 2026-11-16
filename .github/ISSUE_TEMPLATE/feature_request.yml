@@ -1,0 +1,17 @@
+name: Feature request
+description: Propose an experiment change, a task, or repo tooling.
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why does the study need this?
+    validations:
+      required: true
