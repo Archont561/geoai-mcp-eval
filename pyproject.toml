@@ -21,7 +21,7 @@ select = [
 known-first-party = ["experiment"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["experiment/tests"]
 addopts = "-q"
 
 [tool.coverage.run]

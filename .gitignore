@@ -2,6 +2,11 @@
 .pixi/
 .rumdl_cache/
 .tasknest/
+docs/_build/
+.vale/styles/Google/
+.vale/styles/Microsoft/
+.vale/styles/proselint/
+.vale/styles/write-good/
 
 # Python
 __pycache__/

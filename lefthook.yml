@@ -12,8 +12,7 @@ pre-commit:
     - name: lint-repo
       run: pixi run tools run alint
 
-    - name: lint-md
-      glob: "**/*.md"
+    - name: lint-md-and-mdx
       run: pixi run tools run md
 
 pre-push:

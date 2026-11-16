@@ -1,3 +1,4 @@
+# Generated from templates/github/ISSUE_TEMPLATE/bug_report.yml.j2; do not edit directly.
 name: Bug report
 description: Something in the experiment code or automation is broken.
 title: "[bug] "

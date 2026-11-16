@@ -1,0 +1,8 @@
+version: 1
+project:
+  title: "geoai-mcp-eval — prototype"
+  description: "TODO: one-page documentation prototype for the GeoAI MCP evaluation scaffold."
+  toc:
+    - file: index.md
+site:
+  template: book-theme
