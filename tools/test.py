@@ -12,6 +12,14 @@ def test(ctx: ToolContext) -> None:
     """Run pytest with coverage of the experiment package."""
     env = {"PYTHONPATH": str(ctx.repo_root)}
     ctx.run(
-        [sys.executable, "-m", "pytest", "--cov=experiment", "--cov-report=term-missing"],
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "--cov=experiment",
+            "--cov-report=term-missing",
+            "--cov-report=xml:coverage.xml",
+            "--cov-fail-under=90",
+        ],
         env=env,
     )

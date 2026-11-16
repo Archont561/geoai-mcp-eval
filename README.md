@@ -34,6 +34,7 @@ Follows the [Archont561](https://github.com/Archont561) `*-template` toolchain, 
 - **alint** (`.alint.yml`): repo layout & policy rules — required files, hygiene, pinned actions.
 - **lefthook** hooks (pre-commit, pre-push) — install once with `pixi run tools run hooks`.
 - **ruff** (lint+format), **pytest** (tests), and **rumdl** (Markdown and MDX).
+- **Coverage** is measured for `experiment/`; pytest enforces a 90% floor and `codecov.yml` sets matching project and patch targets.
 - **Vale** uses Microsoft and Google technical-writing styles plus proselint and write-good scientific-prose checks; CI lints Markdown and MDX.
 - **lychee** (offline link check) and **actionlint** (workflows) provide additional repository checks.
 

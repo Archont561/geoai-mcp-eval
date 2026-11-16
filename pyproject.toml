@@ -27,6 +27,7 @@ addopts = "-q"
 [tool.coverage.run]
 source = ["experiment"]
 branch = true
+omit = ["experiment/tests/*"]
 
 [tool.coverage.report]
 show_missing = true

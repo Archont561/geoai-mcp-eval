@@ -17,6 +17,7 @@ __pycache__/
 .mypy_cache/
 coverage/
 *.lcov
+coverage.xml
 htmlcov/
 
 # Builds & results (experiment outputs stay out of git)
