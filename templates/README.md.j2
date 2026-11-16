@@ -14,10 +14,15 @@ Thesis experiment code: **does the integration interface matter?** Expose nine g
 │   ├── features/        # future Gherkin experiment specifications
 │   └── tests/           # pytest smoke and regression tests
 ├── docs/                # one-page MyST documentation prototype
+├── .agents/skills/      # project agent skills (upstream and repo-maintained)
+├── backlog/             # local-first Backlog.md tasks, plans, and decisions
 ├── templates/           # Jinja2 sources for generated docs and GitHub forms
 ├── tools/               # automation tasks (Tasknest, Python-native); run via `pixi run tools`
 ├── .github/             # CI, Pages workflow, and issue forms; SHA-pinned actions
-├── pixi.toml            # the ONLY environment manifest (one solve group: default)
+├── pixi.toml            # the ONLY Python environment manifest
+├── package.json         # pinned Bun CLIs (skills and backlog.md only)
+├── bun.lock             # Bun dependency lock
+├── skills-lock.json     # upstream agent-skill source pins and hashes
 ├── tasknest.toml        # single `tools` automation entrypoint
 ├── AGENTS.md            # standing conventions for contributors and coding agents
 └── README.md
@@ -48,7 +53,20 @@ pixi run tools run prose        # install Vale presets and lint prose (needs net
 pixi run tools run hooks        # install pre-commit/pre-push hooks (optional)
 ```
 
-> Never run environment creation inside this repo through a different package manager (`uv`, `pip install -r`, plain `python -m venv`). alint forbids stray `uv.lock`.
+> Never run Python environment creation inside this repo through a different package manager (`uv`, `pip install -r`, plain `python -m venv`). alint forbids stray `uv.lock`.
+
+## Agent skills and backlog
+
+Bun is used only to pin the agent-skill and Backlog.md CLIs; Pixi remains the Python environment manager. Install the CLIs with the committed lockfile, then restore project skills or use the backlog:
+
+```bash
+bun install --frozen-lockfile
+bun x skills experimental_install --frozen-lockfile
+bun x skills list
+bun x backlog board
+```
+
+Five upstream skills are copied to `.agents/skills/` and locked in `skills-lock.json`; the repository-maintained `code-review` skill lives alongside them. Backlog.md is initialized under `backlog/`; its local-only settings disable remote operations and automatic commits. Use `bun x backlog task create` to add work items.
 
 ## CI
 

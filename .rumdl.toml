@@ -8,7 +8,9 @@ respect-gitignore = true
 cache = true
 cache-dir = ".rumdl_cache"
 exclude = [
+  ".agents/skills/**",
   ".pixi/**",
+  "node_modules/**",
   "coverage/**",
   # PR/issue templates intentionally start at H2 (GitHub renders them in a form)
   ".github/**",

@@ -116,6 +116,42 @@ rules:
     level: error
     message: "Codecov coverage status and thresholds must be configured in codecov.yml."
 
+  - id: require-bun-tool-manifest
+    kind: file_exists
+    paths: package.json
+    level: error
+    message: "package.json pins the project-local skills and Backlog.md CLIs."
+
+  - id: require-bun-tool-lockfile
+    kind: file_exists
+    paths: bun.lock
+    level: error
+    message: "bun.lock must pin the package versions used to install skills and Backlog.md."
+
+  - id: require-skills-lock
+    kind: file_exists
+    paths: skills-lock.json
+    level: error
+    message: "skills-lock.json records the upstream source and content hashes for installed skills."
+
+  - id: require-project-skill
+    kind: file_exists
+    paths: .agents/skills/bdd-scenarios/SKILL.md
+    level: error
+    message: "At least one downloaded project skill must be installed under .agents/skills/."
+
+  - id: require-backlog-readme
+    kind: file_exists
+    paths: backlog/README.md
+    level: error
+    message: "The initialized Backlog.md workspace must document its local layout and CLI."
+
+  - id: require-backlog-config
+    kind: file_exists
+    paths: backlog/config.yml
+    level: error
+    message: "Backlog.md configuration must be committed in backlog/config.yml."
+
   - id: gitignore-has-pixi
     kind: file_content_matches
     paths: .gitignore
