@@ -46,6 +46,9 @@ jobs:
     name: Python Lint & Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,5 +63,13 @@ jobs:
       - name: Ruff check & format check
         run: pixi run tools run lint
 
-      - name: Run pytest
+      - name: Run pytest with 90% coverage floor
         run: pixi run tools run test
+
+      - name: Upload experiment coverage to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: coverage.xml
+          flags: experiment
+          use_oidc: true
+          fail_ci_if_error: false

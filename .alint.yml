@@ -110,6 +110,12 @@ rules:
     level: error
     message: "CI must run the alint/ruff/pytest gates on every push and PR."
 
+  - id: require-codecov-config
+    kind: file_exists
+    paths: codecov.yml
+    level: error
+    message: "Codecov coverage status and thresholds must be configured in codecov.yml."
+
   - id: gitignore-has-pixi
     kind: file_content_matches
     paths: .gitignore
