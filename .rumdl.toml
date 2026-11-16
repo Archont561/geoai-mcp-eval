@@ -27,3 +27,7 @@ style = "asterisk"
 
 [MD050]
 style = "asterisk"
+
+# rumdl auto-detects MDX by extension; pin the parser explicitly for docs.
+[per-file-flavor]
+"**/*.mdx" = "mdx"

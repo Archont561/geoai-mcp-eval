@@ -1,3 +1,5 @@
+<!-- Generated from templates/README.md.j2; do not edit directly. -->
+
 # geoai-mcp-eval
 
 Thesis experiment code: **does the integration interface matter?** Expose nine geoprocessing operations to a pinned LLM as **typed MCP tools** versus ask the same model to **generate and run PyQGIS code** — one pinned engine, one pinned oracle, scored on executed spatial artefacts with repetitions.
@@ -8,17 +10,20 @@ Thesis experiment code: **does the integration interface matter?** Expose nine g
 
 ```text
 geoai-mcp-eval/
-├── experiment/          # THE PYTHON SOURCE ROOT for the study (nothing else lives here yet)
-├── tests/               # pytest; starts with a smoke test so the gate is never vacuous
+├── experiment/          # THE PYTHON SOURCE ROOT for the study
+│   ├── features/        # future Gherkin experiment specifications
+│   └── tests/           # pytest smoke and regression tests
+├── docs/                # one-page MyST documentation prototype
+├── templates/           # Jinja2 sources for generated docs and GitHub forms
 ├── tools/               # automation tasks (Tasknest, Python-native); run via `pixi run tools`
-├── .github/             # CI: alint, ruff, pytest, actionlint; SHA-pinned actions
+├── .github/             # CI, Pages workflow, and issue forms; SHA-pinned actions
 ├── pixi.toml            # the ONLY environment manifest (one solve group: default)
 ├── tasknest.toml        # single `tools` automation entrypoint
 ├── AGENTS.md            # standing conventions for contributors and coding agents
 └── README.md
 ```
 
-**Not part of this repository by design:** the docs/site of the literature review and the thesis itself live elsewhere in the workspace (`literature/`, `baseline-thesis/`, `thesis/`). Do not recreate them here.
+The MyST site is only a one-page prototype. The literature review and thesis itself live elsewhere in the workspace (`literature/`, `baseline-thesis/`, `thesis/`); do not recreate them here.
 
 ## Toolchain
 
@@ -28,7 +33,9 @@ Follows the [Archont561](https://github.com/Archont561) `*-template` toolchain, 
 - **Tasknest (PyPI, v0.4.0)** is the task runner; **`pixi.toml` defines exactly one task** (`tools`). Everything goes through `pixi run tools …`.
 - **alint** (`.alint.yml`): repo layout & policy rules — required files, hygiene, pinned actions.
 - **lefthook** hooks (pre-commit, pre-push) — install once with `pixi run tools run hooks`.
-- **ruff** (lint+format), **pytest** (tests), **rumdl** (Markdown), **lychee** (offline link check), **actionlint** (workflows), **vale** (prose, not part of `check`).
+- **ruff** (lint+format), **pytest** (tests), and **rumdl** (Markdown and MDX).
+- **Vale** uses Microsoft and Google technical-writing styles plus proselint and write-good scientific-prose checks; CI lints Markdown and MDX.
+- **lychee** (offline link check) and **actionlint** (workflows) provide additional repository checks.
 
 ## Quickstart
 
@@ -36,6 +43,7 @@ Follows the [Archont561](https://github.com/Archont561) `*-template` toolchain, 
 pixi install --locked          # create the environment from the committed pixi.lock
 pixi run tools ls               # list automation tasks
 pixi run tools check            # alint + ruff + pytest + rumdl (the offline gate)
+pixi run tools run prose        # install Vale presets and lint prose (needs network)
 pixi run tools run hooks        # install pre-commit/pre-push hooks (optional)
 ```
 
@@ -45,10 +53,11 @@ pixi run tools run hooks        # install pre-commit/pre-push hooks (optional)
 
 `.github/workflows/ci.yml` runs on pushes to `main`, PRs, and manual dispatch:
 
-| Job          | Steps                                                        |
-| ------------ | ------------------------------------------------------------ |
-| `repo`       | checkout → setup-pixi (locked; `pixi.lock` is committed) → actionlint → alint → rumdl |
-| `python`     | checkout → setup-pixi → ruff (check+format) → pytest         |
+| Job          | Steps                                                                                                        |
+| ------------ | ------------------------------------------------------------------------------------------------------------ |
+| `repo`       | checkout → setup-pixi (locked) → actionlint → alint → rumdl (Markdown/MDX) → Vale (technical/scientific prose) |
+| `python`     | checkout → setup-pixi → ruff (check+format) → pytest                                                        |
+| `pages`      | MyST one-page prototype build from `docs/myst.yml`; deploys on pushes to `main`                              |
 
 `pixi.lock` is committed and CI installs locked; regenerate it with `pixi lock` whenever dependencies change.
 
@@ -58,26 +67,23 @@ Add them to `[feature.experiment.dependencies]` (or `-pypi-dependencies`) in `pi
 
 ## Honesty notes (read before trusting any of this)
 
-Verified 2026-11-16 (pixi 0.84.2, standalone binary):
+The base Pixi scaffold was checked on 2026-11-16 with Pixi 0.84.2:
 
-- `pixi lock` succeeds for linux-64, osx-arm64 and win-64 (see committed `pixi.lock`,
-  generated 2026-11-16 with pixi 0.84.2); the solve includes the pinned PyPI tools
-  (alint 0.22.1, gherlint 0.5.0, rumdl 0.3.4, tasknest 0.4.0).
-- `tasknest check` and `tasknest run check` both pass (11 tasks; alint 56/56 rules;
-  ruff check + format clean; pytest 1/1 with 100% coverage of `experiment/__init__.py`;
-  rumdl OK after excluding `.github/` templates from Markdown lint).
-- TOML/YAML all parse; `.alint.yml` verified against the real alint 0.22.1 CLI.
+- The committed `pixi.lock` resolves linux-64, osx-arm64, and win-64 and includes the
+  pinned tools (alint 0.22.1, gherlint 0.5.0, rumdl 0.3.4, tasknest 0.4.0).
+- The original scaffold passed Tasknest checks before the docs prototype, Vale presets, and
+  test relocation in this branch. Those newer changes have not yet run through the full Pixi gate.
 
 Not yet verified:
 
-- `pixi install` has not been run (only `pixi lock`); the environment has not been
-  created or smoke-tested. Vale/lychee/actionlint/lefthook ran only where explicitly noted.
+- `pixi install` has not been run in this sandbox; Pixi, pytest, Vale, and rumdl are not
+  installed here. GitHub Actions is expected to run the locked checks on the branch.
+- The MyST CLI parsed `docs/myst.yml`, but the site build could not fetch its remote theme
+  metadata from this sandbox; the Pages build needs verification on a runner with access.
+- Vale presets, the `pages.yml` workflow, and the moved test path have not yet run in CI.
 - `pixi-sandbox` is NOT configured: it is not on conda-forge and its template channel
-  answered 404 here, so the `sandbox` environment was removed (a dead env poisons every
-  fresh solve). `pixi-sandbox.toml` is present but inert; re-add tool + channel together.
-- `.github/workflows/ci.yml` has never run on GitHub; actions are SHA-pinned but untested
-  there. The composite setup now installs locked by default.
-- lefthook hooks are not installed and `lefthook.yml` is untested.
+  answered 404 here, so the `sandbox` environment was removed. `pixi-sandbox.toml` is inert;
+  re-add the tool and channel together only after a working source is available.
 - Nothing here commits results, data, or large artifacts — keep them out of git.
 
 ## License

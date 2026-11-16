@@ -1,3 +1,5 @@
+<!-- Generated from templates/github/PULL_REQUEST_TEMPLATE.md.j2; do not edit directly. -->
+
 ## What & why
 
 Describe the change and the reason for it.

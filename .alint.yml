@@ -62,9 +62,41 @@ rules:
 
   - id: require-smoke-tests
     kind: file_exists
-    paths: tests/test_smoke.py
+    paths: experiment/tests/test_smoke.py
     level: error
-    message: "A smoke test must always exist so `pytest` is meaningful from day one."
+    message: "A smoke test must live under experiment/tests/ so `experiment/` remains the Python source root."
+
+  - id: require-experiment-features
+    kind: file_exists
+    paths: experiment/features/README.md
+    level: error
+    message: "Experiment feature specifications belong under experiment/features/."
+
+  - id: require-myst-prototype
+    kind: file_exists
+    paths: docs/myst.yml
+    level: error
+    message: "The one-page MyST documentation prototype must be configured in docs/myst.yml."
+
+  - id: require-pages-workflow
+    kind: file_exists
+    paths: .github/workflows/pages.yml
+    level: error
+    message: "GitHub Pages CI must build the MyST prototype from docs/myst.yml."
+
+  - id: pages-runs-myst-build
+    kind: file_content_matches
+    paths: .github/workflows/pages.yml
+    pattern: "(?m)^        run: npm exec --yes --package=mystmd@1\\.13\\.0 -- myst build --html --strict --ci$"
+    level: error
+    message: "The Pages workflow must build the pinned MyST CLI in strict CI mode."
+
+  - id: pages-uses-docs-config
+    kind: file_content_matches
+    paths: .github/workflows/pages.yml
+    pattern: "(?m)^        working-directory: docs$"
+    level: error
+    message: "The Pages workflow must run MyST from docs/ to load docs/myst.yml."
 
   - id: forbid-pyproject-as-env-manifest
     kind: file_absent
@@ -84,3 +116,45 @@ rules:
     pattern: "(?m)^\\.pixi/$"
     level: error
     message: ".gitignore must exclude .pixi/ (solve-group environments)."
+
+  - id: readme-identifies-template-source
+    kind: file_content_matches
+    paths: README.md
+    pattern: "(?m)^<!-- Generated from templates/README\\.md\\.j2; do not edit directly\\. -->$"
+    level: error
+    message: "README.md must identify templates/README.md.j2 as its generated source."
+
+  - id: agents-identifies-template-source
+    kind: file_content_matches
+    paths: AGENTS.md
+    pattern: "(?m)^<!-- Generated from templates/AGENTS\\.md\\.j2; do not edit directly\\. -->$"
+    level: error
+    message: "AGENTS.md must identify templates/AGENTS.md.j2 as its generated source."
+
+  - id: bug-form-identifies-template-source
+    kind: file_content_matches
+    paths: .github/ISSUE_TEMPLATE/bug_report.yml
+    pattern: "(?m)^# Generated from templates/github/ISSUE_TEMPLATE/bug_report\\.yml\\.j2; do not edit directly\\.$"
+    level: error
+    message: "The bug report form must identify its Jinja2 template source."
+
+  - id: issue-config-identifies-template-source
+    kind: file_content_matches
+    paths: .github/ISSUE_TEMPLATE/config.yml
+    pattern: "(?m)^# Generated from templates/github/ISSUE_TEMPLATE/config\\.yml\\.j2; do not edit directly\\.$"
+    level: error
+    message: "The issue form configuration must identify its Jinja2 template source."
+
+  - id: feature-form-identifies-template-source
+    kind: file_content_matches
+    paths: .github/ISSUE_TEMPLATE/feature_request.yml
+    pattern: "(?m)^# Generated from templates/github/ISSUE_TEMPLATE/feature_request\\.yml\\.j2; do not edit directly\\.$"
+    level: error
+    message: "The feature request form must identify its Jinja2 template source."
+
+  - id: pull-request-template-identifies-template-source
+    kind: file_content_matches
+    paths: .github/PULL_REQUEST_TEMPLATE.md
+    pattern: "(?m)^<!-- Generated from templates/github/PULL_REQUEST_TEMPLATE\\.md\\.j2; do not edit directly\\. -->$"
+    level: error
+    message: "The pull request template must identify its Jinja2 source."

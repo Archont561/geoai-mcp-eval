@@ -1,0 +1,19 @@
+# Generated from templates/github/ISSUE_TEMPLATE/bug_report.yml.j2; do not edit directly.
+name: Bug report
+description: Something in the experiment code or automation is broken.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Include the command you ran (`pixi run tools ...`) and its output.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true

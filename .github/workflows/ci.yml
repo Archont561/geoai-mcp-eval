@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   repo:
-    name: Repo Policies (alint, Markdown, Actions)
+    name: Repo Policies (alint, Markdown, Vale, Actions)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -36,8 +36,11 @@ jobs:
       - name: Run repository policies (alint)
         run: pixi run tools run alint
 
-      - name: Lint Markdown (rumdl)
+      - name: Lint Markdown and MDX (rumdl)
         run: pixi run tools run md
+
+      - name: Lint technical and scientific prose (Vale)
+        run: pixi run tools run prose
 
   python:
     name: Python Lint & Tests

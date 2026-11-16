@@ -1,11 +1,12 @@
-"""Vale prose lint of the two standing Markdown docs (not part of `check`)."""
+"""Lint Markdown and MDX prose with technical and scientific Vale styles."""
 
 from __future__ import annotations
 
 from tasknest import ToolContext, tool
 
 
-@tool(description="Lint prose in README.md and AGENTS.md with vale.")
+@tool(description="Lint Markdown and MDX prose with Vale style presets.")
 def prose(ctx: ToolContext) -> None:
-    """Lint prose in README.md and AGENTS.md with vale."""
-    ctx.run(["vale", "--no-exit", "README.md", "AGENTS.md"])
+    """Install configured Vale packages and lint project prose."""
+    ctx.run(["vale", "sync"])
+    ctx.run(["vale", "--no-exit", "README.md", "AGENTS.md", "docs", "experiment/features"])
