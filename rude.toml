@@ -34,6 +34,7 @@ ignore = [
     "CC901",  # Missing docstring — not all helpers need docstrings in prototype code
     "CC907",  # Empty docstring
     "E501",   # Line too long — kept at project default but flagged selectively
+    "F821",   # rude 0.1a4 false-positives on parenthesized async-with (PEP 617); ruff F821 remains the authority
 ]
 
 [tool.rude.rules.CC001]
@@ -47,3 +48,8 @@ max_lines = 30
 [tool.rude.rules.E501]
 # Keep lines short for readability in narrow terminal windows.
 max_line_length = 88
+
+# Repeated domain literals (GeoJSON keys, CRS tags) are idiomatic in this codebase;
+# only flag genuinely repeated literals. Survivors must be extracted to constants.
+[tool.rude.rules.CC403]
+min_occurrences = 8
