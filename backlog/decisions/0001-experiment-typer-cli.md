@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted
+Superseded by 0006 (2026-11-22) — see
+`backlog/decisions/0006-experiment-workflow.md`. The typer CLI remains the
+only execution path and stays runnable locally/offline unchanged; 0006
+adds manual-dispatch CI orchestration that invokes the same CLI.
 
 ## Decision
 

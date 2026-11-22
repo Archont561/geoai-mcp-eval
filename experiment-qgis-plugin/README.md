@@ -59,6 +59,59 @@ to. `qgis-sdk dev --mode standalone` runs the same entry in a bare
 without a display by setting `QT_QPA_PLATFORM=offscreen`, which is what the
 workspace smokes do.
 
+## Human-baseline session recorder
+
+The plugin records a human (H) baseline session for one pilot task: you click
+**Start human-baseline session** (metadata is fetched automatically), perform
+the task in QGIS, then click **End human-baseline session**. Nothing else is
+recorded anywhere else and `human_baseline.status` in the task YAML stays
+`pending` until you review the evidence.
+
+### Actions
+
+| action | what it does |
+| --- | --- |
+| `start_session` | `task_id` (default `prep-axis-order-001`), `base_dir` (default `$EXPERIMENT_TASK_DIR` or `experiment/tasks`), `participant_code` (optional). Validates the task id against the suite, hashes the task YAML and fixture, creates the gitignored per-session output dir `experiment/tasks/baselines/<task_id>/session-<started_at_utc>/`, starts the UTC timer, and connects best-effort host hooks (QGIS project layer add/remove, CRS change, project read; canvas extent/scale). The record's `network_disabled` stays `null`: the host cannot verify network isolation — disable the network yourself and record that in a `log_note`. |
+| `log_note` | `message` — records a note/deviation/interruption in the event log. |
+| `end_session` | stops the timer, hashes every output file, writes `human-reference-record.json` and closes `events.jsonl` — both in this session's own `session-<started_at_utc>/` directory (restarts never share an evidence file). |
+| `hello` | original demo action, harmless. |
+
+### What is fetched automatically vs. what stays blank
+
+Fetched: task id, task YAML SHA-256, fixture SHA-256, UTC start/end and elapsed
+minutes, event count (steps excl. the start/end markers), tools used, QGIS /
+GDAL / GEOS / PROJ software versions from the host (or `null` outside QGIS),
+Python/platform facts (no hostname or user name), SHA-256 and size of every
+output file.
+
+Never invented (stays `null`): participant code unless you pass one, consent,
+screen recording, `network_disabled` (the host cannot enforce or verify it), oracle report path and `oracle_passed` — those are filled by
+you and by `pixi run experiment pilot determinism <task_id> --artifacts-dir
+experiment/tasks/baselines/<task_id>/session-<started_at_utc>` afterwards.
+
+### Host notes
+
+Inside QGIS Desktop both toolbar/menu actions work with one click each. The
+host hooks connect lazily and degrade silently when the host provides no
+project or canvas (server hosts, standalone tests). The behavior event log
+(`events.jsonl`, one per session directory) is the raw evidence; the record is the summary. Cap: 2000
+events per session (extent events can flood).
+
+## Known limitations
+
+- **One active session at a time.** The plugin keeps a module-global singleton
+  (`_ACTIVE`); it cannot represent two concurrent sessions (e.g. two projects).
+  Starting a second session while one is active is refused. A real fix needs a
+  registry keyed by project, not the singleton.
+- **Action results are human-readable strings**, not typed success/error values.
+  `start_session` reports failure as text mixed with the success summary — fine
+  for a desktop action label, unusable as a machine-readable status; do not parse it.
+- **`qgis-sdk check` reports PROJECT001** for this project (the package lives
+  under `src/` but `qgis-sdk` expects the plugin package at the project root),
+  and `qgis-sdk build` rejects PEP 621 dynamic versions (META002). The version
+  literal in `pyproject.toml` is therefore pinned equal to
+  `experiment_plugin.__version__` by a test; keep both in sync when bumping.
+
 ## Tests
 
 ```sh

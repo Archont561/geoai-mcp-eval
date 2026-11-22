@@ -68,6 +68,10 @@ class ValidationReport:
         return not self.issues
 
 
+def _schema_path_suffix(path_parts) -> str:
+    return "".join(f"[{part}]" if isinstance(part, int) else f".{part}" for part in path_parts)
+
+
 def _schema_validation_issues(
     value: Any, schema: dict[str, Any], path: str = "$"
 ) -> list[ValidationIssue]:
@@ -78,13 +82,7 @@ def _schema_validation_issues(
         key=lambda error: (tuple(map(str, error.absolute_path)), error.message),
     )
     return [
-        ValidationIssue(
-            path=path
-            + "".join(
-                f"[{part}]" if isinstance(part, int) else f".{part}" for part in error.absolute_path
-            ),
-            message=error.message,
-        )
+        ValidationIssue(path=path + _schema_path_suffix(error.absolute_path), message=error.message)
         for error in errors
     ]
 
@@ -238,24 +236,34 @@ def _task_semantic_issues(
     if not isinstance(oracle, dict):
         return []
     issues = _baseline_issues(task, task_id, root)
-    fixtures = task.get("fixtures", {})
-    input_fixture = fixtures.get("input", "") if isinstance(fixtures, dict) else ""
     assertions = oracle.get("assertions", [])
     if not isinstance(assertions, list):
         assertions = []
-    fixture_paths = [input_fixture]
-    fixture_paths.extend(
-        assertion.get("fixture", "")
-        for assertion in assertions
-        if isinstance(assertion, dict) and assertion.get("fixture")
-    )
-    fixture_paths = [
-        relative for relative in fixture_paths if isinstance(relative, str) and relative
-    ]
+    fixture_paths = _fixture_paths(task, assertions)
     issues.extend(_fixture_file_issues(task_id, root, fixture_paths))
     for assertion in assertions:
         issues.extend(_assertion_issues(task_id, task_path, root, assertion))
     return issues
+
+
+def _input_fixture(task: dict[str, Any]) -> object:
+    fixtures = task.get("fixtures", {})
+    if not isinstance(fixtures, dict):
+        return ""
+    return fixtures.get("input", "")
+
+
+def _assertion_fixture_paths(assertions: list[Any]) -> list[object]:
+    return [
+        assertion.get("fixture", "")
+        for assertion in assertions
+        if isinstance(assertion, dict) and assertion.get("fixture")
+    ]
+
+
+def _fixture_paths(task: dict[str, Any], assertions: list[Any]) -> list[str]:
+    candidates = [_input_fixture(task), *_assertion_fixture_paths(assertions)]
+    return [relative for relative in candidates if isinstance(relative, str) and relative]
 
 
 def _read_schema(root: Path) -> tuple[dict[str, Any] | None, list[ValidationIssue]]:

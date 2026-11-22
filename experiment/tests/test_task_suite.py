@@ -10,6 +10,11 @@ import yaml
 
 from experiment.task_suite import _resolve_inside, validate_suite
 
+UTF8 = "utf-8"
+TYPE_KEY = "type"
+AXIS_TASK_YAML = "prep-axis-order-001.yaml"
+
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TASK_ROOT = REPO_ROOT / "experiment" / "tasks"
 
@@ -21,7 +26,7 @@ def copy_suite(tmp_path: Path) -> Path:
 
 
 def write_task(path: Path, task: dict[str, object]) -> None:
-    path.write_text(yaml.safe_dump(task, sort_keys=False), encoding="utf-8")
+    path.write_text(yaml.safe_dump(task, sort_keys=False), encoding=UTF8)
 
 
 def test_jsonschema_validation_and_path_containment(tmp_path: Path) -> None:
@@ -41,13 +46,13 @@ def test_standard_jsonschema_keywords_are_supported() -> None:
     issues = _schema_validation_issues(
         {"name": "", "count": -1, "tags": ["x", "x"], "extra": 1},
         {
-            "type": "object",
+            TYPE_KEY: "object",
             "required": ["missing"],
             "additionalProperties": False,
             "properties": {
-                "name": {"type": "string", "minLength": 1, "pattern": "^[A-Z]+$"},
-                "count": {"type": "integer", "minimum": 0, "maximum": 2},
-                "tags": {"type": "array", "uniqueItems": True, "items": {"type": "string"}},
+                "name": {TYPE_KEY: "string", "minLength": 1, "pattern": "^[A-Z]+$"},
+                "count": {TYPE_KEY: "integer", "minimum": 0, "maximum": 2},
+                "tags": {TYPE_KEY: "array", "uniqueItems": True, "items": {TYPE_KEY: "string"}},
             },
             "allOf": [{"minProperties": 5}],
         },
@@ -60,7 +65,8 @@ def test_standard_jsonschema_keywords_are_supported() -> None:
     assert "less than the minimum" in messages
     assert "has non-unique elements" in messages
     assert "does not have enough properties" in messages
-    assert "is not of type 'string'" in _schema_validation_issues(1, {"type": "string"})[0].message
+    issues = _schema_validation_issues(1, {TYPE_KEY: "string"})
+    assert "is not of type 'string'" in issues[0].message
 
 
 def test_prepared_pilot_suite_validates() -> None:
@@ -75,11 +81,11 @@ def test_prepared_pilot_suite_validates() -> None:
 
 def test_validator_reports_duplicate_ids_and_unimplemented_oracle(tmp_path: Path) -> None:
     root = copy_suite(tmp_path)
-    first = root / "prep-axis-order-001.yaml"
+    first = root / AXIS_TASK_YAML
     second = root / "analysis-de9im-001.yaml"
-    task = yaml.safe_load(second.read_text(encoding="utf-8"))
+    task = yaml.safe_load(second.read_text(encoding=UTF8))
     task["id"] = "prep-axis-order-001"
-    task["oracle"]["assertions"][0]["type"] = "not-implemented"
+    task["oracle"]["assertions"][0][TYPE_KEY] = "not-implemented"
     write_task(second, task)
 
     report = validate_suite(root)
@@ -93,8 +99,8 @@ def test_validator_reports_duplicate_ids_and_unimplemented_oracle(tmp_path: Path
 
 def test_validator_reports_schema_and_unsafe_fixture_path_errors(tmp_path: Path) -> None:
     root = copy_suite(tmp_path)
-    path = root / "prep-axis-order-001.yaml"
-    task = yaml.safe_load(path.read_text(encoding="utf-8"))
+    path = root / AXIS_TASK_YAML
+    task = yaml.safe_load(path.read_text(encoding=UTF8))
     del task["title"]
     task["fixtures"]["input"] = "../../outside.geojson"
     write_task(path, task)
@@ -108,7 +114,7 @@ def test_validator_reports_schema_and_unsafe_fixture_path_errors(tmp_path: Path)
 
 def test_validator_rejects_schema_that_is_not_valid_json_schema(tmp_path: Path) -> None:
     root = copy_suite(tmp_path)
-    (root / "schema-v1.json").write_text("{not json", encoding="utf-8")
+    (root / "schema-v1.json").write_text("{not json", encoding=UTF8)
     report = validate_suite(root)
 
     assert not report.passed
@@ -116,8 +122,8 @@ def test_validator_rejects_schema_that_is_not_valid_json_schema(tmp_path: Path) 
     assert any("invalid JSON schema" in issue.message for issue in report.issues)
 
     (root / "schema-v1.json").write_text(
-        json.dumps({"$schema": "https://json-schema.org/draft/2020-12/schema", "type": 5}),
-        encoding="utf-8",
+        json.dumps({"$schema": "https://json-schema.org/draft/2020-12/schema", TYPE_KEY: 5}),
+        encoding=UTF8,
     )
     report = validate_suite(root)
 
@@ -135,7 +141,7 @@ def test_validator_rejects_empty_suite_and_non_mapping_task(tmp_path: Path) -> N
     assert not report.passed
     assert any("no task YAML files found" in issue.message for issue in report.issues)
 
-    (root / "prep-axis-order-001.yaml").write_text("- not\n- a mapping\n", encoding="utf-8")
+    (root / AXIS_TASK_YAML).write_text("- not\n- a mapping\n", encoding=UTF8)
     report = validate_suite(root)
 
     assert not report.passed
@@ -144,12 +150,12 @@ def test_validator_rejects_empty_suite_and_non_mapping_task(tmp_path: Path) -> N
 
 def test_validator_reports_invalid_fixture_and_completed_baseline(tmp_path: Path) -> None:
     root = copy_suite(tmp_path)
-    path = root / "prep-axis-order-001.yaml"
-    task = yaml.safe_load(path.read_text(encoding="utf-8"))
+    path = root / AXIS_TASK_YAML
+    task = yaml.safe_load(path.read_text(encoding=UTF8))
     task["human_baseline"]["status"] = "complete"
     task["human_baseline"]["artifact_dir"] = "baselines/missing"
     fixture_path = root / task["fixtures"]["input"]
-    fixture_path.write_text(json.dumps({"type": "FeatureCollection", "features": "bad"}))
+    fixture_path.write_text(json.dumps({TYPE_KEY: "FeatureCollection", "features": "bad"}))
     write_task(path, task)
 
     report = validate_suite(root)
@@ -161,25 +167,25 @@ def test_validator_reports_invalid_fixture_and_completed_baseline(tmp_path: Path
 
 def test_validator_reports_non_geojson_and_malformed_features(tmp_path: Path) -> None:
     root = copy_suite(tmp_path)
-    path = root / "prep-axis-order-001.yaml"
-    task = yaml.safe_load(path.read_text(encoding="utf-8"))
+    path = root / AXIS_TASK_YAML
+    task = yaml.safe_load(path.read_text(encoding=UTF8))
     fixture_path = root / task["fixtures"]["input"]
     fixture_path.write_text(
-        json.dumps({"type": "FeatureCollection", "features": [{"properties": []}]})
+        json.dumps({TYPE_KEY: "FeatureCollection", "features": [{"properties": []}]})
     )
     write_task(path, task)
     report = validate_suite(root)
     assert any("cannot read fixture" in issue.message for issue in report.issues)
 
-    fixture_path.write_text(json.dumps({"type": "Feature", "features": []}))
+    fixture_path.write_text(json.dumps({TYPE_KEY: "Feature", "features": []}))
     report = validate_suite(root)
     assert any("not a GeoJSON FeatureCollection" in issue.message for issue in report.issues)
 
 
 def test_validator_reports_unsafe_oracle_paths_and_missing_assertion_fields(tmp_path: Path) -> None:
     root = copy_suite(tmp_path)
-    path = root / "prep-axis-order-001.yaml"
-    task = yaml.safe_load(path.read_text(encoding="utf-8"))
+    path = root / AXIS_TASK_YAML
+    task = yaml.safe_load(path.read_text(encoding=UTF8))
     assertion = task["oracle"]["assertions"][1]
     del assertion["id_field"]
     assertion["output"] = "../../outside.json"
@@ -192,8 +198,8 @@ def test_validator_reports_unsafe_oracle_paths_and_missing_assertion_fields(tmp_
 
 def test_validator_covers_non_dict_oracle_and_invalid_type_fields(tmp_path: Path) -> None:
     root = copy_suite(tmp_path)
-    path = root / "prep-axis-order-001.yaml"
-    task = yaml.safe_load(path.read_text(encoding="utf-8"))
+    path = root / AXIS_TASK_YAML
+    task = yaml.safe_load(path.read_text(encoding=UTF8))
     task["oracle"] = []
     write_task(path, task)
     report = validate_suite(root)
@@ -204,7 +210,7 @@ def test_validator_covers_non_dict_oracle_and_invalid_type_fields(tmp_path: Path
         "assertions": [
             {
                 "id": "bad",
-                "type": "de9im_relation",
+                TYPE_KEY: "de9im_relation",
                 "expected_relation": "crosses",
                 "output": "out.json",
             }
@@ -219,7 +225,7 @@ def test_validator_covers_non_dict_oracle_and_invalid_type_fields(tmp_path: Path
 
 def test_validator_reports_parse_errors_and_missing_schema(tmp_path: Path) -> None:
     root = copy_suite(tmp_path)
-    (root / "prep-axis-order-001.yaml").write_text("id: [broken\n", encoding="utf-8")
+    (root / AXIS_TASK_YAML).write_text("id: [broken\n", encoding=UTF8)
     report = validate_suite(root)
     assert any("cannot parse YAML" in issue.message for issue in report.issues)
 
@@ -230,8 +236,8 @@ def test_validator_reports_parse_errors_and_missing_schema(tmp_path: Path) -> No
 
 def test_validator_does_not_crash_on_wrongly_shaped_yaml_values(tmp_path: Path) -> None:
     root = copy_suite(tmp_path)
-    path = root / "prep-axis-order-001.yaml"
-    task = yaml.safe_load(path.read_text(encoding="utf-8"))
+    path = root / AXIS_TASK_YAML
+    task = yaml.safe_load(path.read_text(encoding=UTF8))
     task["fixtures"] = []
     task["oracle"]["assertions"] = 5
     task["required_traps"] = [[]]
@@ -243,7 +249,7 @@ def test_validator_does_not_crash_on_wrongly_shaped_yaml_values(tmp_path: Path) 
     assert not report.passed
     assert any("is not of type" in issue.message for issue in report.issues)
 
-    (root / "schema-v1.json").write_text("[]", encoding="utf-8")
+    (root / "schema-v1.json").write_text("[]", encoding=UTF8)
     report = validate_suite(root)
     assert any("schema root must be an object" in issue.message for issue in report.issues)
 
@@ -251,8 +257,8 @@ def test_validator_does_not_crash_on_wrongly_shaped_yaml_values(tmp_path: Path) 
 def test_validator_reports_missing_pilot_family_and_trap(tmp_path: Path) -> None:
     root = copy_suite(tmp_path)
     (root / "cartography-jenks-001.yaml").unlink()
-    path = root / "prep-axis-order-001.yaml"
-    task = yaml.safe_load(path.read_text(encoding="utf-8"))
+    path = root / AXIS_TASK_YAML
+    task = yaml.safe_load(path.read_text(encoding=UTF8))
     task["required_traps"] = ["topology-de9im"]
     write_task(path, task)
     report = validate_suite(root)

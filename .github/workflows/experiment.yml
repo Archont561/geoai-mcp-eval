@@ -1,0 +1,221 @@
+name: Experiment
+
+# Manual trigger only. Never push/PR: CI minutes, noise, and the lineage of
+# ADR 0001 (superseded by ADR-0006, see backlog/decisions/0006-experiment-workflow.md).
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "preflight = validate+pin only; smoke = plumbing probe (no agent); pilot = real harness (blocked until it lands)"
+        type: choice
+        options: [preflight, smoke, pilot]
+        default: preflight
+      enforce:
+        description: "MCP enforcement depth (arm A only)"
+        type: choice
+        options: [N1, N2, N3, N4]
+        default: N3
+      model:
+        description: "Ollama model tag (backlog/decisions/0003-model-pinning.md)"
+        type: string
+        default: qwen2.5:3b
+      repetitions:
+        description: "repetitions per (arm, task); pilot r=2, study r=4"
+        type: string
+        default: "2"
+      retention-days:
+        description: "artifact retention in days"
+        type: string
+        default: "90"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: experiment-${{ github.ref }}
+  cancel-in-progress: false # never cancel a half-written run; completeness matters
+
+env:
+  RUN_ID: ${{ github.run_id }}-${{ github.sha }}
+  MODEL: ${{ inputs.model }}
+
+jobs:
+  preflight:
+    name: Preflight (validate + pin)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Pixi workspace
+        uses: ./.github/actions/setup
+        with:
+          environment: default
+      - name: Validate and pin (writes results/${{ github.run_id }}-${{ github.sha }}/env-pins.txt)
+        run: pixi run tools run experiment_preflight --run-id "$RUN_ID"
+      - name: Upload preflight pins
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: experiment-preflight-pins
+          path: results/${{ github.run_id }}-${{ github.sha }}/env-pins.txt
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention-days }}
+
+  model:
+    name: Ollama — cache, pull, pin ${{ inputs.model }}
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OLLAMA_MODELS: ${{ github.workspace }}/.ollama-models
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Pixi workspace
+        uses: ./.github/actions/setup
+        with:
+          environment: default
+      - name: Cache Ollama model store
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ollama-models
+          key: ollama-${{ inputs.model }}-${{ hashFiles('pixi.lock') }}
+          restore-keys: ollama-${{ inputs.model }}-
+      - name: Pull and smoke the model
+        run: pixi run tools run experiment_model --model "$MODEL" --run-id "$RUN_ID"
+      - name: Upload model records
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: experiment-model-${{ inputs.model }}
+          path: |
+            results/${{ github.run_id }}-${{ github.sha }}/model-digest.txt
+            results/${{ github.run_id }}-${{ github.sha }}/model-smoke.json
+            results/${{ github.run_id }}-${{ github.sha }}/ollama-serve.log
+          if-no-files-found: ignore
+          retention-days: ${{ inputs.retention-days }}
+
+  run:
+    name: Cell ${{ matrix.arm }} · ${{ matrix.task_id }} · rep ${{ matrix.rep }}
+    needs: [preflight, model]
+    if: inputs.stage != 'preflight'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false # a failing cell must not hide sibling arms/tasks
+      matrix:
+        # Static pilot matrix (3 committed pilot tasks). Replace with the frozen
+        # seed table via `experiment plan --json` before the study runs.
+        include:
+          - { arm: A, task_id: analysis-de9im-001, rep: 1 }
+          - { arm: A, task_id: analysis-de9im-001, rep: 2 }
+          - { arm: A, task_id: cartography-jenks-001, rep: 1 }
+          - { arm: A, task_id: cartography-jenks-001, rep: 2 }
+          - { arm: A, task_id: prep-axis-order-001, rep: 1 }
+          - { arm: A, task_id: prep-axis-order-001, rep: 2 }
+          - { arm: B, task_id: analysis-de9im-001, rep: 1 }
+          - { arm: B, task_id: analysis-de9im-001, rep: 2 }
+          - { arm: B, task_id: cartography-jenks-001, rep: 1 }
+          - { arm: B, task_id: cartography-jenks-001, rep: 2 }
+          - { arm: B, task_id: prep-axis-order-001, rep: 1 }
+          - { arm: B, task_id: prep-axis-order-001, rep: 2 }
+    env:
+      OLLAMA_MODELS: ${{ github.workspace }}/.ollama-models
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Pixi workspace
+        uses: ./.github/actions/setup
+        with:
+          environment: default
+      - name: Restore model cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ollama-models
+          key: ollama-${{ inputs.model }}-${{ hashFiles('pixi.lock') }}
+          restore-keys: ollama-${{ inputs.model }}-
+      - name: Run cell
+        run: pixi run tools run experiment_run --arm ${{ matrix.arm }} --task-id ${{ matrix.task_id }} --repetition ${{ matrix.rep }} --stage ${{ inputs.stage }} --enforce ${{ inputs.enforce }} --model "$MODEL" --run-id "$RUN_ID"
+      - name: Upload cell artefacts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: experiment-${{ matrix.arm }}-${{ matrix.task_id }}-rep${{ matrix.rep }}
+          path: results/${{ github.run_id }}-${{ github.sha }}/${{ matrix.task_id }}/${{ matrix.arm }}/rep-${{ matrix.rep }}
+          if-no-files-found: warn
+          retention-days: ${{ inputs.retention-days }}
+
+  harvest:
+    name: Harvest — oracle gate + completeness
+    needs: [preflight, model, run]
+    if: always() # runs even when cells fail; gaps must surface
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Pixi workspace
+        uses: ./.github/actions/setup
+        with:
+          environment: default
+      - name: Download all experiment artifacts
+        if: inputs.stage != 'preflight'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: experiment-*
+          path: harvest
+          merge-multiple: false
+      - name: Harvest and check completeness
+        if: inputs.stage != 'preflight'
+        run: pixi run tools run experiment_harvest --harvest-dir harvest --arms A --arms B --repetitions ${{ inputs.repetitions }} ${{ inputs.stage == 'smoke' && '--no-fail-on-missing --skip-oracle' || '' }} --run-id "$RUN_ID"
+      - name: Upload merged results
+        if: inputs.stage != 'preflight'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: experiment-results-${{ github.run_id }}-${{ github.sha }}
+          path: harvest
+          if-no-files-found: warn
+          retention-days: ${{ inputs.retention-days }}
+
+  summary:
+    name: Experiment summary
+    needs: [preflight, model, run, harvest]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download merged results
+        if: inputs.stage != 'preflight'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: experiment-results-${{ github.run_id }}-${{ github.sha }}
+          path: harvest
+      - name: Download preflight and model records
+        if: inputs.stage == 'preflight'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: experiment-*
+          path: harvest
+          merge-multiple: false
+      - name: Render step summary
+        run: pixi run tools run experiment_summary --harvest-dir harvest --run-id "$RUN_ID"
+      - name: Upload summary
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: experiment-summary-${{ github.run_id }}-${{ github.sha }}
+          path: harvest/summary.md
+          if-no-files-found: ignore
+          retention-days: ${{ inputs.retention-days }}

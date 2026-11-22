@@ -3,7 +3,11 @@
 # metadata.txt and classFactory are derived from this file (decision-43).
 [project]
 name = "experiment-qgis-plugin"
-version = "0.1.0"
+# qgis-sdk build reads [project] version literally (it rejects PEP 621 dynamic —
+# META002), so this literal cannot go dynamic. Single-sourced instead by
+# experiment_plugin.__init__.__version__ + tests/test_plugin.py::test_version_is_single_sourced,
+# which fails CI if the two drift.
+version = "0.2.0"
 description = "Experiment Plugin: a minimal qgis-sdk plugin."
 authors = [{ name = "qgis-sdk scaffold user", email = "someone@example.invalid" }]
 requires-python = ">=3.11"
@@ -39,3 +43,9 @@ testpaths = ["tests"]
 # `qgis_iface` fixtures, and the guard `qgis-sdk test` relies on. Plain `pytest`
 # keeps working; `qgis-sdk test --target qgis|desktop` runs the native layers.
 addopts = "-p qgis_sdk_tools.pytest_plugin"
+
+[tool.qgis-sdk.build]
+# PyYAML is not QGIS/stdlib; every QGIS this project targets ships it
+# (conda-forge qgis via the pixi default/sandbox environments).
+# The build probes it at startup instead of vendoring.
+external = ["yaml"]
