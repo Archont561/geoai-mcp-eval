@@ -27,7 +27,7 @@ class PatchedHandler(http.server.SimpleHTTPRequestHandler):
         """Strip the base URL prefix and map to build or assets directory."""
         # Strip the base URL prefix
         if path.startswith(BASE_URL):
-            path = path[len(BASE_URL) - 1:]  # keep leading slash
+            path = path[len(BASE_URL) - 1 :]  # keep leading slash
         elif path == "/":
             path = "/index.html"
 
@@ -35,7 +35,7 @@ class PatchedHandler(http.server.SimpleHTTPRequestHandler):
         if path.startswith(ASSETS_PATH):
             # Serve from docs/assets/ (e.g. /assets/marimo-islands/main.js
             # -> docs/assets/marimo-islands/main.js)
-            rel = path[len(ASSETS_PATH):]
+            rel = path[len(ASSETS_PATH) :]
             return str(ASSETS_DIR / rel)
         else:
             # Serve from docs/_build/html/
@@ -50,9 +50,7 @@ class PatchedHandler(http.server.SimpleHTTPRequestHandler):
         """Add cache control headers for assets."""
         # Cache control for assets
         if self.path.startswith(ASSETS_PATH):
-            self.send_header(
-                "Cache-Control", "public, max-age=31536000, immutable"
-            )
+            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
         super().end_headers()
 
 
