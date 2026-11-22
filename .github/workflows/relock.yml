@@ -144,20 +144,32 @@ jobs:
           PUBLISHER_WORKFLOW: "publish-sandbox.yml"
         with:
           script: |
-            try {
-              await Promise.all([
-                ...[process.env.CI_WORKFLOW, process.env.PUBLISHER_WORKFLOW].map((workflow_id) =>
-                  github.rest.actions.createWorkflowDispatch({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    workflow_id,
-                    ref: process.env.HEAD_REF,
-                  })),
-                github.rest.actions.createWorkflowDispatch({
+            // GitHub only accepts `workflow_dispatch` for a workflow that exists on the default
+            // branch. The publisher is introduced by the pull request that adds it, so on the
+            // very first pull request carrying `publish-sandbox.yml` it is not registered yet
+            // and would 404. Treat an unregistered publisher as "not started" here; the verdict
+            // job skips it until it is registered on the default branch.
+            const dispatch = async (workflow_id, payload) => {
+              try {
+                await github.rest.actions.createWorkflowDispatch({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  workflow_id: process.env.RELOCK_WORKFLOW,
+                  workflow_id,
                   ref: process.env.HEAD_REF,
+                  ...payload,
+                });
+              } catch (error) {
+                if (workflow_id !== process.env.PUBLISHER_WORKFLOW || error.status !== 404) {
+                  throw error;
+                }
+                core.warning(`${workflow_id} is not registered on the default branch yet; skipping publisher validation for ${process.env.REPAIRED_SHA}.`);
+              }
+            };
+            try {
+              await Promise.all([
+                dispatch(process.env.CI_WORKFLOW),
+                dispatch(process.env.PUBLISHER_WORKFLOW),
+                dispatch(process.env.RELOCK_WORKFLOW, {
                   inputs: { repaired_sha: process.env.REPAIRED_SHA },
                 }),
               ]);
@@ -236,10 +248,40 @@ jobs:
 
             const workflows = [process.env.CI_WORKFLOW, process.env.PUBLISHER_WORKFLOW];
             const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+            // An unregistered workflow never appears, so waiting on it would only time out an
+            // hour later. The publisher ships with the pull request that adds it and is not on
+            // the default branch yet on that first pull request; drop it from the wait set and
+            // say so, rather than reporting a failure the author cannot act on.
+            const registered = [];
+            for (const workflow_id of workflows) {
+              try {
+                await github.rest.actions.getWorkflow({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id,
+                });
+                registered.push(workflow_id);
+              } catch (error) {
+                if (error.status !== 404) {
+                  throw error;
+                }
+                core.warning(`${workflow_id} is not registered on the default branch yet; not waiting for it.`);
+              }
+            }
+            if (registered.length === 0) {
+              await update(
+                'completed',
+                'failure',
+                'No repaired-head validation is registered',
+                'Neither the configured CI nor the publisher workflow is registered on the default branch.',
+              );
+              core.setFailed('no configured workflow is registered');
+              return;
+            }
             for (let attempt = 0; attempt < 360; attempt += 1) {
               let expected;
               try {
-                expected = await Promise.all(workflows.map(async (workflow_id) => {
+                expected = await Promise.all(registered.map(async (workflow_id) => {
                   const runs = await github.rest.actions.listWorkflowRuns({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
