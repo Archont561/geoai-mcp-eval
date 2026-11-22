@@ -106,6 +106,42 @@ def test_validator_reports_schema_and_unsafe_fixture_path_errors(tmp_path: Path)
     assert "escapes the task-suite directory" in messages
 
 
+def test_validator_rejects_schema_that_is_not_valid_json_schema(tmp_path: Path) -> None:
+    root = copy_suite(tmp_path)
+    (root / "schema-v1.json").write_text("{not json", encoding="utf-8")
+    report = validate_suite(root)
+
+    assert not report.passed
+    assert report.task_count == 0
+    assert any("invalid JSON schema" in issue.message for issue in report.issues)
+
+    (root / "schema-v1.json").write_text(
+        json.dumps({"$schema": "https://json-schema.org/draft/2020-12/schema", "type": 5}),
+        encoding="utf-8",
+    )
+    report = validate_suite(root)
+
+    assert not report.passed
+    assert report.task_count == 0
+    assert any("invalid JSON schema" in issue.message for issue in report.issues)
+
+
+def test_validator_rejects_empty_suite_and_non_mapping_task(tmp_path: Path) -> None:
+    root = copy_suite(tmp_path)
+    for path in root.glob("*.yaml"):
+        path.unlink()
+    report = validate_suite(root)
+
+    assert not report.passed
+    assert any("no task YAML files found" in issue.message for issue in report.issues)
+
+    (root / "prep-axis-order-001.yaml").write_text("- not\n- a mapping\n", encoding="utf-8")
+    report = validate_suite(root)
+
+    assert not report.passed
+    assert any("task document must be a YAML mapping" in issue.message for issue in report.issues)
+
+
 def test_validator_reports_invalid_fixture_and_completed_baseline(tmp_path: Path) -> None:
     root = copy_suite(tmp_path)
     path = root / "prep-axis-order-001.yaml"
