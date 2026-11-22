@@ -39,6 +39,9 @@ python = ">=3.12,<3.14"
 
 [feature.experiment.pypi-dependencies]
 qgis-sdk = "*"
+# The qgis-sdk meta-package's Linux wheel is a 0.0.0 placeholder; install the
+# actual runtime explicitly so imports such as `from qgis_sdk import describe` work.
+qgis-sdk-runtime = "==0.11.0"
 
 [feature.experiment.target.linux-64.dependencies]
 qgis = "4.2.*"
