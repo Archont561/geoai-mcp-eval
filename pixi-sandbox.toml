@@ -1,13 +1,17 @@
 # pixi-sandbox configuration — https://github.com/Archont561/pixi-sandbox
 #
-# INERT for now. `pixi-sandbox` is NOT on conda-forge; the template pins it from
-# the channel https://prefix.dev/archont561/archont561, which answered 404 from
-# this workspace, so no `sandbox` environment exists in pixi.toml yet.
+# Optional Pixi-sandbox bundle settings. The sandbox environment is declared in
+# pixi.toml, but the external channel's reachability has not been independently
+# verified here; do not rely on this bundle until installation is tested.
 #
-# This file declares what a self-describing, offline, ~95 MiB-blob clone pack
-# of this repo should contain (used once pixi-sandbox is re-added together with
-# a reachable channel — see the commented [feature.sandbox] note in pixi.toml).
-# It is cargo_vendor = false (pure-Python repo; no Cargo registry to vendor).
+# This file describes a self-describing, offline clone pack of the repository.
+# It is cargo_vendor = false (no Cargo registry is used by the repo).
+#
+# Bundled environments mirror pixi.toml [environments]:
+#   default   — python + experiment + lint + automation (tools, tasknest, rude)
+#   docs      — docs build (jupyter-book-marimo, marimo, pandas, altair, …)
+#   sandbox   — python + experiment + sandbox + automation (qgis, ollama, qgis-sdk)
+#   gherlint-env — isolated: gherlint + pydantic<2.0.0 (conflicts with default)
 
 schema = 1
 branch_prefix = "sandbox"
@@ -15,11 +19,11 @@ cargo_vendor = false
 
 [budgets]
 max_blob_mib = 95
-max_transport_mib = 2048
-max_repository_push_mib = 2048
-max_restore_required_mib = 8192
+max_transport_mib = 8192
+max_repository_push_mib = 8192
+max_restore_required_mib = 32768
 
 [[bundle]]
 name = "developer"
-environments = ["default"]
+environments = ["default", "docs", "sandbox", "gherlint-env"]
 platforms = ["linux-64"]

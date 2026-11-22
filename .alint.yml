@@ -52,13 +52,27 @@ rules:
     path: "$.tasks.tools"
     equals: "tasknest"
     level: error
-    message: "pixi.toml must define exactly the `tools` task pointing at the Python-native tasknest runner."
+    message: "pixi.toml must define the `tools` task pointing at the Python-native Tasknest runner."
+
+  - id: require-experiment-entrypoint
+    kind: toml_path_equals
+    paths: pixi.toml
+    path: "$.tasks.experiment.cmd"
+    equals: "python -m experiment"
+    level: error
+    message: "pixi.toml must expose the experiment CLI through the documented `experiment` task."
+
+  - id: forbid-experiment-package-at-repo-root
+    kind: file_absent
+    paths: experiment/__init__.py
+    level: error
+    message: "The experiment package lives in experiment/src/experiment/, not at the repository root."
 
   - id: require-experiment-package
     kind: file_exists
-    paths: experiment/__init__.py
+    paths: experiment/src/experiment/__init__.py
     level: error
-    message: "experiment/ is the Python source root for the study; do not move it."
+    message: "experiment/ must have a src/experiment/ package (__init__.py)."
 
   - id: require-smoke-tests
     kind: file_exists
@@ -72,22 +86,48 @@ rules:
     level: error
     message: "Experiment feature specifications belong under experiment/features/."
 
+  # --- experiment* project structure enforcement (src / tests / features) ---
+
+  - id: require-experiment-src-package
+    kind: file_exists
+    paths: experiment/src/experiment/__init__.py
+    level: error
+    message: "experiment/ must have a src/experiment/ package (__init__.py)."
+
+  - id: require-experiment-qgis-plugin-src-package
+    kind: file_exists
+    paths: experiment-qgis-plugin/src/experiment_plugin/__init__.py
+    level: error
+    message: "experiment-qgis-plugin/ must have a src/experiment_plugin/ package (__init__.py)."
+
+  - id: require-experiment-qgis-plugin-tests
+    kind: file_exists
+    paths: experiment-qgis-plugin/tests/test_plugin.py
+    level: error
+    message: "experiment-qgis-plugin/ must have tests/ with test_plugin.py."
+
+  - id: require-experiment-qgis-plugin-features
+    kind: file_exists
+    paths: experiment-qgis-plugin/features/hello.feature
+    level: error
+    message: "experiment-qgis-plugin/ must have features/ with hello.feature."
+
   - id: require-myst-prototype
     kind: file_exists
     paths: docs/myst.yml
     level: error
-    message: "The one-page MyST documentation prototype must be configured in docs/myst.yml."
+    message: "The pre-experiment MyST documentation must be configured in docs/myst.yml."
 
   - id: require-pages-workflow
     kind: file_exists
     paths: .github/workflows/pages.yml
     level: error
-    message: "GitHub Pages CI must build the MyST prototype from docs/myst.yml."
+    message: "GitHub Pages CI must build the documentation from docs/myst.yml."
 
   - id: pages-runs-myst-build
     kind: file_content_matches
     paths: .github/workflows/pages.yml
-    pattern: "(?m)^        run: npm exec --yes --package=mystmd@1\\.13\\.0 -- myst build --html --strict --ci$"
+    pattern: "(?m)^        run: pixi run --environment docs -- npm exec --yes --package=mystmd@1\\.13\\.0 -- myst build --html --strict --ci$"
     level: error
     message: "The Pages workflow must build the pinned MyST CLI in strict CI mode."
 
@@ -200,3 +240,38 @@ rules:
     pattern: "(?m)^<!-- Generated from templates/github/PULL_REQUEST_TEMPLATE\\.md\\.j2; do not edit directly\\. -->$"
     level: error
     message: "The pull request template must identify its Jinja2 source."
+
+  - id: llms-text-identifies-source
+    kind: file_content_matches
+    paths: docs/llms.txt
+    pattern: "(?m)^<!-- Generated from docs/myst\\.yml; do not edit directly\\. -->$"
+    level: error
+    message: "docs/llms.txt must identify its MyST source."
+
+  - id: llms-full-identifies-source
+    kind: file_content_matches
+    paths: docs/llms-full.txt
+    pattern: "(?m)^<!-- Generated from docs/myst\\.yml; do not edit directly\\. -->$"
+    level: error
+    message: "docs/llms-full.txt must identify its MyST source."
+
+  - id: sitemap-identifies-source
+    kind: file_content_matches
+    paths: docs/sitemap.xml
+    pattern: "(?m)^<!-- Generated from docs/myst\\.yml; do not edit directly\\. -->$"
+    level: error
+    message: "docs/sitemap.xml must identify its MyST source."
+
+  - id: robots-identifies-source
+    kind: file_content_matches
+    paths: docs/robots.txt
+    pattern: "(?m)^# Generated from docs/myst\\.yml; do not edit directly\\.$"
+    level: error
+    message: "docs/robots.txt must identify its MyST source."
+
+  - id: analysis-chart-identifies-source
+    kind: file_content_matches
+    paths: docs/assets/gis-se-demand.svg
+    pattern: "(?m)^<!-- Generated from docs/analyses/gis-se-analysis\\.md; do not edit directly\\. -->$"
+    level: error
+    message: "The GIS.SE chart must identify its notebook source."

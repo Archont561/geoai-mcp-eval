@@ -2,58 +2,58 @@
 
 # geoai-mcp-eval
 
-Thesis experiment code: **does the integration interface matter?** Expose nine geoprocessing operations to a pinned LLM as **typed MCP tools** versus ask the same model to **generate and run PyQGIS code** — one pinned engine, one pinned oracle, scored on executed spatial artefacts with repetitions.
+Thesis experiment code: **does the integration interface matter?** Expose geoprocessing operations to a pinned LLM as **typed MCP tools** versus ask the same model to **generate and run PyQGIS code**—one engine, one oracle, scored on executed spatial artefacts.
 
-> **Status: scaffold.** The repo is deliberately skeleton-only. No experiment design is pinned here, the `experiment` feature in `pixi.toml` is empty, and no GIS/AI runtime is installed. Nothing in this repo is authoritative about the study's final shape yet.
+> **Status: pre-experiment.** The repository contains a Typer experiment CLI and a QGIS plugin prototype. The protocol is not frozen, no confirmatory runs have been made, and nothing here is a study result. The preregistration tag `v1.0-prereg` is the intended freeze point.
 
 ## Layout
 
 ```text
 geoai-mcp-eval/
-├── experiment/          # THE PYTHON SOURCE ROOT for the study
-│   ├── features/        # future Gherkin experiment specifications
-│   └── tests/           # pytest smoke and regression tests
-├── docs/                # one-page MyST documentation prototype
-├── .agents/skills/      # project agent skills (upstream and repo-maintained)
-├── backlog/             # local-first Backlog.md tasks, plans, and decisions
+├── experiment/
+│   ├── src/experiment/  # study CLI and reusable experiment code
+│   ├── features/        # Gherkin experiment specifications
+│   └── tests/           # experiment CLI tests
+├── experiment-qgis-plugin/
+│   ├── src/             # qgis-sdk plugin prototype
+│   ├── features/        # plugin behavior specifications
+│   └── tests/           # plugin tests
+├── docs/                # pre-experiment MyST documentation book
+├── .agents/skills/      # upstream and repository-maintained agent skills
+├── backlog/             # local-first tasks, milestones, decisions, and plans
 ├── templates/           # Jinja2 sources for generated docs and GitHub forms
-├── tools/               # automation tasks (Tasknest, Python-native); run via `pixi run tools`
-├── .github/             # CI, Pages workflow, and issue forms; SHA-pinned actions
-├── pixi.toml            # the ONLY Python environment manifest
-├── package.json         # pinned Bun CLIs (skills and backlog.md only)
+├── tools/               # Tasknest automation; run via `pixi run tools`
+├── pixi.toml            # Pixi workspace and environments
+├── package.json         # pinned Bun CLIs (skills and Backlog.md only)
 ├── bun.lock             # Bun dependency lock
 ├── skills-lock.json     # upstream agent-skill source pins and hashes
-├── tasknest.toml        # single `tools` automation entrypoint
-├── AGENTS.md            # standing conventions for contributors and coding agents
+├── tasknest.toml        # Tasknest automation configuration
+├── AGENTS.md            # standing contributor and agent conventions
 └── README.md
 ```
 
-The MyST site is only a one-page prototype. The literature review and thesis itself live elsewhere in the workspace (`literature/`, `baseline-thesis/`, `thesis/`); do not recreate them here.
+The documentation book presents a proposed design and public-source context, not a frozen protocol. Findings pages are intentionally marked ToDo. The GIS Stack Exchange snapshot in the analysis pages has an unverified retrieval date and values; validate them against the source before relying on them. The canonical thesis and literature review remain outside this repository.
 
 ## Toolchain
 
-Follows the [Archont561](https://github.com/Archont561) `*-template` toolchain, made Python-native:
-
-- **pixi** is the only environment manager. Solve groups: `default`.
-- **Tasknest (PyPI, v0.4.0)** is the task runner; **`pixi.toml` defines exactly one task** (`tools`). Everything goes through `pixi run tools …`.
-- **alint** (`.alint.yml`): repo layout & policy rules — required files, hygiene, pinned actions.
-- **lefthook** hooks (pre-commit, pre-push) — install once with `pixi run tools run hooks`.
-- **ruff** (lint+format), **pytest** (tests), and **rumdl** (Markdown and MDX).
-- **Coverage** is measured for `experiment/`; pytest enforces a 90% floor and `codecov.yml` sets matching project and patch targets.
-- **Vale** uses Microsoft and Google technical-writing styles plus proselint and write-good scientific-prose checks; CI lints Markdown and MDX.
-- **lychee** (offline link check) and **actionlint** (workflows) provide additional repository checks.
+- **Pixi** is the Python environment manager. Package-level `pyproject.toml` files describe the CLI and plugin; Pixi resolves workspace environments.
+- **Tasknest** is the sole repository automation entry point (`tools`). `pixi.toml` also exposes `experiment` as the experiment CLI task, not as repository automation.
+- **Ruff**, **pytest**, **rumdl**, **Vale**, **alint**, **actionlint**, and **lychee** provide linting, tests, and repository checks.
+- Experiment coverage targets `experiment/`; pytest and Codecov enforce the configured 90% threshold.
+- The `docs` environment has a separate solve group for MyST and reactive analysis dependencies. The optional sandbox environment depends on an external Pixi channel whose availability has not been independently verified here.
 
 ## Quickstart
 
 ```bash
-pixi install --locked          # create the environment from the committed pixi.lock
-pixi run tools ls               # list automation tasks
-pixi run tools check            # alint + ruff + pytest + rumdl (the offline gate)
-pixi run tools run prose        # install Vale presets and lint prose (needs network)
-pixi run tools run hooks        # install pre-commit/pre-push hooks (optional)
+pixi install --locked
+pixi run tools ls                 # list repository automation tasks
+pixi run tools check              # alint + ruff + pytest + rumdl
+pixi run experiment --help        # experiment CLI
+pixi run tools run prose          # Vale technical/scientific prose checks
+pixi run tools run hooks          # install hooks (optional)
 ```
 
-> Never run Python environment creation inside this repo through a different package manager (`uv`, `pip install -r`, plain `python -m venv`). alint forbids stray `uv.lock`.
+Never create a Python environment in this repository with another package manager (`uv`, `pip install -r`, or plain `python -m venv`).
 
 ## Agent skills and backlog
 
@@ -66,45 +66,18 @@ bun x skills list
 bun x backlog board
 ```
 
-Five upstream skills are copied to `.agents/skills/` and locked in `skills-lock.json`; the repository-maintained `code-review` skill lives alongside them. Backlog.md is initialized under `backlog/`; its local-only settings disable remote operations and automatic commits. Use `bun x backlog task create` to add work items.
+Five upstream skills are copied to `.agents/skills/` and locked in `skills-lock.json`; the repository-maintained `code-review` skill lives alongside them. Backlog.md stores tasks, milestones, decisions, and project notes under `backlog/`; its settings disable remote operations and automatic commits. Use `bun x backlog task create` to add work items.
 
-## CI
+## CI and documentation
 
-`.github/workflows/ci.yml` runs on pushes to `main`, PRs, and manual dispatch:
+CI runs repository policies, Markdown and prose checks, Python lint/tests, and builds the MyST site from `docs/myst.yml`. Pages deploy on pushes to `main`. The Pages workflow also checks generated sitemap and LLM text artifacts.
 
-| Job          | Steps                                                                                                        |
-| ------------ | ------------------------------------------------------------------------------------------------------------ |
-| `repo`       | checkout → setup-pixi (locked) → actionlint → alint → rumdl (Markdown/MDX) → Vale (technical/scientific prose) |
-| `python`     | checkout → setup-pixi → ruff (check+format) → pytest                                                        |
-| `pages`      | MyST one-page prototype build from `docs/myst.yml`; deploys on pushes to `main`                              |
+`pixi.lock` is committed; regenerate it with `pixi lock` whenever Pixi dependencies change. The optional `pixi-sandbox` configuration and the sandbox environment require external-channel verification before use.
 
-`pixi.lock` is committed and CI installs locked; regenerate it with `pixi lock` whenever dependencies change.
+## Scope and provenance
 
-## Adding experiment dependencies
-
-Add them to `[feature.experiment.dependencies]` (or `-pypi-dependencies`) in `pixi.toml`. If the native GIS stack grows heavy (GDAL/QGIS), give it its own solve-group — mirroring the workspace-root `pixi.toml`'s separation between the measurement solve group and tooling. Runtime dependencies never go to `pyproject.toml` (it holds tool config only).
-
-## Honesty notes (read before trusting any of this)
-
-The base Pixi scaffold was checked on 2026-11-16 with Pixi 0.84.2:
-
-- The committed `pixi.lock` resolves linux-64, osx-arm64, and win-64 and includes the
-  pinned tools (alint 0.22.1, gherlint 0.5.0, rumdl 0.3.4, tasknest 0.4.0).
-- The original scaffold passed Tasknest checks before the docs prototype, Vale presets, and
-  test relocation in this branch. Those newer changes have not yet run through the full Pixi gate.
-
-Not yet verified:
-
-- `pixi install` has not been run in this sandbox; Pixi, pytest, Vale, and rumdl are not
-  installed here. GitHub Actions is expected to run the locked checks on the branch.
-- The MyST CLI parsed `docs/myst.yml`, but the site build could not fetch its remote theme
-  metadata from this sandbox; the Pages build needs verification on a runner with access.
-- Vale presets, the `pages.yml` workflow, and the moved test path have not yet run in CI.
-- `pixi-sandbox` is NOT configured: it is not on conda-forge and its template channel
-  answered 404 here, so the `sandbox` environment was removed. `pixi-sandbox.toml` is inert;
-  re-add the tool and channel together only after a working source is available.
-- Nothing here commits results, data, or large artifacts — keep them out of git.
+The study design remains open until preregistration. Keep documentation focused on the pre-experiment book; do not add the canonical thesis or literature review here. Public GIS Stack Exchange material is CC BY-SA 4.0 and must retain attribution and provenance. Do not commit private data, unpublished run outputs, or GIS binaries.
 
 ## License
 
-MIT — see `LICENSE`.
+MIT—see `LICENSE` for the code scaffold. Public-source material carries its own attribution and license as documented on the site.

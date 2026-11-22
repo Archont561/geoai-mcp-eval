@@ -3,7 +3,7 @@ description: "Install a locked Pixi environment."
 
 inputs:
   environment:
-    description: "Pixi environment name to install (default, sandbox)."
+    description: "Pixi environment name to install (default, docs, sandbox, gherlint-env)."
     required: false
     default: "default"
   locked:

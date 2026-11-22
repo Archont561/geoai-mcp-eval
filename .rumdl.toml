@@ -27,6 +27,10 @@ style = "dash"
 [MD049]
 style = "asterisk"
 
+[MD025]
+# MyST pages may carry both a YAML title and a single body H1; count body headings only.
+front-matter-title = ""
+
 [MD050]
 style = "asterisk"
 

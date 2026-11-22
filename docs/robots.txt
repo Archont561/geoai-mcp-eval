@@ -1,0 +1,5 @@
+# Generated from docs/myst.yml; do not edit directly.
+# https://www.robotstxt.org/robotstxt.html
+User-agent: *
+Allow: /
+Sitemap: https://archont561.github.io/geoai-mcp-eval/sitemap.xml

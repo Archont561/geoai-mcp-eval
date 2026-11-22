@@ -1,0 +1,24 @@
+<!-- Generated from docs/myst.yml; do not edit directly. -->
+# geoai-mcp-eval
+
+> Pre-experiment documentation: does the integration interface (typed MCP tools vs PyQGIS code generation) change the correctness of executed GIS artefacts produced by LLM agents? Status: pre-experiment, not frozen. Nothing in this site is a result.
+
+## Pages
+- [Visit](https://archont561.github.io/geoai-mcp-eval/): Visit — main question, abstract, scope, status, roadmap
+- [Literature review & gap](https://archont561.github.io/geoai-mcp-eval/literature-review/): Literature review & gap — corpus-keyed, condensed
+- [Research questions](https://archont561.github.io/geoai-mcp-eval/research-questions/): Research questions — nulls verbatim, gate order
+- [Hypotheses & inferential contract](https://archont561.github.io/geoai-mcp-eval/hypotheses/): Hypotheses & inferential contract — nulls, alpha discipline, gatekeeping
+- [Experiment setup](https://archont561.github.io/geoai-mcp-eval/experiment/): Experiment setup — arms A/B/C/D/H, task-suite v1, freeze order
+- [Implementation status](https://archont561.github.io/geoai-mcp-eval/implementation/): Implementation status — what exists, constraints, deviations log
+- [Results](https://archont561.github.io/geoai-mcp-eval/results/): Results — ToDo (empty until executed)
+- [Interpretation](https://archont561.github.io/geoai-mcp-eval/interpretation/): Interpretation — ToDo (empty until analysis is locked)
+- [Summary](https://archont561.github.io/geoai-mcp-eval/summary/): Summary — ToDo (written last)
+- [GIS.SE analysis (raw marimo notebook)](https://archont561.github.io/geoai-mcp-eval/gis-se-analysis/): raw marimo source behind the SE demand analysis — embedded offline snapshot (retrieval date not independently verified), interactive in the browser
+- [Provenance & licensing](https://archont561.github.io/geoai-mcp-eval/provenance/): Provenance & licensing — GIS SE demand evidence, CC BY-SA 4.0
+- [SE demand analysis](https://archont561.github.io/geoai-mcp-eval/analysis/): SE demand analysis — frequency, complexity ranking, catalogue gaps; snapshot retrieval date not independently verified
+- [Reproducibility](https://archont561.github.io/geoai-mcp-eval/reproducibility/): Reproducibility — environment, pins, freeze contract
+
+## Optional
+- [Repository](https://github.com/Archont561/geoai-mcp-eval): source, scaffold, backlog
+
+Text is CC BY-SA 4.0; code scaffold is MIT. Inherited GIS StackExchange material is CC BY-SA 4.0 with attribution.

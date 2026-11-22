@@ -1,0 +1,50 @@
+# rude — fast, extensible Python linter
+# Enables most rules against all Python files under src/ and tests/.
+
+[rude]
+# Select broad rule categories so most checks are active.
+select = [
+    # McCabe complexity
+    "C901",
+    # Other (code craftsmanship)
+    "CC001", "CC002", "CC004", "CC005",
+    "CC101", "CC102", "CC103", "CC104", "CC107", "CC105", "CC106", "CC108",
+    "CC201", "CC202", "CC207", "CC204", "CC205", "CC206",
+    "CC301", "CC302", "CC303", "CC306", "CC308", "CC304", "CC305", "CC307",
+    "CC309", "CC310", "CC311",
+    "CC401", "CC402", "CC403",
+    "CC501", "CC503", "CC504",
+    "CC601", "CC602", "CC603", "CC604", "CC605", "CC606",
+    "CC701", "CC702", "CC704",
+    "CC801", "CC802", "CC803", "CC804", "CC805",
+    "CC907", "CC908", "CC909", "CC910",
+    "CC902", "CC903", "CC905", "CC906", "CC904",
+    # Pycodestyle errors
+    "E711", "E712", "E713", "E714", "E721",
+    "E701", "E702", "E703", "E704",
+    "E722", "E731", "E741", "E742",
+    "E303", "E304", "E305", "E306",
+    # Pycodestyle warnings
+    "W291", "W292", "W293", "W391",
+    "W605", "W191",
+    # Pyflakes
+    "F841", "F401", "F706", "F704", "F702", "F701",
+    "F707", "F621", "F622", "F631", "F634", "F632", "F633", "F901",
+    "F601", "F602", "F831", "F541", "F542",
+    "F821", "F822", "F823", "F402", "F403", "F404",
+    "F407", "F406", "F811", "F842", "F824",
+    "F521", "F525", "F523", "F522", "F524",
+    "F501", "F506", "F509", "F507", "F504", "F505",
+    "F508", "F722", "F721",
+]
+# Exclude a few rules that are too opinionated for a research / prototype codebase.
+ignore = [
+    "CC003",  # __init__.py missing __all__ — package markers intentionally minimal
+    "CC901",  # Missing docstring — not all helpers need docstrings in prototype code
+    "CC907",  # Empty docstring
+    "E501",   # Line too long — kept at project default but flagged selectively
+]
+
+[rude.line-length]
+# Keep lines short for readability in narrow terminal windows.
+value = 88

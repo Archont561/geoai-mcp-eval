@@ -1,8 +1,52 @@
 version: 1
 project:
-  title: "geoai-mcp-eval — prototype"
-  description: "TODO: one-page documentation prototype for the GeoAI MCP evaluation scaffold."
+  title: "geoai-mcp-eval"
+  description: >-
+    Pre-experiment documentation: does the integration interface (typed MCP tools vs
+    PyQGIS code generation) change the correctness of executed GIS artefacts produced
+    by LLM agents?
+  keywords:
+    - LLM agents
+    - MCP
+    - PyQGIS
+    - geoprocessing
+    - benchmark
+    - ISO 19157
+  bibliography:
+    - bibliography.bib
+  static_files:
+    - robots.txt
+    - sitemap.xml
+    - llms.txt
+    - llms-full.txt
+  plugins:
+    - type: executable
+      path: jupyter-book-marimo
   toc:
     - file: index.md
+    - title: Review
+      children:
+        - file: review/literature-review.md
+        - file: review/research-questions.md
+    - title: Study
+      children:
+        - file: study/hypotheses.md
+        - file: study/experiment.md
+        - file: study/implementation.md
+    - title: Findings
+      children:
+        - file: findings/results.md
+        - file: findings/interpretation.md
+        - file: findings/summary.md
+    - title: Analyses
+      children:
+        - file: analyses/gis-se-analysis.md
+    - title: Reference
+      children:
+        - file: provenance.md
+        - file: analysis.md
+        - file: reproducibility.md
 site:
   template: book-theme
+  options:
+    url: https://archont561.github.io/geoai-mcp-eval/
