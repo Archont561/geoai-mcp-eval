@@ -5,7 +5,10 @@ description = "Thesis experiment CLI: MCP typed tools vs PyQGIS code generation 
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "typer",
-    "pyyaml",
+    "pyyaml>=6,<7",
+    "jsonschema>=4.26,<5",
+    "pydantic>=2.5,<3",
+    "rich>=15,<16",
     "shapely>=2,<3",
 ]
 

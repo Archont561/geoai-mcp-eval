@@ -1,8 +1,14 @@
 # pixi-sandbox configuration — https://github.com/Archont561/pixi-sandbox
 #
-# Optional Pixi-sandbox bundle settings. The sandbox environment is declared in
-# pixi.toml, but the external channel's reachability has not been independently
-# verified here; do not rely on this bundle until installation is tested.
+# Pixi-sandbox bundle settings. The sandbox environment is declared in pixi.toml and
+# resolves through the same published channels (conda-forge plus the external
+# prefix.dev/archont561/archont561 channel that provides `pixi-sandbox` itself).
+#
+# `.github/workflows/publish-sandbox.yml` packs the four environments below into
+# `sandbox/developer-linux-64` on every push to main; `./restore.sh` unpacks that branch
+# on an offline host. That publisher is the one workflow that requires
+# `contents: write` — `.alint.yml` scopes the least-privilege rule to the hand-written
+# workflows so this machine-generated file is never hand-edited to satisfy it.
 #
 # This file describes a self-describing, offline clone pack of the repository.
 # It is cargo_vendor = false (no Cargo registry is used by the repo).
