@@ -8,7 +8,7 @@ description: >-
 ---
 
 :::{important} Pre-experiment—not frozen
-![Flask](assets/icons/flask-conical.svg){width=18px} This site documents a proposed
+<img src="assets/icons/flask-conical.svg" width="18" height="18" alt="Flask"> This site documents a proposed
 experiment, not a finished one. The protocol is open until the preregistration tag
 `v1.0-prereg`. Pages under *Findings* are explicit **ToDo** pages and are empty on
 purpose. Nothing here is a result, a recommendation, or a ranking of interfaces.
@@ -71,12 +71,12 @@ flowchart TD
 | Stage | Where | State |
 |---|---|---|
 | Visit (this page) | `index` | Written; scope pending freeze |
-| Literature review & gap | [Literature review](review/literature-review.md) | ![Draft](assets/icons/clock-3.svg){width=14px} Draft—pre-experiment distillation |
-| Research questions | [Research questions](review/research-questions.md) | ![Draft](assets/icons/clock-3.svg){width=14px} Drafted; nulls verbatim |
-| Hypotheses & experiment setup | [Hypotheses](study/hypotheses.md) · [Experiment](study/experiment.md) | ![Draft](assets/icons/clock-3.svg){width=14px} Drafted from the design |
-| Implementation | [Implementation](study/implementation.md) | ![Draft](assets/icons/clock-3.svg){width=14px} CLI and QGIS plugin prototype; no study runs |
-| Findings (results → interpretation → summary) | [Results](findings/results.md) → [Interpretation](findings/interpretation.md) → [Summary](findings/summary.md) | ![ToDo](assets/icons/triangle-alert.svg){width=14px} ToDo—empty on purpose |
-| Evidence & reproducibility | [Provenance](provenance.md) · [SE demand analysis](analysis.md) · [Reproducibility](reproducibility.md) | ![Check](assets/icons/circle-check.svg){width=14px} Written; see CC BY-SA note |
+| Literature review & gap | [Literature review](review/literature-review.md) | <img src="assets/icons/clock-3.svg" width="14" height="14" alt="Draft"> Draft—pre-experiment distillation |
+| Research questions | [Research questions](review/research-questions.md) | <img src="assets/icons/clock-3.svg" width="14" height="14" alt="Draft"> Drafted; nulls verbatim |
+| Hypotheses & experiment setup | [Hypotheses](study/hypotheses.md) · [Experiment](study/experiment.md) | <img src="assets/icons/clock-3.svg" width="14" height="14" alt="Draft"> Drafted from the design |
+| Implementation | [Implementation](study/implementation.md) | <img src="assets/icons/clock-3.svg" width="14" height="14" alt="Draft"> CLI and QGIS plugin prototype; no study runs |
+| Findings (results → interpretation → summary) | [Results](findings/results.md) → [Interpretation](findings/interpretation.md) → [Summary](findings/summary.md) | <img src="assets/icons/triangle-alert.svg" width="14" height="14" alt="ToDo"> ToDo—empty on purpose |
+| Evidence & reproducibility | [Provenance](provenance.md) · [SE demand analysis](analysis.md) · [Reproducibility](reproducibility.md) | <img src="assets/icons/circle-check.svg" width="14" height="14" alt="Check"> Written; see CC BY-SA note |
 
 ## Reading order
 

@@ -37,3 +37,11 @@ style = "asterisk"
 # rumdl auto-detects MDX by extension; pin the parser explicitly for docs.
 [per-file-flavor]
 "**/*.mdx" = "mdx"
+
+# MyST renders the status icons at a fixed size. The Markdown image syntax
+# (`![alt](src){width=18px}`) is an attribute extension MyST accepts but GitHub
+# and rumdl do not, and it leaked the literal `{width=18px}` into the published
+# `llms-full.txt`. The pages use plain `<img>` now, which every renderer honours,
+# so MD033 is allowed for these icon tags only — the rule stays on everywhere else.
+[per-file-ignores]
+"docs/**/*.md" = ["MD033"]

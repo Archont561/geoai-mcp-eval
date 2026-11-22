@@ -21,7 +21,10 @@ project:
     - llms-full.txt
   plugins:
     - type: executable
-      path: jupyter-book-marimo
+      # MyST resolves executable-plugin paths relative to this directory and
+      # does not search PATH; the wrapper locates the real plugin in the
+      # Pixi docs environment (or on PATH). See ./jupyter-book-marimo.
+      path: ./jupyter-book-marimo
   toc:
     - file: index.md
     - title: Review
