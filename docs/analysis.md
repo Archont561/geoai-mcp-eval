@@ -30,8 +30,8 @@ tool-ecosystem-skewed toward desktop QGIS/ArcGIS.
 :::
 
 :::{card} What it is not
-Not a frequency-of-practice measure, not difficulty, not importance, not evidence
-that any tool or interface works. It anchors task selection and contamination strata —
+It measures none of frequency of practice, difficulty, or importance, and provides no
+evidence that any tool or interface works. It anchors task selection and contamination strata —
 never scoring, never the oracle.
 :::
 
@@ -77,7 +77,7 @@ never scoring, never the oracle.
    the literature, not on SE volume.
 5. **Nobody asks about checkers.** No "validate my CRS/geometry" quality tag exists —
    validation lives inside other questions. This supports predicates-as-oracle by design.
-6. **Software context**: qgis 43 077 dominates; the audience is desktop/scripting
+6. **Software context**: `qgis` 43 077 dominates; the audience is desktop/scripting
    QGIS + ArcGIS—matching the study's toolchain choice.
 
 ## Frequency anchor (all-time counts, site=gis)
@@ -86,7 +86,7 @@ Bolded rows are the six seeded task-bank candidates.
 
 | Tag | Count | Tag | Count | Tag | Count |
 |---|---:|---|---:|---|---:|
-| qgis | 43 077 | postgis | 9 580 | pyqgis | 7 931 |
+| `qgis` | 43 077 | postgis | 9 580 | `pyqgis` | 7 931 |
 | python | 12 249 | arcpy | 10 662 | raster | 10 203 |
 | coordinate-system | 8 647 | gdal | 6 448 | shapefile | 5 698 |
 | field-calculator | 2 562 | dem | 2 113 | fields-attributes / attribute-table | 2 003–2 330 |
@@ -99,7 +99,7 @@ Bolded rows are the six seeded task-bank candidates.
 | simplify | 185 | reverse-geocoding | 151 | choropleth | 147 |
 | network-analysis | 98 | erase | 82 | jenks | 9 |
 
-Context (popular non-task tags): qgis-3 4 556 · qgis-plugins 3 175 · arcgis-desktop
+Context (popular non-task tags): `qgis-3` 4 556 · `qgis-plugins` 3 175 · arcgis-desktop
 21 012 · arcgis-pro 4 126 · arcgis-server 2 749 · arcmap 7 827 · google-earth-engine
 5 822 · leaflet 4 195 · openstreetmap 3 330.
 

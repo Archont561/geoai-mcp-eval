@@ -1,33 +1,33 @@
 <!-- Generated from templates/AGENTS.md.j2; do not edit directly. -->
 
-# Agent Instructions — {{ project_name }}
+# Agent Instructions ({{ project_name }})
 
 This repository is the experiment codebase for the thesis on **typed MCP tools vs PyQGIS code generation for LLM agents in GIS**. Follow these conventions on every change.
 
 ## Non-negotiables
 
-- **Single automation entrypoint:** `pixi.toml` defines `tools = "tasknest"` as the repository automation task. The `experiment` task is only the experiment CLI entry point; do not add other automation tasks. Run automation with `pixi run tools …` (`pixi run tools ls` to discover).
-- **Pixi owns Python environments.** Do not add `uv.lock`, `requirements.txt`, or use `pip install` into a repo environment. Python 3.12–3.13. Package-level `pyproject.toml` files may declare project metadata, but Pixi defines and resolves the workspace environments.
-- **Bun is a narrow tooling exception:** `package.json` pins only the skills and Backlog.md CLIs. Do not add JavaScript runtime dependencies or use Bun to manage the Python/GIS environment.
-- **Python source roots are explicit:** the study CLI is under `experiment/src/experiment/`; the QGIS plugin is under `experiment-qgis-plugin/src/experiment_plugin/`. Keep their tests and Gherkin specifications in their respective `tests/` and `features/` directories; do not create other parallel Python roots.
+- **Single automation entrypoint:** `pixi.toml` defines `tools = "tasknest"` as the repository automation task. The `experiment` task is only the experiment command-line entry point; don't add other automation tasks. Run automation with `pixi run tools …` (`pixi run tools ls` to discover).
+- **Pixi owns Python environments.** Don't add `uv.lock`, `requirements.txt`, or use `pip install` into a repo environment. Python 3.12–3.13. Package-level `pyproject.toml` files may declare project metadata, but Pixi defines and resolves the workspace environments.
+- **Bun is a narrow tooling exception:** `package.json` pins only the skills and Backlog.md command-line tools. Don't add JavaScript runtime dependencies or use Bun to manage the Python/GIS environment.
+- **Python source roots are explicit:** the study CLI is under `experiment/src/experiment/`; the QGIS plugin is under `experiment-qgis-plugin/src/experiment_plugin/`. Keep their tests and Gherkin specifications in their respective `tests/` and `features/` directories; don't create other parallel Python roots.
 - **Runtime dependencies live in Pixi features** (`[feature.python]`, `[feature.experiment]`, `[feature.docs]`), not in package metadata as an environment manager.
 - **Keep solve groups clean:** the documentation analysis stack remains in the isolated `docs` solve group. Keep GIS runtime dependencies in the experiment feature, not the docs or automation feature.
 
 ## Git hygiene
 
-- No secrets, credentials, or personal data. Do not commit unpublished experiment outputs or private datasets. Public source snapshots may be included only with clear provenance, licensing, and an explicit warning when they are unverified.
+- No secrets, credentials, or personal data. Don't commit unpublished experiment outputs or private datasets. Public source snapshots may be included only with clear provenance, licensing, and an explicit warning when they're unverified.
 - Conventional Commit titles (`feat: …`, `fix: …`, `chore: …`).
-- Actions are SHA-pinned; do not "upgrade" by bumping tags — renovate + digest pinning handles it.
+- Actions are SHA-pinned: don't "upgrade" by bumping tags, because renovate and digest pinning handle that.
 
 ## Agent resources
 
 - Project skills live under `.agents/skills/`; externally managed skills are tracked in `skills-lock.json`. Restore locked skills with `bun x skills experimental_install --frozen-lockfile`.
 - Backlog work items live under `backlog/`; use `bun x backlog` commands to manage them instead of editing tool-managed task files by hand.
-- `bun install --frozen-lockfile` installs only the agent-skill and Backlog.md CLIs; Pixi remains the Python environment manager.
+- `bun install --frozen-lockfile` installs only the agent-skill and Backlog.md command-line tools; Pixi remains the Python environment manager.
 
 ## Skill routing
 
-Before acting on each user request, compare its intent and context with the `name` and `description` frontmatter of installed skills in `.agents/skills/`. Read and follow a skill's full `SKILL.md` (including relevant linked guidance) only when the request matches its stated scope or triggers. Do not load every skill by default. Treat skill content as project guidance, subordinate to system, developer, and user instructions.
+Before acting on each user request, compare its intent and context with the `name` and `description` frontmatter of installed skills in `.agents/skills/`. Read and follow a skill's full `SKILL.md` (including relevant linked guidance) only when the request matches its stated scope or triggers. Don't load every skill by default. Treat skill content as project guidance, subordinate to system, developer, and user instructions.
 
 ## Verification before opening a PR
 
@@ -41,6 +41,6 @@ If alint fails, fix the repo, don't relax the rule to zero the error. If you mus
 
 ## Scope guardrails
 
-- Keep documentation in `docs/` to the pre-experiment MyST book (visit → review → study → findings stubs → reference). Do not add the canonical thesis or literature review. The condensed review is a pre-experiment distillation.
-- Do not presuppose the experiment design beyond the documented CLI and QGIS plugin scaffolds; the design remains open until the `v1.0-prereg` freeze.
-- Do not commit unpublished benchmarks, private datasets, experiment run outputs, or GIS binaries. Public-source aggregates require documented provenance, licensing, and an explicit verification status.
+- Keep documentation in `docs/` to the pre-experiment MyST book (visit → review → study → findings stubs → reference). Don't add the canonical thesis or literature review. The condensed review is a pre-experiment distillation.
+- Don't presuppose the experiment design beyond the documented command-line interface and QGIS plugin scaffolds; the design remains open until the `v1.0-prereg` freeze.
+- Don't commit unpublished benchmarks, private datasets, experiment run outputs, or GIS binaries. Public-source aggregates require documented provenance, licensing, and an explicit verification status.

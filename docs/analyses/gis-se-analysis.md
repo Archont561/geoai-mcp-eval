@@ -76,9 +76,9 @@ mo.vstack([
 ])
 ```
 
-## Cell 5 — Demand concentrates on qgis, raster, CRS tags
+## Cell 5 — Demand concentrates on `qgis`, raster, CRS tags
 
-**Result.** Demand concentrates on general-purpose software tags—qgis (43 078), raster (10 202), coordinate-system (8 647)—while the six task-bank candidates sit mid-pack (buffer 1 533, clip 1 391, spatial-join 1 014, zonal-statistics 572, dissolve 547, overlay 512). Symlog scale keeps a zero baseline—a plain log can't draw bars. N comes from the Top-N slider (default 15). Snapshot date unverified. CC BY-SA 4.0.
+**Result.** Demand concentrates on general-purpose software tags — `qgis` (43 078), raster (10 202), coordinate-system (8 647) — while the six task-bank candidates sit mid-pack (buffer 1 533, clip 1 391, spatial-join 1 014, zonal-statistics 572, dissolve 547, overlay 512). Symlog scale keeps a zero baseline—a plain log can't draw bars. N comes from the Top-N slider (default 15). Snapshot date unverified. CC BY-SA 4.0.
 
 ```{marimo} python
 import altair as alt
@@ -99,7 +99,7 @@ chart
 
 ## Cell 6 — All 29 counts, exactly
 
-**Result.** All 29 counts, exactly—qgis 43 078 down to jenks 9. Static HTML table via great_tables (styled pandas fallback if absent). Snapshot date unverified. CC BY-SA 4.0.
+**Result.** All 29 counts, exactly: `qgis` 43 078 down to jenks 9. Static HTML table via great_tables (styled pandas fallback if absent). Snapshot date unverified. CC BY-SA 4.0.
 
 ```{marimo} python
 try:
