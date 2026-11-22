@@ -36,8 +36,12 @@ typer = "*"
 # qgis (conda-forge, linux-64) provides the QGIS Desktop host for `qgis-sdk dev` and `qgis-sdk test --target desktop`.
 [feature.experiment.dependencies]
 python = ">=3.12,<3.14"
+pyyaml = ">=6,<7"
 
 [feature.experiment.pypi-dependencies]
+jsonschema = ">=4.26,<5"
+pydantic = ">=2.5,<3"
+rich = ">=15,<16"
 qgis-sdk = "*"
 # The qgis-sdk meta-package's Linux wheel is a 0.0.0 placeholder; install the
 # actual runtime explicitly so imports such as `from qgis_sdk import describe` work.

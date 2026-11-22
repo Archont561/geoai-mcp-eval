@@ -7,11 +7,14 @@ from pathlib import Path
 
 import typer
 import yaml
+from rich.console import Console
+from rich.text import Text
 
 from experiment.oracle import run_determinism_gate
 from experiment.task_suite import validate_suite
 
 app = typer.Typer(help="Prepare and verify the pilot task suite.")
+console = Console(no_color=True, highlight=False, markup=False)
 DEFAULT_TASK_ROOT = Path("experiment/tasks")
 ROOT_OPTION = typer.Option(DEFAULT_TASK_ROOT, "--root")
 TASK_ID_ARGUMENT = typer.Argument(...)
@@ -34,13 +37,15 @@ def validate(root: Path = ROOT_OPTION) -> None:
     """Validate task schemas, fixtures, oracle types, and required trap coverage."""
     report = validate_suite(root)
     if report.passed:
-        typer.echo(
-            f"Task suite valid: {report.task_count} tasks; pilot traps covered: "
-            f"{', '.join(sorted(report.traps_found))}"
+        console.print(
+            Text(
+                f"Task suite valid: {report.task_count} tasks; pilot traps covered: "
+                f"{', '.join(sorted(report.traps_found))}"
+            )
         )
         return
     for issue in report.issues:
-        typer.echo(f"ERROR: {issue}")
+        console.print(Text(f"ERROR: {issue}"))
     raise typer.Exit(code=1)
 
 

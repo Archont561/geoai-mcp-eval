@@ -2,35 +2,14 @@
 
 from __future__ import annotations
 
-import argparse
 import json
-import re
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
+from jsonschema import Draft202012Validator, SchemaError
+from pydantic.dataclasses import dataclass
 
-SUPPORTED_SCHEMA_KEYWORDS = {
-    "$id",
-    "$schema",
-    "additionalProperties",
-    "const",
-    "enum",
-    "items",
-    "maxItems",
-    "maxLength",
-    "maximum",
-    "minItems",
-    "minLength",
-    "minimum",
-    "pattern",
-    "properties",
-    "required",
-    "title",
-    "type",
-    "uniqueItems",
-}
 SUPPORTED_ORACLE_TYPES = {
     "de9im_relation",
     "geojson_feature_count",
@@ -89,118 +68,25 @@ class ValidationReport:
         return not self.issues
 
 
-def _json_type_matches(value: Any, expected: str) -> bool:
-    if expected == "null":
-        return value is None
-    if expected == "boolean":
-        return isinstance(value, bool)
-    if expected == "integer":
-        return isinstance(value, int) and not isinstance(value, bool)
-    if expected == "number":
-        return isinstance(value, (int, float)) and not isinstance(value, bool)
-    if expected == "string":
-        return isinstance(value, str)
-    if expected == "array":
-        return isinstance(value, list)
-    if expected == "object":
-        return isinstance(value, dict)
-    return False
-
-
-def _validate_scalar(value: Any, schema: dict[str, Any], path: str) -> list[ValidationIssue]:
-    issues: list[ValidationIssue] = []
-    if "const" in schema and value != schema["const"]:
-        issues.append(ValidationIssue(path, f"must equal {schema['const']!r}"))
-    if "enum" in schema and value not in schema["enum"]:
-        issues.append(ValidationIssue(path, f"must be one of {schema['enum']!r}"))
-    if isinstance(value, str):
-        issues.extend(_validate_string(value, schema, path))
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        issues.extend(_validate_number(value, schema, path))
-    return issues
-
-
-def _validate_string(value: str, schema: dict[str, Any], path: str) -> list[ValidationIssue]:
-    issues: list[ValidationIssue] = []
-    if len(value) < schema.get("minLength", 0):
-        issues.append(ValidationIssue(path, "is shorter than the minimum length"))
-    if len(value) > schema.get("maxLength", float("inf")):
-        issues.append(ValidationIssue(path, "is longer than the maximum length"))
-    pattern = schema.get("pattern")
-    if pattern and re.search(pattern, value) is None:
-        issues.append(ValidationIssue(path, f"does not match pattern {pattern!r}"))
-    return issues
-
-
-def _validate_number(
-    value: int | float, schema: dict[str, Any], path: str
+def _schema_validation_issues(
+    value: Any, schema: dict[str, Any], path: str = "$"
 ) -> list[ValidationIssue]:
-    issues: list[ValidationIssue] = []
-    if value < schema.get("minimum", float("-inf")):
-        issues.append(ValidationIssue(path, f"must be at least {schema['minimum']}"))
-    if value > schema.get("maximum", float("inf")):
-        issues.append(ValidationIssue(path, f"must be at most {schema['maximum']}"))
-    return issues
-
-
-def _validate_object(
-    value: dict[str, Any], schema: dict[str, Any], path: str
-) -> list[ValidationIssue]:
-    issues = [
-        ValidationIssue(path, f"missing required field {key!r}")
-        for key in schema.get("required", [])
-        if key not in value
-    ]
-    properties = schema.get("properties", {})
-    if schema.get("additionalProperties") is False:
-        issues.extend(
-            ValidationIssue(f"{path}.{key}", "additional field is not allowed")
-            for key in value.keys() - properties.keys()
+    """Apply the standard JSON Schema draft used by the task-suite contract."""
+    validator = Draft202012Validator(schema)
+    errors = sorted(
+        validator.iter_errors(value),
+        key=lambda error: (tuple(map(str, error.absolute_path)), error.message),
+    )
+    return [
+        ValidationIssue(
+            path=path
+            + "".join(
+                f"[{part}]" if isinstance(part, int) else f".{part}" for part in error.absolute_path
+            ),
+            message=error.message,
         )
-    for key, child_schema in properties.items():
-        if key in value:
-            issues.extend(_validate_instance(value[key], child_schema, f"{path}.{key}"))
-    return issues
-
-
-def _validate_array(value: list[Any], schema: dict[str, Any], path: str) -> list[ValidationIssue]:
-    issues: list[ValidationIssue] = []
-    if len(value) < schema.get("minItems", 0):
-        issues.append(ValidationIssue(path, "has fewer items than the minimum"))
-    if len(value) > schema.get("maxItems", float("inf")):
-        issues.append(ValidationIssue(path, "has more items than the maximum"))
-    if schema.get("uniqueItems") and len(
-        {json.dumps(item, sort_keys=True) for item in value}
-    ) != len(value):
-        issues.append(ValidationIssue(path, "items must be unique"))
-    item_schema = schema.get("items")
-    if item_schema:
-        for index, item in enumerate(value):
-            issues.extend(_validate_instance(item, item_schema, f"{path}[{index}]"))
-    return issues
-
-
-def _validate_instance(value: Any, schema: dict[str, Any], path: str) -> list[ValidationIssue]:
-    """Validate the deliberately small JSON Schema keyword subset used by v1."""
-    unsupported = set(schema) - SUPPORTED_SCHEMA_KEYWORDS
-    if unsupported:
-        return [
-            ValidationIssue(
-                path, f"schema uses unsupported keyword(s): {', '.join(sorted(unsupported))}"
-            )
-        ]
-    expected_type = schema.get("type")
-    if expected_type is not None:
-        types = expected_type if isinstance(expected_type, list) else [expected_type]
-        if not any(_json_type_matches(value, kind) for kind in types):
-            return [ValidationIssue(path, f"expected type {' or '.join(types)}")]
-
-    issues = _validate_scalar(value, schema, path)
-    if isinstance(value, dict):
-        issues.extend(_validate_object(value, schema, path))
-    if isinstance(value, list):
-        issues.extend(_validate_array(value, schema, path))
-    return issues
+        for error in errors
+    ]
 
 
 def _resolve_inside(root: Path, relative: str) -> Path:
@@ -382,6 +268,10 @@ def _read_schema(root: Path) -> tuple[dict[str, Any] | None, list[ValidationIssu
         return None, [ValidationIssue(str(schema_path), f"invalid JSON schema: {exc}")]
     if not isinstance(schema, dict):
         return None, [ValidationIssue(str(schema_path), "JSON schema root must be an object")]
+    try:
+        Draft202012Validator.check_schema(schema)
+    except SchemaError as exc:
+        return None, [ValidationIssue(str(schema_path), f"invalid JSON schema: {exc.message}")]
     return schema, []
 
 
@@ -402,7 +292,7 @@ def _load_task_files(
         if not isinstance(task, dict):
             issues.append(ValidationIssue(path.name, "task document must be a YAML mapping"))
             continue
-        task_issues = _validate_instance(task, schema, "$")
+        task_issues = _schema_validation_issues(task, schema)
         issues.extend(
             ValidationIssue(
                 path.name,
@@ -481,24 +371,3 @@ def validate_suite(root: Path) -> ValidationReport:
         traps_found,
         tuple(issues + coverage_issues),
     )
-
-
-def main(argv: list[str] | None = None) -> int:
-    """Provide a small standalone validation entry point for tools and CI."""
-    parser = argparse.ArgumentParser(
-        description="Validate GEOAI pilot task-suite YAML and fixtures."
-    )
-    parser.add_argument("--root", type=Path, default=Path("experiment/tasks"))
-    args = parser.parse_args(argv)
-    report = validate_suite(args.root)
-    if report.passed:
-        traps = ", ".join(sorted(report.traps_found))
-        print(f"Task suite valid: {report.task_count} tasks; pilot traps covered: {traps}")
-        return 0
-    for issue in report.issues:
-        print(f"ERROR: {issue}")
-    return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

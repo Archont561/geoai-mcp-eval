@@ -8,13 +8,7 @@ from pathlib import Path
 
 import yaml
 
-from experiment.task_suite import (
-    _json_type_matches,
-    _resolve_inside,
-    _validate_instance,
-    main,
-    validate_suite,
-)
+from experiment.task_suite import _resolve_inside, validate_suite
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TASK_ROOT = REPO_ROOT / "experiment" / "tasks"
@@ -30,17 +24,7 @@ def write_task(path: Path, task: dict[str, object]) -> None:
     path.write_text(yaml.safe_dump(task, sort_keys=False), encoding="utf-8")
 
 
-def test_json_type_matching_and_path_containment(tmp_path: Path) -> None:
-    assert _json_type_matches(None, "null")
-    assert _json_type_matches(False, "boolean")
-    assert _json_type_matches(2, "integer")
-    assert not _json_type_matches(True, "integer")
-    assert _json_type_matches(2.0, "number")
-    assert not _json_type_matches(False, "number")
-    assert _json_type_matches("x", "string")
-    assert _json_type_matches([], "array")
-    assert _json_type_matches({}, "object")
-    assert not _json_type_matches(1, "unknown")
+def test_jsonschema_validation_and_path_containment(tmp_path: Path) -> None:
     assert _resolve_inside(tmp_path, "nested/file").parent == tmp_path / "nested"
     for unsafe in ("/absolute", "../outside"):
         try:
@@ -51,9 +35,10 @@ def test_json_type_matching_and_path_containment(tmp_path: Path) -> None:
             raise AssertionError("unsafe paths must be rejected")
 
 
-def test_schema_subset_rejects_keywords_and_checks_constraints() -> None:
-    assert _validate_instance("yes", {"type": ["null", "string"]}, "$s") == []
-    issues = _validate_instance(
+def test_standard_jsonschema_keywords_are_supported() -> None:
+    from experiment.task_suite import _schema_validation_issues
+
+    issues = _schema_validation_issues(
         {"name": "", "count": -1, "tags": ["x", "x"], "extra": 1},
         {
             "type": "object",
@@ -64,20 +49,18 @@ def test_schema_subset_rejects_keywords_and_checks_constraints() -> None:
                 "count": {"type": "integer", "minimum": 0, "maximum": 2},
                 "tags": {"type": "array", "uniqueItems": True, "items": {"type": "string"}},
             },
+            "allOf": [{"minProperties": 5}],
         },
-        "$s",
     )
     messages = " ".join(issue.message for issue in issues)
-    assert "missing required" in messages
-    assert "additional field" in messages
-    assert "shorter" in messages
-    assert "does not match pattern" in messages
-    assert "at least" in messages
-    assert "items must be unique" in messages
-    unsupported = _validate_instance({}, {"type": "object", "allOf": []}, "$s")
-    assert len(unsupported) == 1
-    assert "unsupported keyword" in unsupported[0].message
-    assert _validate_instance(1, {"type": "string"}, "$s")[0].message == "expected type string"
+    assert "missing' is a required property" in messages
+    assert "Additional properties are not allowed" in messages
+    assert "should be non-empty" in messages
+    assert "does not match" in messages
+    assert "less than the minimum" in messages
+    assert "has non-unique elements" in messages
+    assert "does not have enough properties" in messages
+    assert "is not of type 'string'" in _schema_validation_issues(1, {"type": "string"})[0].message
 
 
 def test_prepared_pilot_suite_validates() -> None:
@@ -119,7 +102,7 @@ def test_validator_reports_schema_and_unsafe_fixture_path_errors(tmp_path: Path)
     report = validate_suite(root)
     messages = "\n".join(str(issue) for issue in report.issues)
 
-    assert "missing required field 'title'" in messages
+    assert "'title' is a required property" in messages
     assert "escapes the task-suite directory" in messages
 
 
@@ -178,7 +161,7 @@ def test_validator_covers_non_dict_oracle_and_invalid_type_fields(tmp_path: Path
     task["oracle"] = []
     write_task(path, task)
     report = validate_suite(root)
-    assert any("expected type object" in issue.message for issue in report.issues)
+    assert any("is not of type 'object'" in issue.message for issue in report.issues)
 
     task["oracle"] = {
         "determinism_runs": 3,
@@ -198,25 +181,15 @@ def test_validator_covers_non_dict_oracle_and_invalid_type_fields(tmp_path: Path
     assert "missing 'fixture'" in messages
 
 
-def test_validator_reports_parse_errors_missing_schema_and_cli_output(
-    tmp_path: Path, capsys
-) -> None:
+def test_validator_reports_parse_errors_and_missing_schema(tmp_path: Path) -> None:
     root = copy_suite(tmp_path)
     (root / "prep-axis-order-001.yaml").write_text("id: [broken\n", encoding="utf-8")
     report = validate_suite(root)
     assert any("cannot parse YAML" in issue.message for issue in report.issues)
 
-    assert main(["--root", str(TASK_ROOT)]) == 0
-    assert "Task suite valid: 3 tasks" in capsys.readouterr().out
-
     (root / "schema-v1.json").unlink()
     report = validate_suite(root)
     assert any("cannot read schema" in issue.message for issue in report.issues)
-
-    empty = tmp_path / "empty"
-    empty.mkdir()
-    assert main(["--root", str(empty)]) == 1
-    assert "cannot read schema" in capsys.readouterr().out
 
 
 def test_validator_does_not_crash_on_wrongly_shaped_yaml_values(tmp_path: Path) -> None:
@@ -232,7 +205,7 @@ def test_validator_does_not_crash_on_wrongly_shaped_yaml_values(tmp_path: Path) 
     report = validate_suite(root)
 
     assert not report.passed
-    assert any("expected type" in issue.message for issue in report.issues)
+    assert any("is not of type" in issue.message for issue in report.issues)
 
     (root / "schema-v1.json").write_text("[]", encoding="utf-8")
     report = validate_suite(root)

@@ -40,7 +40,7 @@ The documentation book presents a proposed design and public-source context, not
 - **Tasknest** is the sole repository automation entry point (`tools`). `pixi.toml` also exposes `experiment` as the experiment CLI task, not as repository automation.
 - **Ruff**, **pytest**, **rumdl**, **Vale**, **alint**, **actionlint**, and **lychee** provide linting, tests, and repository checks.
 - Experiment coverage targets `experiment/`; pytest and Codecov enforce the configured 90% threshold.
-- The `docs` environment has a separate solve group for MyST and reactive analysis dependencies. The optional sandbox environment depends on an external Pixi channel whose availability has not been independently verified here.
+- The `docs` environment has a separate solve group for MyST and reactive analysis dependencies. The optional sandbox environment installs `pixi-sandbox` from the `https://prefix.dev/archont561/archont561` channel and `qgis` from conda-forge; both resolved when the sandbox environment was last installed on linux-64, but the QGIS Desktop session itself is not exercised by CI.
 
 ## Quickstart
 
@@ -72,7 +72,7 @@ Five upstream skills are copied to `.agents/skills/` and locked in `skills-lock.
 
 CI runs repository policies, Markdown and prose checks, Python lint/tests, and builds the MyST site from `docs/myst.yml`. Pages deploy on pushes to `main`. The Pages workflow also checks generated sitemap and LLM text artifacts.
 
-`pixi.lock` is committed; regenerate it with `pixi lock` whenever Pixi dependencies change. The optional `pixi-sandbox` configuration and the sandbox environment require external-channel verification before use.
+`pixi.lock` is committed; regenerate it with `pixi lock` whenever Pixi dependencies change. The `pixi-sandbox.toml` bundle publishes all four environments to the `sandbox/developer-linux-64` branch through `.github/workflows/publish-sandbox.yml`; restore a machine from that branch with `./restore.sh` (`PIXI_SANDBOX_BUNDLE` selects a bundle when several share a platform). The publisher needs `contents: write`; that is the only workflow allowed to hold it.
 
 ## Scope and provenance
 
