@@ -10,9 +10,8 @@ description: >-
 
 :::{warning} ToDo—nothing has been run yet
 ![ToDo](../assets/icons/triangle-alert.svg){width=18px} The protocol is not yet in
-execution. There are no results, figures or tables to report. This page is a
-reserved, empty slot in the arc—it will be filled after the freeze and the
-completeness check.
+execution. This page reports no results, figures, or tables: it is a reserved, empty slot
+in the arc, filled after the freeze and the completeness check.
 :::
 
 ## What this page will contain

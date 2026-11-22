@@ -19,3 +19,16 @@ PyQGIS
 QGIS
 WPS
 VGI
+# Command-line vocabulary the guides would otherwise rename into a different sense:
+# "CLI" here names the installed Typer/Tasknest command, not a generic tool, and the
+# study's own artefacts are called specs in backlog/decisions.
+CLI
+CLIs
+spec
+specs
+# The repository name is the product name; sentence-case and acronym rules do not apply.
+geoai-mcp-eval
+# Citation keys are set by their BibTeX entries and are not prose: two ICHMS keys carry
+# "mcp" in lower case, which the term rule would otherwise rewrite.
+ichms2026_mcp_geodata
+gis-mcp-server-cluster-2026
