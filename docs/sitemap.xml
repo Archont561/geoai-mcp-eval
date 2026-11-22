@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Generated from docs/myst.yml; do not edit directly. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://archont561.github.io/geoai-mcp-eval/</loc></url>
+  <url><loc>https://archont561.github.io/geoai-mcp-eval/literature-review/</loc></url>
+  <url><loc>https://archont561.github.io/geoai-mcp-eval/research-questions/</loc></url>
+  <url><loc>https://archont561.github.io/geoai-mcp-eval/hypotheses/</loc></url>
+  <url><loc>https://archont561.github.io/geoai-mcp-eval/experiment/</loc></url>
+  <url><loc>https://archont561.github.io/geoai-mcp-eval/implementation/</loc></url>
+  <url><loc>https://archont561.github.io/geoai-mcp-eval/results/</loc></url>
+  <url><loc>https://archont561.github.io/geoai-mcp-eval/interpretation/</loc></url>
+  <url><loc>https://archont561.github.io/geoai-mcp-eval/summary/</loc></url>
+  <url><loc>https://archont561.github.io/geoai-mcp-eval/gis-se-analysis/</loc></url>
+  <url><loc>https://archont561.github.io/geoai-mcp-eval/provenance/</loc></url>
+  <url><loc>https://archont561.github.io/geoai-mcp-eval/analysis/</loc></url>
+  <url><loc>https://archont561.github.io/geoai-mcp-eval/reproducibility/</loc></url>
+</urlset>

@@ -1,0 +1,73 @@
+# lychee — link checker configuration for geoai-mcp-eval
+# Run with: pixi run --environment default lychee --config .lychee.toml .
+#
+# All `include`/`exclude` values are regex patterns (not globs).
+
+# --include patterns: which files to scan
+include = [".*\\.md$", ".*\\.markdown$"]
+
+# --exclude patterns: paths and URL patterns to skip entirely
+exclude = [
+  # Build artefacts and caches
+  "\\.pixi/",
+  "\\.pytest_cache/",
+  "__pycache__/",
+  "_build/",
+  "node_modules/",
+  "/dist/",
+  "\\.git/",
+
+  # Docs build output (generated HTML, not source)
+  "docs/_build/",
+
+  # Pixi-sandbox generated artifacts
+  "\\.qgis-sdk/",
+
+  # Localhost / loopback (not reachable in CI)
+  "^http://localhost",
+  "^http://127\\.0\\.0\\.1",
+
+  # Mailto and tel links
+  "^mailto:",
+  "^tel:",
+
+  # GitHub raw content that may be rate-limited in CI
+  "^https://raw\\.githubusercontent\\.com",
+
+  # DOI resolvers (often redirect-heavy; checked manually)
+  "^https://doi\\.org",
+
+  # GitHub Pages site not yet deployed (404/503 expected)
+  "^https://archont561\\.github\\.io/geoai-mcp-eval/",
+
+  # Stack Exchange API returns 400 without proper query params
+  "^https://api\\.stackexchange\\.com",
+
+  # Local file references
+  "^\\./",
+  "^\\./\\./",
+]
+
+# --exclude-path: paths to skip checking
+exclude_path = [
+  "\\.pixi/",
+  "node_modules/",
+  "__pycache__/",
+  "_build/",
+  "backlog/",
+]
+
+# --timeout: seconds before a link check times out
+timeout = 30
+
+# --max-concurrency: concurrent link checks
+max_concurrency = 10
+
+# --max-retries: number of retries on failure
+max_retries = 2
+
+# --retry-wait-time: wait time between retries (seconds)
+retry_wait_time = 2
+
+# --no-progress: disable progress bars (CI-friendly)
+no_progress = false

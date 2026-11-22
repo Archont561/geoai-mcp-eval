@@ -21,11 +21,12 @@ select = [
 known-first-party = ["experiment"]
 
 [tool.pytest.ini_options]
-testpaths = ["experiment/tests"]
+pythonpath = ["experiment/src", "experiment-qgis-plugin/src"]
+testpaths = ["experiment/tests", "experiment-qgis-plugin/tests"]
 addopts = "-q"
 
 [tool.coverage.run]
-source = ["experiment"]
+source = ["experiment/src/experiment"]
 branch = true
 omit = ["experiment/tests/*"]
 

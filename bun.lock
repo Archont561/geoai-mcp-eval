@@ -9,8 +9,14 @@
         "skills": "1.8.1",
       },
     },
+    "docs": {
+      "name": "@geoai-mcp-eval/docs",
+      "version": "0.1.0",
+    },
   },
   "packages": {
+    "@geoai-mcp-eval/docs": ["@geoai-mcp-eval/docs@workspace:docs"],
+
     "@isaacs/fs-minipass": ["@isaacs/fs-minipass@4.0.1", "", { "dependencies": { "minipass": "^7.0.4" } }, "sha512-wgm9Ehl2jpeqP3zw/7mo3kRHFp5MEDhqAdwy1fTGkHAwnkGOVsgpvQhL8B5n1qlb01jV3n/bI0ZfZp5lWA1k4w=="],
 
     "backlog.md": ["backlog.md@1.55.3", "", { "optionalDependencies": { "backlog.md-darwin-arm64": "1.55.3", "backlog.md-darwin-x64": "1.55.3", "backlog.md-linux-arm64": "1.55.3", "backlog.md-linux-x64": "1.55.3", "backlog.md-windows-arm64": "1.55.3", "backlog.md-windows-x64": "1.55.3" }, "bin": { "backlog": "cli.js" } }, "sha512-HN37ifPKQR28QAEdKO9g9sF/DjmTaVkBSfMK2BleNrbIShe8evFqoPpGlyvQtAQM1XKW+5guPW3+c5Tt8Mrpew=="],

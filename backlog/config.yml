@@ -12,4 +12,5 @@ filesystem_only: true
 bypass_git_hooks: false
 check_active_branches: false
 active_branch_days: 30
+zero_padded_ids: 3
 task_prefix: "GEO"

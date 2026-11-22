@@ -9,4 +9,13 @@ from tasknest import ToolContext, tool
 def prose(ctx: ToolContext) -> None:
     """Install configured Vale packages and lint project prose."""
     ctx.run(["vale", "sync"])
-    ctx.run(["vale", "--no-exit", "README.md", "AGENTS.md", "docs", "experiment/features"])
+    ctx.run(
+        [
+            "vale",
+            "--no-exit",
+            "README.md",
+            "AGENTS.md",
+            "docs",
+            "experiment/features",
+        ]
+    )

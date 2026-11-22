@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build MyST prototype
+    name: Build documentation site
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -41,11 +41,21 @@ jobs:
         with:
           node-version: 22
 
-      - name: Build the one-page MyST site
-        run: npm exec --yes --package=mystmd@1.13.0 -- myst build --html --strict --ci
+      - name: Install the locked documentation environment
+        run: pixi install --locked --environment docs
+
+      - name: Build the documentation site
+        run: pixi run --environment docs -- npm exec --yes --package=mystmd@1.13.0 -- myst build --html --strict --ci
         working-directory: docs
         env:
           BASE_URL: /${{ github.event.repository.name }}/
+
+      - name: Verify generated sitemap and robots.txt
+        working-directory: docs
+        run: |
+          ! grep -E "pre\.render|localhost" _build/html/sitemap.xml _build/html/robots.txt
+          test -s _build/html/llms.txt && test -s _build/html/llms-full.txt
+          grep -q "/${{ github.event.repository.name }}/" _build/html/sitemap.xml
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4

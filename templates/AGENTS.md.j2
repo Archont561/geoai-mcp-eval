@@ -6,16 +6,16 @@ This repository is the experiment codebase for the thesis on **typed MCP tools v
 
 ## Non-negotiables
 
-- **Single automation entrypoint:** `pixi.toml` defines **only** the `tools` task (`tasknest`). Never add extra `[tasks]` / `[feature.*.tasks]`; CI forbids it via alint. Run automation with `pixi run tools …` (`pixi run tools ls` to discover).
-- **pixi only** for Python environments. No `uv.lock`, `requirements.txt`, or `pip install` into the repo environment. Python 3.12–3.13.
+- **Single automation entrypoint:** `pixi.toml` defines `tools = "tasknest"` as the repository automation task. The `experiment` task is only the experiment CLI entry point; do not add other automation tasks. Run automation with `pixi run tools …` (`pixi run tools ls` to discover).
+- **Pixi owns Python environments.** Do not add `uv.lock`, `requirements.txt`, or use `pip install` into a repo environment. Python 3.12–3.13. Package-level `pyproject.toml` files may declare project metadata, but Pixi defines and resolves the workspace environments.
 - **Bun is a narrow tooling exception:** `package.json` pins only the skills and Backlog.md CLIs. Do not add JavaScript runtime dependencies or use Bun to manage the Python/GIS environment.
-- **`experiment/` is the only Python source root.** Put study modules, tests (`experiment/tests/`), and future Gherkin specifications (`experiment/features/`) there. Do not create parallel top-level Python source directories.
-- **Runtime deps live in pixi features** (`[feature.python]`, `[feature.experiment]`), never in `pyproject.toml` (tool config only) or `setup.py`.
-- **Keep solve groups clean:** if the native GIS stack lands, isolate it in its own solve-group — never let measurement deps leak into the tooling environment.
+- **Python source roots are explicit:** the study CLI is under `experiment/src/experiment/`; the QGIS plugin is under `experiment-qgis-plugin/src/experiment_plugin/`. Keep their tests and Gherkin specifications in their respective `tests/` and `features/` directories; do not create other parallel Python roots.
+- **Runtime dependencies live in Pixi features** (`[feature.python]`, `[feature.experiment]`, `[feature.docs]`), not in package metadata as an environment manager.
+- **Keep solve groups clean:** the documentation analysis stack remains in the isolated `docs` solve group. Keep GIS runtime dependencies in the experiment feature, not the docs or automation feature.
 
 ## Git hygiene
 
-- No secrets, credentials, personal data, experiment **outputs or datasets** in the repo. Results go elsewhere (out of scope here).
+- No secrets, credentials, or personal data. Do not commit unpublished experiment outputs or private datasets. Public source snapshots may be included only with clear provenance, licensing, and an explicit warning when they are unverified.
 - Conventional Commit titles (`feat: …`, `fix: …`, `chore: …`).
 - Actions are SHA-pinned; do not "upgrade" by bumping tags — renovate + digest pinning handles it.
 
@@ -41,6 +41,6 @@ If alint fails, fix the repo, don't relax the rule to zero the error. If you mus
 
 ## Scope guardrails
 
-- Keep documentation to the one-page MyST prototype in `docs/`; do not add a full docs site, thesis sources, or literature review here.
-- Do not presuppose the experiment design in directory layout or imports; the design is unsettled.
-- No benchmarks, datasets or GIS binaries committed.
+- Keep documentation in `docs/` to the pre-experiment MyST book (visit → review → study → findings stubs → reference). Do not add the canonical thesis or literature review. The condensed review is a pre-experiment distillation.
+- Do not presuppose the experiment design beyond the documented CLI and QGIS plugin scaffolds; the design remains open until the `v1.0-prereg` freeze.
+- Do not commit unpublished benchmarks, private datasets, experiment run outputs, or GIS binaries. Public-source aggregates require documented provenance, licensing, and an explicit verification status.

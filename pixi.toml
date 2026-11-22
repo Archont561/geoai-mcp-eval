@@ -1,23 +1,23 @@
 # pixi workspace — https://pixi.sh
 #
 # geoai-mcp-eval: thesis experiment code (MCP typed tools vs PyQGIS code
-# generation for LLM agents in GIS). The runtime GIS/experiment stack is
-# DELIBERATELY not pinned here yet — see [feature.experiment] below.
+# generation for LLM agents in GIS).
 #
-# Only one task is allowed here, enforced by convention and review: `tools`
-# (the Python-native Tasknest runner from the Archont561 toolchain).
-# CI and hooks call `pixi run tools ...` exclusively.
+# `tools` is the sole repository-automation task and runs Tasknest. `experiment`
+# is a separate application entry point for the study CLI; CI and hooks use only
+# `pixi run tools ...` for automation.
 
 [workspace]
 name = "geoai-mcp-eval"
 version = "0.1.0"
 description = "Thesis experiment: MCP typed tools vs PyQGIS code generation for LLM agents in GIS"
 license = "MIT"
-channels = ["conda-forge"]
+channels = ["conda-forge", "https://prefix.dev/archont561/archont561"]
 platforms = ["linux-64", "osx-arm64", "win-64"]
 
 [tasks]
 tools = "tasknest"
+experiment = { cmd = "python -m experiment", env = { PYTHONPATH = "experiment/src" } }
 
 [feature.python.dependencies]
 python = ">=3.12,<3.14"
@@ -25,17 +25,30 @@ ruff = "*"
 pytest = "*"
 pytest-cov = "*"
 
-# THE EXPERIMENT RUNTIME GOES HERE — intentionally empty until the design is
-# pinned. When it is, add the analysis/GIS stack under
-# [feature.experiment.dependencies], e.g.:
-#   geopandas = "*"
-#   shapely = "*"
-#   pyogrio = "*"
-#   pyproj = "*"
-# If the native GIS stack grows heavy (GDAL/QGIS), give it its own
-# solve-group, mirroring the workspace-root manifest's separation between the
-# measurement solve group and the tooling environment.
-[feature.experiment]
+[feature.python.pypi-dependencies]
+rude = "*"
+rude-clean-code = "*"
+typer = "*"
+
+# THE EXPERIMENT RUNTIME — QGIS plugin development stack.
+# qgis-sdk provides declarative plugin authoring (native dialogs, typed actions,
+# Processing algorithm contracts) without requiring QGIS at import time.
+# qgis (conda-forge, linux-64) provides the QGIS Desktop host for `qgis-sdk dev` and `qgis-sdk test --target desktop`.
+[feature.experiment.dependencies]
+python = ">=3.12,<3.14"
+
+[feature.experiment.pypi-dependencies]
+qgis-sdk = "*"
+
+[feature.experiment.target.linux-64.dependencies]
+qgis = "4.2.*"
+ollama = "0.32.*"
+mcp = "*"
+geopandas = "*"
+shapely = "*"
+pyproj = "*"
+rasterio = "*"
+pyogrio = "*"
 
 [feature.lint.dependencies]
 actionlint = "*"
@@ -49,22 +62,46 @@ shellcheck = "*"
 
 [feature.lint.pypi-dependencies]
 alint = "==0.22.1"
-gherlint = "==0.5.0"
 rumdl = "==0.3.4"
+
+# gherlint moved to its own environment (gherlint-env) because it requires
+# pydantic<2.0.0 which conflicts with the default environment's pydantic==2.x.
+# Use `pixi install --environment gherlint-env` to use it.
+[feature.gherlint.dependencies]
+pydantic = "<2.0.0"
+
+[feature.gherlint.pypi-dependencies]
+gherlint = "*"
+
+# Docs build environment: the MyST site and reactive analyses in docs/ use
+# jupyter-book-marimo (registered in docs/myst.yml). Keep this stack in its own
+# solve group so analysis dependencies do not perturb the default environment.
+[feature.docs.dependencies]
+python = ">=3.12,<3.14"
+
+[feature.docs.pypi-dependencies]
+jupyter-book-marimo = "*"
+marimo = "*"
+pandas = "*"
+altair = "*"
+stackapi = "*"
+diskcache = "*"
+great_tables = "*"
 
 [feature.automation.pypi-dependencies]
 tasknest = "==0.4.0"
 
-# NOTE: `pixi-sandbox` is NOT on conda-forge. The template pins it from the
-# channel https://prefix.dev/archont561/archont561, which answered 404 from this
-# workspace — an unsolvable environment poisons every fresh `pixi run`, so it is
-# not configured here. Re-add this feature + the channel (or a verified mirror)
-# together when access is available:
-# [feature.sandbox.dependencies]
-# pixi-sandbox = "=0.9.0"
-# [environments]
-# sandbox = { features = ["python", "sandbox", "automation"], solve-group = "default" }
-# pixi-sandbox.toml ships in the repo and stays inert until then.
+# pixi-sandbox installed from https://prefix.dev/archont561/archont561
+# (channel reachability not independently verified here). Provides isolated sandbox environments
+# for running QGIS sessions with the experiment plugin.
+[feature.sandbox.dependencies]
+pixi-sandbox = ">=0.9.0,<0.10"
 
 [environments]
 default = { features = ["python", "experiment", "lint", "automation"], solve-group = "default" }
+docs = { features = ["docs"], solve-group = "docs" }
+sandbox = { features = ["python", "experiment", "sandbox", "automation"], solve-group = "default" }
+# gherlint requires pydantic<2.0.0, incompatible with default's pydantic==2.x.
+# Keep it isolated so `pixi install` (default) works; use
+# `pixi install --environment gherlint-env` when gherlint is needed.
+gherlint-env = { features = ["gherlint"], solve-group = "gherlint" }
