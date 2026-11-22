@@ -18,7 +18,7 @@ select = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["experiment"]
+known-first-party = ["experiment", "experiment_plugin"]
 
 [tool.pytest.ini_options]
 pythonpath = ["experiment/src", "experiment-qgis-plugin/src"]
