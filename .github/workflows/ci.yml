@@ -63,6 +63,9 @@ jobs:
       - name: Ruff check & format check
         run: pixi run tools run lint
 
+      - name: Validate pilot task suite
+        run: pixi run experiment pilot validate
+
       - name: Run pytest with 90% coverage floor
         run: pixi run tools run test
 

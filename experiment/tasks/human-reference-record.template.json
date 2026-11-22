@@ -1,0 +1,32 @@
+{
+  "record_version": 1,
+  "status": "not_started",
+  "task_id": null,
+  "task_file_sha256": null,
+  "fixture_path": null,
+  "fixture_sha256": null,
+  "participant_code": null,
+  "consent": {
+    "obtained": null,
+    "screen_recording": false
+  },
+  "session": {
+    "started_at_utc": null,
+    "ended_at_utc": null,
+    "elapsed_minutes": null,
+    "steps": null,
+    "tools": [],
+    "software_versions": {
+      "qgis": null,
+      "gdal": null,
+      "geos": null,
+      "proj": null
+    },
+    "network_disabled": null,
+    "deviations_or_interruptions": []
+  },
+  "outputs": [],
+  "oracle_report_path": null,
+  "oracle_passed": null,
+  "evidence_storage_reference": null
+}

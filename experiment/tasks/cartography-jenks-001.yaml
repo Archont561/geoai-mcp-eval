@@ -1,0 +1,48 @@
+schema_version: 1
+id: cartography-jenks-001
+title: Classify Natural Earth population estimates with four Jenks classes
+prompt: >-
+  Classify the supplied country's POP_EST values into four natural-breaks
+  (Fisher–Jenks) classes. Write result.json with keys `method`, `class_count`,
+  `breaks`, and `assignments`. Set method to `jenks`, number classes from 1
+  (lowest population) to 4 (highest), include the four upper class bounds in
+  ascending order, and map every feature's ISO_A3 code to its class. Use the
+  supplied values only; do not replace them with current population estimates.
+family: C
+difficulty_rubric:
+  tier: 3
+  n_tools_human: 2
+  n_steps_human: 5
+  expressible: low
+provenance:
+  source: Natural Earth Vector 1:110m Admin 0 Countries
+  source_url: https://github.com/nvkelso/natural-earth-vector
+  source_file: geojson/ne_110m_admin_0_countries.geojson
+  source_commit: ca96624a56bd078437bca8184e78163e5039ad19
+  license: Public domain (Natural Earth README)
+  contamination: constructed
+fixtures:
+  input: fixtures/cartography/countries.geojson
+human_baseline:
+  status: pending
+  artifact_dir: baselines/cartography-jenks-001
+  produced_with: null
+  human_time_min: null
+  human_steps: null
+  human_tools: []
+oracle:
+  determinism_runs: 3
+  assertions:
+    - id: natural-breaks-assignments
+      type: jenks_classification
+      fixture: fixtures/cartography/countries.geojson
+      output: result.json
+      id_field: ISO_A3
+      value_field: POP_EST
+      class_count: 4
+budget_bounds:
+  max_tool_calls: 20
+  max_wall_s: 300
+runs: 2
+required_traps:
+  - jenks-classification

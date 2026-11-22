@@ -4,9 +4,13 @@ title: Execute human baseline H protocol
 status: To Do
 assignee: []
 created_date: '2026-11-16T00:00:00Z'
+updated_date: '2026-11-22T16:16:00Z'
 labels: []
 milestone: m-0
 dependencies: []
+documentation:
+  - experiment/tasks/HUMAN-REFERENCE.md
+  - experiment/tasks/human-reference-record.template.json
 ordinal: 4000
 ---
 

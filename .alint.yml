@@ -150,6 +150,20 @@ rules:
     level: error
     message: "CI must run the alint/ruff/pytest gates on every push and PR."
 
+  - id: ci-validates-pilot-task-suite
+    kind: file_content_matches
+    paths: .github/workflows/ci.yml
+    pattern: "(?m)^        run: pixi run experiment pilot validate$"
+    level: error
+    message: "CI must validate the pilot task suite through the experiment CLI."
+
+  - id: lint-runs-rude
+    kind: file_content_matches
+    paths: tools/lint.py
+    pattern: "(?s)python.*-m.*rude.*check"
+    level: error
+    message: "The Python lint gate must run rude before Ruff."
+
   - id: require-codecov-config
     kind: file_exists
     paths: codecov.yml
