@@ -1,24 +1,15 @@
 # rude — fast, extensible Python linter
 # Enables most rules against all Python files under src/ and tests/.
 
-[rude]
+[tool.rude]
+# Load the project's Clean Code plugin explicitly (the runner deduplicates rule codes).
+plugins = ["rude_clean_code"]
 # Select broad rule categories so most checks are active.
 select = [
     # McCabe complexity
     "C901",
-    # Other (code craftsmanship)
-    "CC001", "CC002", "CC004", "CC005",
-    "CC101", "CC102", "CC103", "CC104", "CC107", "CC105", "CC106", "CC108",
-    "CC201", "CC202", "CC207", "CC204", "CC205", "CC206",
-    "CC301", "CC302", "CC303", "CC306", "CC308", "CC304", "CC305", "CC307",
-    "CC309", "CC310", "CC311",
-    "CC401", "CC402", "CC403",
-    "CC501", "CC503", "CC504",
-    "CC601", "CC602", "CC603", "CC604", "CC605", "CC606",
-    "CC701", "CC702", "CC704",
-    "CC801", "CC802", "CC803", "CC804", "CC805",
-    "CC907", "CC908", "CC909", "CC910",
-    "CC902", "CC903", "CC905", "CC906", "CC904",
+    # Rude Clean Code plugin rules (all CC-prefixed rules, except explicit ignores below).
+    "CC",
     # Pycodestyle errors
     "E711", "E712", "E713", "E714", "E721",
     "E701", "E702", "E703", "E704",
@@ -45,6 +36,14 @@ ignore = [
     "E501",   # Line too long — kept at project default but flagged selectively
 ]
 
-[rude.line-length]
+[tool.rude.rules.CC001]
+# Keep modules to 400 lines unless an explicit exception is documented.
+max_lines = 400
+
+[tool.rude.rules.CC101]
+# Keep functions to 30 lines unless an explicit exception is documented.
+max_lines = 30
+
+[tool.rude.rules.E501]
 # Keep lines short for readability in narrow terminal windows.
-value = 88
+max_line_length = 88

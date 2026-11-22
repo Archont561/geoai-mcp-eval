@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://geoai-mcp-eval.invalid/task-suite/schema-v1.json",
+  "title": "GEOAI pilot task schema v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "title",
+    "prompt",
+    "family",
+    "difficulty_rubric",
+    "provenance",
+    "fixtures",
+    "human_baseline",
+    "oracle",
+    "budget_bounds",
+    "runs",
+    "required_traps"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,40}$" },
+    "title": { "type": "string", "minLength": 1 },
+    "prompt": { "type": "string", "minLength": 20 },
+    "family": { "type": "string", "enum": ["P", "A", "C"] },
+    "difficulty_rubric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tier", "n_tools_human", "n_steps_human", "expressible"],
+      "properties": {
+        "tier": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "n_tools_human": { "type": "integer", "minimum": 0 },
+        "n_steps_human": { "type": "integer", "minimum": 1 },
+        "expressible": { "type": "string", "enum": ["low", "medium", "high"] }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "source_url", "source_file", "source_commit", "license", "contamination"],
+      "properties": {
+        "source": { "type": "string", "minLength": 1 },
+        "source_url": { "type": "string", "pattern": "^https://" },
+        "source_file": { "type": "string", "minLength": 1 },
+        "source_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "license": { "type": "string", "minLength": 1 },
+        "contamination": { "type": "string", "enum": ["inherited", "constructed"] }
+      }
+    },
+    "fixtures": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input"],
+      "properties": {
+        "input": { "type": "string", "minLength": 1 }
+      }
+    },
+    "human_baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "artifact_dir", "produced_with", "human_time_min", "human_steps", "human_tools"],
+      "properties": {
+        "status": { "type": "string", "enum": ["pending", "complete"] },
+        "artifact_dir": { "type": "string", "minLength": 1 },
+        "produced_with": { "type": ["string", "null"] },
+        "human_time_min": { "type": ["number", "null"], "minimum": 0 },
+        "human_steps": { "type": ["integer", "null"], "minimum": 0 },
+        "human_tools": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "oracle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["determinism_runs", "assertions"],
+      "properties": {
+        "determinism_runs": { "type": "integer", "const": 3 },
+        "assertions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["id", "type"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+              "type": { "type": "string", "enum": ["geojson_feature_count", "representative_point_matches", "de9im_relation", "jenks_classification"] },
+              "preserve_fields": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+            }
+          }
+        }
+      }
+    },
+    "budget_bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_tool_calls", "max_wall_s"],
+      "properties": {
+        "max_tool_calls": { "type": "integer", "minimum": 1 },
+        "max_wall_s": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "runs": { "type": "integer", "const": 2 },
+    "required_traps": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "enum": ["crs-axis-order", "topology-de9im", "jenks-classification"] }
+    }
+  }
+}

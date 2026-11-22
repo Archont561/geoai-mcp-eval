@@ -28,6 +28,8 @@ results/
 data/
 dist/
 build/
+experiment/tasks/baselines/
+experiment/tasks/runs/
 
 # OS, secrets & logs
 .env

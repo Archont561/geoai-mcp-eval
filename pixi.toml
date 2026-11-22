@@ -4,8 +4,8 @@
 # generation for LLM agents in GIS).
 #
 # `tools` is the sole repository-automation task and runs Tasknest. `experiment`
-# is a separate application entry point for the study CLI; CI and hooks use only
-# `pixi run tools ...` for automation.
+# is the study application CLI; application commands such as task-suite validation
+# run through `pixi run experiment ...`, not through separate Tasknest tools.
 
 [workspace]
 name = "geoai-mcp-eval"
