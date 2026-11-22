@@ -53,7 +53,10 @@ jobs:
       - name: Verify generated sitemap and robots.txt
         working-directory: docs
         run: |
-          ! grep -E "pre\.render|localhost" _build/html/sitemap.xml _build/html/robots.txt
+          if grep -E "pre\.render|localhost" _build/html/sitemap.xml _build/html/robots.txt; then
+            echo "Generated sitemap or robots.txt contains a forbidden URL." >&2
+            exit 1
+          fi
           test -s _build/html/llms.txt && test -s _build/html/llms-full.txt
           grep -q "/${{ github.event.repository.name }}/" _build/html/sitemap.xml
 
