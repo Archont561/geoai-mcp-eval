@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Executable entry point for the `jupyter-book-marimo` MyST plugin.
+#
+# docs/myst.yml registers this file as the plugin (`type: executable`).
+# MyST resolves plugin paths relative to this project directory and does NOT
+# search PATH, so pointing myst.yml at bare `jupyter-book-marimo` never loaded
+# the plugin and every ` ```{marimo} ` cell rendered as an
+# "marimo · Unknown Directive" error banner.
+#
+# This wrapper forwards to the real plugin, preferring the locked Pixi docs
+# environment (.pixi/envs/docs, created by `pixi install --locked
+# --environment docs`) and falling back to whatever is on PATH.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+candidates=(
+  "$here/../.pixi/envs/docs/bin/jupyter-book-marimo"
+  "$(command -v jupyter-book-marimo || true)"
+)
+for candidate in "${candidates[@]}"; do
+  if [ -n "$candidate" ] && [ -x "$candidate" ] \
+     && [ "$(cd "$(dirname "$candidate")" && pwd)/$(basename "$candidate")" != "$here/jupyter-book-marimo" ]; then
+    exec "$candidate" "$@"
+  fi
+done
+
+echo "jupyter-book-marimo not found." >&2
+echo "Install the locked docs environment (pixi install --locked --environment docs) or put jupyter-book-marimo on PATH." >&2
+exit 1

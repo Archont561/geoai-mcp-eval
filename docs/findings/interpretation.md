@@ -9,7 +9,7 @@ description: >-
 (interpretation)=
 
 :::{warning} ToDo—not started
-![ToDo](../assets/icons/triangle-alert.svg){width=18px} Interpretation happens after
+<img src="../assets/icons/triangle-alert.svg" width="18" height="18" alt="ToDo"> Interpretation happens after
 the agent-run analysis is locked and the human-reference report is appended (the human
 report is appended after, not before, the analysis is locked). Nothing here is a
 finding.

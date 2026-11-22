@@ -9,7 +9,7 @@ description: >-
 (summary)=
 
 :::{warning} ToDo—written last
-![ToDo](../assets/icons/triangle-alert.svg){width=18px} A summary written before
+<img src="../assets/icons/triangle-alert.svg" width="18" height="18" alt="ToDo"> A summary written before
 data is a prediction dressed as a conclusion. This page stays empty until the analysis
 is locked.
 :::

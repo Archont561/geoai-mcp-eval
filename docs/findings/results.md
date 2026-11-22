@@ -9,7 +9,7 @@ description: >-
 (results)=
 
 :::{warning} ToDo—nothing has been run yet
-![ToDo](../assets/icons/triangle-alert.svg){width=18px} The protocol is not yet in
+<img src="../assets/icons/triangle-alert.svg" width="18" height="18" alt="ToDo"> The protocol is not yet in
 execution. This page reports no results, figures, or tables: it is a reserved, empty slot
 in the arc, filled after the freeze and the completeness check.
 :::
