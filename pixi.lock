@@ -499,6 +499,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/86/5d/e720b313a6c4af07f1908b7893f2a79bf006ea2abc88428225ebc20d41ec/rude-0.1a4-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/9e/55/cae87da36610808e4817bb9f8baaf5eee4b4ac63116d72235b7552f4260d/alint-0.22.1-py3-none-manylinux_2_17_x86_64.musllinux_1_2_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/b0/80/6fefabdbfabdd3423672714bc9ce6ccc1b8d084a18e3854a50992e7c113d/qgis_sdk-0.0.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/e2/b7/883fd914ce1c31a457ebde788b6cce1fdfabbd1c4d47f14f8e54a99aeaf4/qgis_sdk_runtime-0.11.0-py3-none-any.whl
       osx-arm64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.10.23-hbd8a1cb_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/colorama-0.4.6-pyhd8ed1ab_1.conda
@@ -1405,6 +1406,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/75/3f/26029dfa5aa634b7014a746dfd7dd5be0c5a5c08d90b68ce09c855038673/tasknest-0.4.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/86/5d/e720b313a6c4af07f1908b7893f2a79bf006ea2abc88428225ebc20d41ec/rude-0.1a4-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/b0/80/6fefabdbfabdd3423672714bc9ce6ccc1b8d084a18e3854a50992e7c113d/qgis_sdk-0.0.0-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/e2/b7/883fd914ce1c31a457ebde788b6cce1fdfabbd1c4d47f14f8e54a99aeaf4/qgis_sdk_runtime-0.11.0-py3-none-any.whl
       osx-arm64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/ca-certificates-2026.10.23-hbd8a1cb_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/colorama-0.4.6-pyhd8ed1ab_1.conda
