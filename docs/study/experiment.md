@@ -85,7 +85,7 @@ Scored on executed artefacts via ISO 19157-derived predicates (tiers A–D: exis
 spatial predicates → value-level vs baseline → repeatability/economics). The formal
 scoring contract (WSZ/OQS definitions, weights, tie handling) and the full analysis plan
 with its limits are defined in the specification §§6.7–6.8 and are intentionally **not**
-restated here. Preregistration → **Załącznik E** (outside this repository).
+restated here. Preregistration → **Appendix E** (outside this repository).
 
 ## Threats and the human reference
 

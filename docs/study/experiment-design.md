@@ -133,7 +133,7 @@ Licensing: GIS StackExchange inherits CC-BY-SA 4.0 — attribution in
 2. **Pre-freeze audit**: directory hash, fixture checksums, task-suite validator
    pass, oracle 3× determinism pass, human baseline H executed + oracle-verified,
    contamination tags spot-audited.
-3. **Freeze** → tag `v1.0-prereg` (Załącznik E scope: this document + task
+3. **Freeze** → tag `v1.0-prereg` (Appendix E scope: this document + task
    checksums + seed table + protocol).
 4. **Runs**: stratum-interleaved randomisation (P/A/C within stratum,
    inherited/constructed balanced); independent fresh session per run;

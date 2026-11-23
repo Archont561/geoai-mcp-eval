@@ -97,8 +97,8 @@ description: >-
     feature counts, extent, schema, mandatory non-nulls); workflow invariants
     between steps; all-or-nothing step semantics; full audit log.
   - (N0 — CodeGen control arm: checks live only in the post-hoc oracle.)
-- **Oracle (wyrocznia; ang. *test oracle*)** — the decision procedure mapping
-  actual → verdict `(spełnienie, wartość, tolerancja)` functions
+- **Oracle (*test oracle*)** — the decision procedure mapping
+  actual → verdict `(pass, value, tolerance)` functions
   [barr2015oracle]. Not gold truth; not the validator; not a metric. The ISO
   19157 elements (completeness, logical consistency [DE-9IM/`iso19107`],
   positional accuracy, thematic accuracy, temporal quality, usability)
@@ -110,10 +110,10 @@ description: >-
   task-card facts. **Validator** — N3/N4’s runtime twin of the oracle; the
   (enforced ∩ oracle) set is enumerated pre-freeze so “testing on one’s own
   checks” is auditable. **Metric** — aggregation over oracle verdicts (below).
-- **WSZ (wskaźnik sukcesu zadania)** — task success: 1 iff **all** assertions
+- **WSZ (task success rate)** — task success: 1 iff **all** assertions
   for the task pass on the executed artefact (strict; no partial credit inside
   the binary).
-- **OQS (średni wynik predykatów)** — continuous: mean predicate-pass fraction
+- **OQS (mean predicate score)** — continuous: mean predicate-pass fraction
   per run ∈ [0,1] (report alongside WSZ).
 - **pass^k** — P(all k independent trials succeed) [yao2024taubench;
   gupta2026reliabilitybench]; here k = r = 4 repeats/cell.

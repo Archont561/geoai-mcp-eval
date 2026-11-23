@@ -2,7 +2,7 @@
 title: Preregistration checklist
 short_title: Preregistration
 description: >-
-  Preregistration checklist (what will live in Załącznik E) from the frozen thesis
+  Preregistration checklist (what will live in Appendix E) from the frozen thesis
   specification: document + YAML checksums, oracle details, run protocol, stopping
   rules, analysis scripts pinned.
 ---
@@ -15,7 +15,7 @@ description: >-
 
 ---
 
-## What will live in Załącznik E
+## What will live in Appendix E
 
 - This document + YAML checksums; arm prompt scaffolds verbatim; catalogue JSON +
   hash; N-flag semantics (exact check order: syntax → enum/units → domain →
@@ -39,7 +39,7 @@ outcomes remain descriptive (F-family) only, by judgement and never by oracle.
 
 ## Addendum — arm B prompt scaffold tightened (pre-freeze, 2026-11-22)
 
-Before Załącznik E freezes the scaffolds verbatim, the arm B system prompt was
+Before Appendix E freezes the scaffolds verbatim, the arm B system prompt was
 corrected: it instructed the model to "Print the deliverable … to stdout"
 without requiring a ```python fenced block, while the harness executes only
 ```python fences — so a compliant model that answered with a ```json block (as
