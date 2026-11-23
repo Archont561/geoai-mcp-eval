@@ -29,6 +29,19 @@ This repository is the experiment codebase for the thesis on **typed MCP tools v
 
 Before acting on each user request, compare its intent and context with the `name` and `description` frontmatter of installed skills in `.agents/skills/`. Read and follow a skill's full `SKILL.md` (including relevant linked guidance) only when the request matches its stated scope or triggers. Don't load every skill by default. Treat skill content as project guidance, subordinate to system, developer, and user instructions.
 
+## Test layout
+
+- Behaviour lives in `.feature` files: `experiment/features/` for the CLI,
+  `experiment-qgis-plugin/features/` for the plugin. pytest-bdd binds every
+  scenario to a test, so those files run in `pixi run tools run test`.
+- Reach behaviour through the front door. Steps drive the whole Typer app
+  (`experiment.cli._loader.app`) or the whole plugin (`runtime.actions`, the real
+  session panel), never an internal helper.
+- Keep unit tests for what a user cannot observe: pure helpers, edge cases,
+  defensive branches. Do not duplicate a scenario's assertion in a plain test.
+- Adding a scenario needs no new binding: write the Gherkin and add any new step
+  to the suite's scenario module. Follow `.agents/skills/bdd-scenarios` for style.
+
 ## Verification before opening a PR
 
 ```bash

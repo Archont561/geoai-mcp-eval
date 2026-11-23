@@ -12,12 +12,12 @@ Thesis experiment code: **does the integration interface matter?** Expose geopro
 geoai-mcp-eval/
 ├── experiment/
 │   ├── src/experiment/  # study CLI and reusable experiment code
-│   ├── features/        # Gherkin experiment specifications
-│   └── tests/           # experiment CLI tests
+│   ├── features/        # executable Gherkin specifications for the CLI
+│   └── tests/           # experiment CLI tests and the scenario steps
 ├── experiment-qgis-plugin/
-│   ├── src/             # qgis-sdk plugin prototype
-│   ├── features/        # plugin behavior specifications
-│   └── tests/           # plugin tests
+│   ├── experiment_plugin/  # qgis-sdk plugin prototype (flat layout)
+│   ├── features/        # executable Gherkin specifications for the plugin
+│   └── tests/           # plugin tests and the scenario steps
 ├── docs/                # pre-experiment MyST documentation book
 ├── .agents/skills/      # upstream and repository-maintained agent skills
 ├── backlog/             # local-first tasks, milestones, decisions, and plans
@@ -40,6 +40,7 @@ The documentation book presents a proposed design and public-source context, not
 - **Tasknest** is the sole repository automation entry point (`tools`). `pixi.toml` also exposes `experiment` as the experiment CLI task, not as repository automation.
 - **Ruff**, **pytest**, **rumdl**, **Vale**, **alint**, **actionlint**, and **lychee** provide linting, tests, and repository checks.
 - Experiment coverage targets `experiment/`; pytest and Codecov enforce the configured 90% threshold.
+- Behaviour is specified in `.feature` files under `experiment/features/` and `experiment-qgis-plugin/features/`. pytest-bdd binds each scenario to a test, so the feature files run — they are specifications, not notes.
 - The `docs` environment has a separate solve group for MyST and reactive analysis dependencies. The optional sandbox environment installs `pixi-sandbox` from the `https://prefix.dev/archont561/archont561` channel and `qgis` from conda-forge; both resolved when the sandbox environment was last installed on linux-64, but the QGIS Desktop session itself isn't exercised by CI.
 
 ## Quickstart

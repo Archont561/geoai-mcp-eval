@@ -86,6 +86,12 @@ rules:
     level: error
     message: "Experiment feature specifications belong under experiment/features/."
 
+  - id: require-experiment-bdd-scenarios
+    kind: file_exists
+    paths: experiment/features/command-line.feature
+    level: error
+    message: "experiment/features/ must hold executable Gherkin scenarios for the CLI."
+
   # --- experiment* project structure enforcement (src / tests / features) ---
 
   - id: require-experiment-src-package
@@ -111,6 +117,12 @@ rules:
     paths: experiment-qgis-plugin/features/hello.feature
     level: error
     message: "experiment-qgis-plugin/ must have features/ with hello.feature."
+
+  - id: require-experiment-qgis-plugin-scenario-bindings
+    kind: file_exists
+    paths: experiment-qgis-plugin/tests/test_plugin_scenarios.py
+    level: error
+    message: "Plugin feature files must be bound to pytest by tests/test_plugin_scenarios.py."
 
   - id: require-myst-prototype
     kind: file_exists
