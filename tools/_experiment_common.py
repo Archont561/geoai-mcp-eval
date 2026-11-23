@@ -35,7 +35,7 @@ def resolve_run_id(run_id: str) -> str:
 def experiment_env(ctx: ToolContext) -> dict[str, str]:
     src_roots = [
         ctx.repo_root / "experiment" / "src",
-        ctx.repo_root / "experiment-qgis-plugin" / "src",
+        ctx.repo_root / "experiment-qgis-plugin",
     ]
     return {"PYTHONPATH": os.pathsep.join(str(p) for p in src_roots)}
 

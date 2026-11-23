@@ -35,6 +35,7 @@ oracle:
   assertions:
     - id: natural-breaks-assignments
       type: jenks_classification
+      predicate: natural_breaks
       fixture: fixtures/cartography/countries.geojson
       output: result.json
       id_field: ISO_A3

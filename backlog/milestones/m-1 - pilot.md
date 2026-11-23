@@ -1,5 +1,5 @@
 ---
-id: m-0
+id: m-1
 title: "Pilot"
 ---
 
@@ -13,3 +13,5 @@ Exit criteria:
 - The task-suite validator passes.
 - Oracle determinism produces three identical verdicts per fixed artefact.
 - Human reference H is executed and oracle-verified.
+- The 3x2x r=2 pilot runs produce scored cells with zero silently dropped runs.
+- The flat binary predicate matrix builds from the pilot results.

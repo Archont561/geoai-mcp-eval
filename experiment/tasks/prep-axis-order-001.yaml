@@ -35,10 +35,12 @@ oracle:
   assertions:
     - id: single-output-feature
       type: geojson_feature_count
+      predicate: feature_count
       output: result.geojson
       expected: 1
     - id: representative-point-axis-order
       type: representative_point_matches
+      predicate: point_axis_order
       fixture: fixtures/prepare/poland.geojson
       output: result.geojson
       id_field: ISO_A3

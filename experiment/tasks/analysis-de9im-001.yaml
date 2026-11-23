@@ -34,6 +34,7 @@ oracle:
   assertions:
     - id: shared-boundary-relation
       type: de9im_relation
+      predicate: touches
       fixture: fixtures/analysis/poland-czechia.geojson
       output: result.json
       id_field: ISO_A3

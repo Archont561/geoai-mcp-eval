@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import typer
@@ -13,7 +12,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 from rich.text import Text
 
-from experiment import gis_ops, mcp_client, prototype
+from experiment import backends, gis_ops, mcp_client, prototype
 from experiment.harness import (
     ARM_PREFIX,
     DRIVERS,
@@ -32,9 +31,18 @@ DRIVER_OPTION = typer.Option(
     "scripted", "--driver", help="scripted (deterministic canned plan) | ollama (real model)"
 )
 MODEL_OPTION = typer.Option(
-    "qwen2.5-coder:0.5b", "--model", help="Ollama model tag (prototype only; not the study pin)"
+    None, "--model", help="override the profile's model (prototype only; not the study pin)"
 )
-HOST_OPTION = typer.Option(os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434"), "--host")
+HOST_OPTION = typer.Option(
+    None,
+    "--host",
+    help="override the profile's base_url (local default: $OLLAMA_HOST or http://127.0.0.1:11434)",
+)
+BACKEND_OPTION = typer.Option(
+    "local",
+    "--backend",
+    help="profile from experiment/backends.toml (local, remote-ollama, free-open, …)",
+)
 ARMS_OPTION = typer.Option("both", "--arm", help="both | A | B")
 TASK_OPTION = typer.Option("all", "--task", help="all | comma-separated task ids")
 OUTPUT_OPTION = typer.Option(None, "--output-dir", help="defaults to results/prototype-<utc stamp>")
@@ -111,11 +119,24 @@ def mcp_selftest() -> None:
     console.print(table)
 
 
-def _parse_run_spec(driver: str, model: str, host: str, arm: str, task: str) -> RunSpec:
+def _parse_run_spec(
+    driver: str, model: str | None, host: str | None, arm: str, task: str, backend: str
+) -> RunSpec:
     if driver not in DRIVERS:
         raise typer.BadParameter(f"--driver must be one of {', '.join(DRIVERS)}")
+    try:
+        profile = backends.resolve_profile(backend, host=host, model=model)
+        if driver == "ollama":
+            backends.require_api_key(profile)
+    except backends.BackendError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     return RunSpec(
-        driver=driver, model=model, host=host, arms=_parse_arms(arm), task_ids=_parse_tasks(task)
+        driver=driver,
+        model=profile.model,
+        host=str(profile.base_url),
+        arms=_parse_arms(arm),
+        task_ids=_parse_tasks(task),
+        profile=profile,
     )
 
 
@@ -140,15 +161,16 @@ def _run_banner(spec: RunSpec, out: Path) -> Panel:
 @app.command()
 def run(  # noqa: CC102
     driver: str = DRIVER_OPTION,
-    model: str = MODEL_OPTION,
-    host: str = HOST_OPTION,
+    model: str | None = MODEL_OPTION,
+    host: str | None = HOST_OPTION,
     arm: str = ARMS_OPTION,
     task: str = TASK_OPTION,
     output_dir: Path | None = OUTPUT_OPTION,
     root: Path = ROOT_OPTION,
+    backend: str = BACKEND_OPTION,
 ) -> None:
     """Run the 3 pilot tasks in arms A and/or B, then score with the oracle."""
-    spec = _parse_run_spec(driver, model, host, arm, task)
+    spec = _parse_run_spec(driver, model, host, arm, task, backend)
     out = resolve_output_dir(output_dir)
     console.print(_run_banner(spec, out))
     with Progress(

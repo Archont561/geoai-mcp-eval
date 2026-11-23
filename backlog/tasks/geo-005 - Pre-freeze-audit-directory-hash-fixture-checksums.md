@@ -5,7 +5,7 @@ status: To Do
 assignee: []
 created_date: '2026-11-16T00:00:00Z'
 labels: []
-milestone: m-1
+milestone: m-2
 dependencies:
   - GEO-001
   - GEO-002
