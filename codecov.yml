@@ -27,3 +27,4 @@ flags:
 ignore:
   - "experiment/tests/**"
   - "experiment/features/**"
+  - "experiment-qgis-plugin/features/**"

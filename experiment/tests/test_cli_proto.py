@@ -1,4 +1,8 @@
-"""CLI-level tests for `experiment proto ...` and `experiment qgis ...`."""
+"""Unit-level tests for the `experiment qgis` sub-application.
+
+The `proto` commands (ops, mcp-selftest, run, score, show) are specified in
+``features/prototype-runs.feature`` and driven through the whole application.
+"""
 
 from __future__ import annotations
 
@@ -8,93 +12,11 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from experiment.cli import proto, qgis
+from experiment.cli import qgis
 
 RUN_CMD = "run"
 
 runner = CliRunner()
-
-
-def test_ops_lists_14_tools() -> None:
-    result = runner.invoke(proto.app, ["ops"])
-    assert result.exit_code == 0
-    assert "relate_de9im" in result.output
-    assert "14 ops" in result.output
-
-
-def test_mcp_selftest() -> None:
-    result = runner.invoke(proto.app, ["mcp-selftest"])
-    assert result.exit_code == 0
-    assert "relate_de9im POL×CZE" in result.output
-    assert "touches" in result.output
-
-
-def test_run_scripted_single_cell(tmp_path: Path) -> None:
-    result = runner.invoke(
-        proto.app,
-        [
-            RUN_CMD,
-            "--driver",
-            "scripted",
-            "--arm",
-            "B",
-            "--task",
-            "analysis-de9im-001",
-            "--output-dir",
-            str(tmp_path / "out"),
-        ],
-    )
-    assert result.exit_code == 0
-    assert "1/1 cells oracle-passed" in result.output
-    assert (tmp_path / "out" / "summary.json").is_file()
-
-
-def test_run_bad_driver(tmp_path: Path) -> None:
-    result = runner.invoke(proto.app, [RUN_CMD, "--driver", "bogus", "--output-dir", str(tmp_path)])
-    assert result.exit_code != 0
-
-
-def test_run_bad_arm(tmp_path: Path) -> None:
-    result = runner.invoke(proto.app, [RUN_CMD, "--arm", "Q", "--output-dir", str(tmp_path)])
-    assert result.exit_code != 0
-
-
-def test_score_empty_dir_fails(tmp_path: Path) -> None:
-    result = runner.invoke(proto.app, ["score", str(tmp_path)])
-    assert result.exit_code == 1
-    assert "no cells" in result.output
-
-
-def test_score_and_show_roundtrip(tmp_path: Path) -> None:
-    out = tmp_path / "out"
-    assert (
-        runner.invoke(
-            proto.app,
-            [
-                RUN_CMD,
-                "--driver",
-                "scripted",
-                "--arm",
-                "B",
-                "--task",
-                "analysis-de9im-001",
-                "--output-dir",
-                str(out),
-            ],
-        ).exit_code
-        == 0
-    )
-    rescored = runner.invoke(proto.app, ["score", str(out)])
-    assert rescored.exit_code == 0
-    assert "1/1 cells oracle-passed" in rescored.output
-    shown = runner.invoke(proto.app, ["show", str(out)])
-    assert shown.exit_code == 0
-    assert "Oracle scores" in shown.output
-
-
-def test_show_missing_summary(tmp_path: Path) -> None:
-    result = runner.invoke(proto.app, ["show", str(tmp_path)])
-    assert result.exit_code == 1
 
 
 def test_qgis_check_exits_3_without_pyqgis() -> None:

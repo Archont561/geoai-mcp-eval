@@ -24,6 +24,19 @@ known-first-party = ["experiment", "experiment_plugin"]
 pythonpath = ["experiment/src", "experiment-qgis-plugin"]
 testpaths = ["experiment/tests", "experiment-qgis-plugin/tests"]
 addopts = "-q"
+# Gherkin tags used by the feature files, declared so pytest-bdd's scenario
+# markers are known rather than reported as typos.
+markers = [
+  "cli: scenarios driving the whole Typer application",
+  "plugin: scenarios driving the whole QGIS plugin",
+  "action-surface: the plugin's public action surface",
+  "human-baseline: session recording and the reference record",
+  "session-panel: the timer and logs panel",
+  "host-observation: QGIS project and canvas hooks",
+  "pilot: the pilot task suite and the determinism gate",
+  "analysis: analysis-ready data preparation",
+  "proto: prototype runs, scoring, and the MCP self-test",
+]
 
 [tool.coverage.run]
 source = ["experiment/src/experiment"]

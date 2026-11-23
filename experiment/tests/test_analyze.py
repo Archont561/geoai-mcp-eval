@@ -1,4 +1,9 @@
-"""Tests for analysis data preparation (flat predicate matrix)."""
+"""Unit tests for analysis data preparation.
+
+The predicate matrix itself is specified in ``features/analysis.feature`` and
+driven through the CLI. What remains here are cases below that behaviour: the
+predicate mapping's shape and a helper that raises rather than guessing.
+"""
 
 from __future__ import annotations
 
@@ -7,12 +12,8 @@ from pathlib import Path
 
 import pytest
 import yaml
-from typer.testing import CliRunner
 
 from experiment import analyze
-from experiment.cli import _loader
-
-runner = CliRunner()
 
 TASKS = {
     "analysis-de9im-001.yaml": {
@@ -77,42 +78,6 @@ def _check(assertion_id: str, passed: bool) -> dict:
     return {"assertion_id": assertion_id, "passed": passed, "message": "m"}
 
 
-def test_flatten_rows_binary_matrix(tmp_path: Path) -> None:
-    tasks = _write_tasks(tmp_path)
-    results = tmp_path / "results"
-    _write_cell(results, "analysis-de9im-001", "B", [_check("shared-boundary-relation", True)])
-    _write_cell(
-        results,
-        "prep-axis-order-001",
-        "B",
-        [_check("single-output-feature", True), _check("representative-point-axis-order", False)],
-        run_id="r2",
-    )
-    frame = analyze.flatten(results, tasks)
-    assert list(frame.columns) == [
-        "run_id",
-        "task",
-        "arm",
-        "driver",
-        "model",
-        "feature_count",
-        "point_axis_order",
-        "touches",
-    ]
-    by_task = frame.set_index("task")
-    assert by_task.loc["analysis-de9im-001", "touches"] == 1
-    assert by_task.loc["prep-axis-order-001", "feature_count"] == 1
-    assert by_task.loc["prep-axis-order-001", "point_axis_order"] == 0
-
-
-def test_missing_check_scores_zero(tmp_path: Path) -> None:
-    tasks = _write_tasks(tmp_path)
-    results = tmp_path / "results"
-    _write_cell(results, "prep-axis-order-001", "B", [_check("single-output-feature", True)])
-    row = analyze.flatten_rows(results, tasks)[0]
-    assert row["point_axis_order"] == 0
-
-
 def test_unknown_assertion_fails_loudly(tmp_path: Path) -> None:
     tasks = _write_tasks(tmp_path)
     results = tmp_path / "results"
@@ -128,16 +93,6 @@ def test_load_predicates_roundtrip(tmp_path: Path) -> None:
         "single-output-feature": "feature_count",
         "representative-point-axis-order": "point_axis_order",
     }
-
-
-def test_flatten_cli_prints_table(tmp_path: Path) -> None:
-    tasks = _write_tasks(tmp_path)
-    results = tmp_path / "results"
-    _write_cell(results, "analysis-de9im-001", "B", [_check("shared-boundary-relation", True)])
-    out = runner.invoke(_loader.app, ["analyze", "flatten", str(results), "--tasks", str(tasks)])
-    assert out.exit_code == 0
-    assert "touches" in out.output
-    assert "analysis-de9im-001" in out.output
 
 
 def test_real_suite_predicates_unique_and_present() -> None:
