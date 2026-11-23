@@ -15,5 +15,5 @@ and the real session panel.
 | `host-observation.feature` | project and map-canvas hook wiring |
 
 `tests/plugin_harness.py` holds the QGIS and Qt doubles and the fixtures; that
-module is not named `conftest.py` because pytest would then collide it with the
+module isn't named `conftest.py` because pytest would then collide it with the
 experiment suite's `conftest.py` in a whole-repository run.

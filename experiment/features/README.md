@@ -14,5 +14,5 @@ than internal helpers.
 | `prototype-runs.feature` | prototype runs, oracle scoring, the MCP self-test |
 
 Adding a scenario needs no Python: write the Gherkin, then add any new step to
-`experiment/tests/test_cli_scenarios.py`. Keep scenarios business-facing —
+`experiment/tests/test_cli_scenarios.py`. Keep scenarios business-facing:
 name the outcome the researcher sees, not the function that produces it.
