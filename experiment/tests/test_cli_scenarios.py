@@ -175,6 +175,144 @@ def output_says_unknown_task(result: dict) -> None:
     assert "unknown task ID" in reported
 
 
+# --- the workflow from suite check to predicate matrix -----------------------
+
+
+@given("a task suite copied without its cartography task", target_fixture="suite")
+def a_suite_without_cartography(suite: dict) -> dict:
+    (suite["root"] / "cartography-jenks-001.yaml").unlink()
+    return suite
+
+
+@given("a task suite whose axis-order trap is no longer declared", target_fixture="suite")
+def a_suite_without_axis_trap(suite: dict) -> dict:
+    task_path = suite["root"] / "prep-axis-order-001.yaml"
+    task_path.write_text(
+        task_path.read_text(encoding="utf-8").replace(
+            "  - crs-axis-order\n", "  - topology-de9im\n"
+        ),
+        encoding="utf-8",
+    )
+    return suite
+
+
+@given("a task suite copied without its prepare fixture", target_fixture="suite")
+def a_suite_without_fixture(suite: dict) -> dict:
+    (suite["root"] / "fixtures/prepare/poland.geojson").unlink()
+    return suite
+
+
+@when(
+    "I run a scripted prototype over the whole suite in both arms",
+    target_fixture="result",
+)
+def run_whole_suite_both_arms(cli: CliRunner, output: Path) -> dict:
+    return run_cli(cli, f"proto run --driver scripted --arm both --output-dir {output}")
+
+
+@when(
+    parsers.parse('I run a scripted prototype for the tasks "{task_ids}" in both arms'),
+    target_fixture="result",
+)
+def run_task_subset_both_arms(cli: CliRunner, output: Path, task_ids: str) -> dict:
+    return run_cli(
+        cli,
+        f"proto run --driver scripted --arm both --task {task_ids} --output-dir {output}",
+    )
+
+
+@when(
+    parsers.parse(
+        'I check determinism on the cell that run produced for task "{task_id}" in arm "{arm}"'
+    ),
+    target_fixture="result",
+)
+def check_determinism_on_cell(
+    cli: CliRunner, output: Path, suite: dict, task_id: str, arm: str
+) -> dict:
+    cell = output / task_id / f"arm-{arm}"
+    result = run_cli(
+        cli, f"pilot determinism {task_id} --artifacts-dir {cell} --root {suite['path']}"
+    )
+    try:
+        payload = json.loads(result["stdout"])
+    except json.JSONDecodeError:
+        payload = {}
+    return {**result, "report": payload}
+
+
+@when("I flatten that run against the shipped suite", target_fixture="result")
+def flatten_that_run(cli: CliRunner, output: Path, suite: dict) -> dict:
+    result = run_cli(cli, f"analyze flatten {output} --tasks {suite['path']}")
+    result["rows"] = _table_rows(result["output"])
+    return result
+
+
+@then("the run reports that all six cells passed the oracle")
+def run_reports_six_of_six(result: dict) -> None:
+    # 3 pilot tasks x 2 arms: a pass here means the full matrix is scoreable.
+    assert result["exit_code"] == 0, result["output"]
+    assert "6/6 cells oracle-passed" in result["output"], result["output"]
+
+
+@then("the run reports that all four cells passed the oracle")
+def run_reports_four_of_four(result: dict) -> None:
+    # 2 selected tasks x 2 arms: narrowing the run must not skip a cell.
+    assert result["exit_code"] == 0, result["output"]
+    assert "4/4 cells oracle-passed" in result["output"], result["output"]
+
+
+@then("every pilot task appears in both arms")
+def every_task_in_both_arms(output: Path) -> None:
+    summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+    seen = {(cell["task"], cell["arm"]) for cell in summary["cells"]}
+    tasks = {task for task, _arm in seen}
+    assert len(tasks) == 3, sorted(tasks)
+    assert seen == {(task, arm) for task in tasks for arm in ("A", "B")}
+
+
+@then(parsers.parse('the run holds no cell for task "{task_id}"'))
+def run_holds_no_cell(output: Path, task_id: str) -> None:
+    summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+    assert {cell["task"] for cell in summary["cells"]} == {
+        "prep-axis-order-001",
+        "cartography-jenks-001",
+    }, f"{task_id} must not be scored"
+
+
+@then("every cell keeps a transcript and a score file")
+def every_cell_keeps_artifacts(output: Path) -> None:
+    summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+    for cell in summary["cells"]:
+        cell_dir = output / cell["task"] / f"arm-{cell['arm']}"
+        assert (cell_dir / "transcript.jsonl").is_file(), cell_dir
+        assert (cell_dir / "score.json").is_file(), cell_dir
+
+
+@then("the table has one row per cell of that run")
+def table_has_row_per_cell(result: dict, output: Path) -> None:
+    summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+    assert result["exit_code"] == 0, result["output"]
+    assert len(result["rows"]) == len(summary["cells"])
+
+
+@then("the output names the task family that is missing")
+def output_names_missing_family(result: dict) -> None:
+    assert "missing task family C" in result["output"]
+
+
+@then("the output names the pilot trap that is uncovered")
+def output_names_uncovered_trap(result: dict) -> None:
+    assert "required pilot trap is not covered" in result["output"]
+    assert "crs-axis-order" in result["output"]
+
+
+@then("the output names the fixture that cannot be found")
+def output_names_missing_fixture(result: dict) -> None:
+    assert "fixture does not exist" in result["output"]
+    assert "fixtures/prepare/poland.geojson" in result["output"]
+
+
 # --- analysis ----------------------------------------------------------------
 
 
@@ -339,5 +477,6 @@ for _feature in (
     "pilot-suite.feature",
     "analysis.feature",
     "prototype-runs.feature",
+    "workflow.feature",
 ):
     scenarios(str(FEATURE_DIR / _feature))

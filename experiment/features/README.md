@@ -12,6 +12,7 @@ than internal helpers.
 | `pilot-suite.feature` | task-suite validation and the oracle determinism gate |
 | `analysis.feature` | the flat binary predicate matrix |
 | `prototype-runs.feature` | prototype runs, oracle scoring, the MCP self-test |
+| `workflow.feature` | the researcher's end-to-end pass: suite check → both-arm run → determinism gate → predicate matrix |
 
 Adding a scenario needs no Python: write the Gherkin, then add any new step to
 `experiment/tests/test_cli_scenarios.py`. Keep scenarios business-facing:

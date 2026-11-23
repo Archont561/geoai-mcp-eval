@@ -36,6 +36,7 @@ markers = [
   "pilot: the pilot task suite and the determinism gate",
   "analysis: analysis-ready data preparation",
   "proto: prototype runs, scoring, and the MCP self-test",
+  "workflow: the end-to-end pass from suite check to predicate matrix",
 ]
 
 [tool.coverage.run]
