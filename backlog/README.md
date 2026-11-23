@@ -33,6 +33,7 @@ Project-local Markdown planning managed by [Backlog.md](https://github.com/MrLes
 | `provenance.md` | `docs/provenance.md` | Provenance: data sources, licensing, contamination tags |
 | `literature-review.md` | `docs/review/literature-review.md` | Literature review: GIS canon, autonomous GIS, protocols, tool-use benchmarks |
 | `gis-se-analysis.md` | `docs/analyses/gis-se-analysis.md` | GIS StackExchange demand analysis: 29 tag counts, candidate operations |
+| `experiment-analysis.md` | `docs/analyses/experiment-analysis.md` | Experiment analysis raw notebook: flat predicate matrix, WSZ/OQS, pass^k, Jenks ground truth; illustration rows until pinned runs execute |
 
 ## Decisions (`backlog/decisions/`)
 

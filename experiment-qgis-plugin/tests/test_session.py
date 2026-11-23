@@ -122,3 +122,51 @@ def test_same_second_restarts_get_distinct_session_dirs(
     assert second.output_dir.name == "session-20261122T100000Z-2"
     assert (first.output_dir / "events.jsonl").read_text(encoding=UTF8) != ""
     assert (second.output_dir / "events.jsonl").exists()
+
+
+def test_render_log_renders_events_and_header(tmp_path: Path) -> None:
+    suite = copy_suite(tmp_path)
+    recorder = session.start_session("prep-axis-order-001", suite, participant_code="P1")
+    recorder.log("note", tool="note", message="hello world")
+    text = session.render_log(recorder)
+    lines = text.splitlines()
+    assert lines[0].startswith("human-baseline session log")
+    assert "prep-axis-order-001" in lines[0]
+    assert any("status: in_progress" in line for line in lines)
+    assert any("session_start" in line and "task_id=prep-axis-order-001" in line for line in lines)
+    note_line = next(line for line in lines if "note" in line and "hello world" in line)
+    assert "message=hello world" in note_line
+
+
+def test_render_log_passes_through_malformed_lines(tmp_path: Path) -> None:
+    suite = copy_suite(tmp_path)
+    recorder = session.start_session("prep-axis-order-001", suite)
+    with recorder.tracker.events_path.open("a", encoding="utf-8") as handle:
+        handle.write("this is not json\n")
+    text = session.render_log(recorder)
+    assert "this is not json" in text
+
+
+def test_render_log_reports_missing_event_log(tmp_path: Path) -> None:
+    suite = copy_suite(tmp_path)
+    recorder = session.start_session("prep-axis-order-001", suite)
+    recorder.tracker.events_path.unlink()
+    text = session.render_log(recorder)
+    assert "(event log unavailable:" in text
+
+
+def test_abandon_session_marks_evidence_without_record(tmp_path: Path) -> None:
+    suite = copy_suite(tmp_path)
+    recorder = session.start_session("prep-axis-order-001", suite, participant_code="P1")
+    recorder.log("note", tool="note", message="mid-take")
+    marker = session.abandon_session(recorder, reason="restart requested")
+    assert recorder.status == "abandoned"
+    payload = json.loads(marker.read_text(encoding="utf-8"))
+    assert payload["record_written"] is False
+    assert payload["reason"] == "restart requested"
+    assert payload["task_id"] == "prep-axis-order-001"
+    assert payload["tools_used"] == ["note"]
+    assert not (recorder.output_dir / "human-reference-record.json").exists()
+    events = recorder.tracker.events_path.read_text(encoding="utf-8")
+    assert "session_abandoned" in events
+    assert "restart requested" in events

@@ -255,6 +255,70 @@ class HumanBaselineSession:
         return record_path
 
 
+def render_log(session: HumanBaselineSession) -> str:
+    """Human-readable rendering of a session's event log, for display and export.
+
+    Rendered line: ``<ts>  <event>  key=value key=value`` with keys sorted; no
+    values invented. A missing or unreadable events file yields a header that
+    says so instead of an exception.
+    """
+    lines = [
+        f"human-baseline session log — task {session.task_id}",
+        f"session dir: {session.output_dir}",
+        f"started: {session.started_at.isoformat()}   status: {session.status}",
+        "",
+    ]
+    try:
+        raw_lines = session.tracker.events_path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        lines.append(f"(event log unavailable: {exc})")
+        return "\n".join(lines) + "\n"
+    for raw in raw_lines:
+        try:
+            record = json.loads(raw)
+        except json.JSONDecodeError:
+            lines.append(raw)
+            continue
+        ts = record.pop("ts", "?")
+        event = record.pop("event", "?")
+        fields = "  ".join(f"{k}={v}" for k, v in sorted(record.items()) if v is not None)
+        lines.append(f"{ts}  {event}  {fields}".rstrip())
+    return "\n".join(lines) + "\n"
+
+
+def abandon_session(session: HumanBaselineSession, reason: str = "user requested") -> Path:
+    """Abandon a session without writing human-reference-record.json.
+
+    The event log stays on disk and gains a ``session_abandoned`` marker; a
+    small ``session-abandoned.json`` is written next to it so the directory is
+    recognisably an abandoned take, not an unfinished recording. The record is
+    NOT written — whatever was measured is not promoted to reference evidence.
+    Returns the marker path.
+    """
+    session.tracker.record("session_abandoned", reason=reason)
+    abandoned_at = utc_now()
+    marker = session.output_dir / "session-abandoned.json"
+    marker.write_text(
+        json.dumps(
+            {
+                "task_id": session.task_id,
+                "abandoned_at_utc": abandoned_at.isoformat(),
+                "reason": reason,
+                "started_at_utc": session.started_at.isoformat(),
+                "event_count": session.tracker.event_count,
+                "tools_used": list(session.tools_used),
+                "record_written": False,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    session.status = "abandoned"
+    return marker
+
+
 def start_session(
     task_id: str,
     base_dir: str | Path,
