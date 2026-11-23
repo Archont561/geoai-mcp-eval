@@ -37,8 +37,8 @@ Before acting on each user request, compare its intent and context with the `nam
 - Reach behaviour through the front door. Steps drive the whole Typer app
   (`experiment.cli._loader.app`) or the whole plugin (`runtime.actions`, the real
   session panel), never an internal helper.
-- Keep unit tests for what a user cannot observe: pure helpers, edge cases,
-  defensive branches. Do not duplicate a scenario's assertion in a plain test.
+- Keep unit tests for what a user can't observe: pure helpers, edge cases,
+  defensive branches. Don't duplicate a scenario's assertion in a plain test.
 - Adding a scenario needs no new binding: write the Gherkin and add any new step
   to the suite's scenario module. Follow `.agents/skills/bdd-scenarios` for style.
 
