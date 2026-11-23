@@ -226,3 +226,35 @@ def test_extract_json_block() -> None:
     assert drivers._extract_json_block('```json\n{"a": 1}\n```') == {"a": 1}
     assert drivers._extract_json_block('junk {"b": 2}') == {"b": 2}
     assert drivers._extract_json_block("nothing") is None
+
+
+def test_ollama_arm_b_ignores_json_fence(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A ```json answer must not be executed as Python (regression: fence-tag leak)."""
+    answer = '```json\n{"relation": "touches", "de9im": "FF2F11212"}\n```'
+    _install_fake_chat(monkeypatch, lambda: _content_response(answer))
+    cell = _make_cell(tmp_path)
+    req = _cell_request("analysis-de9im-001", "B", "ollama", cell)
+    result = prototype.run_cell(req)
+    assert result["oracle_passed"] is False
+    assert not (cell / "result.json").exists()
+    transcript = (cell / "transcript.jsonl").read_text(encoding="utf-8")
+    assert "no python block found" in transcript
+    assert "<string>" not in transcript  # code was never run
+
+
+def test_ollama_arm_b_accepts_py_fence(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    code = "import json\nprint(json.dumps({'relation': 'touches', 'de9im': 'FF2F11212'}))\n"
+    _install_fake_chat(monkeypatch, lambda: _content_response(f"```py\n{code}```"))
+    cell = _make_cell(tmp_path)
+    req = _cell_request("analysis-de9im-001", "B", "ollama", cell)
+    assert prototype.run_cell(req)["oracle_passed"] is True
+
+
+def test_ollama_arm_b_accepts_untagged_fence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    code = "import json\nprint(json.dumps({'relation': 'touches', 'de9im': 'FF2F11212'}))\n"
+    _install_fake_chat(monkeypatch, lambda: _content_response(f"```\n{code}```"))
+    cell = _make_cell(tmp_path)
+    req = _cell_request("analysis-de9im-001", "B", "ollama", cell)
+    assert prototype.run_cell(req)["oracle_passed"] is True

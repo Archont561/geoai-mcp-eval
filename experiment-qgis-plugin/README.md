@@ -106,11 +106,10 @@ events per session (extent events can flood).
 - **Action results are human-readable strings**, not typed success/error values.
   `start_session` reports failure as text mixed with the success summary — fine
   for a desktop action label, unusable as a machine-readable status; do not parse it.
-- **`qgis-sdk check` reports PROJECT001** for this project (the package lives
-  under `src/` but `qgis-sdk` expects the plugin package at the project root),
-  and `qgis-sdk build` rejects PEP 621 dynamic versions (META002). The version
-  literal in `pyproject.toml` is therefore pinned equal to
-  `experiment_plugin.__version__` by a test; keep both in sync when bumping.
+- **Version sync is test-pinned, not shared.** `qgis-sdk build` rejects PEP 621
+  dynamic versions (META002), so `pyproject.toml` carries a literal version that
+  must equal `experiment_plugin.__version__`; `tests/test_plugin.py` fails the
+  suite if they drift. Bump both together (and `qgis-sdk` check grounds expectations).
 
 ## Tests
 

@@ -10,13 +10,13 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import urllib.request
 from typing import Any
 
+import requests
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
-from experiment import mcp_client
+from experiment import backends, mcp_client
 from experiment.harness import (
     _K_CONTENT,
     _K_ID,
@@ -39,28 +39,43 @@ _TRANSCRIPT_USER_CAP = 4000
 
 
 def _chat_completions(
-    host: str,
-    model: str,
+    session: requests.Session,
+    profile: backends.BackendProfile,
     messages: list[dict[str, Any]],
-    tools: list[dict[str, Any]] | None,
-    timeout_s: int = 240,
+    tools: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     body: dict[str, Any] = {
-        "model": model,
+        "model": profile.model,
         "messages": messages,
         "stream": False,
-        "options": {"temperature": 0},
+        "temperature": profile.temperature,
+        "max_tokens": profile.max_tokens,
     }
     if tools:
         body["tools"] = tools
-    request = urllib.request.Request(
-        f"{host.rstrip('/')}/v1/chat/completions",
-        data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=timeout_s) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        resp = session.post(profile.chat_url, json=body, timeout=profile.timeout)
+    except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError) as exc:
+        detail = f"cannot reach {profile.base_url}: {exc}"
+        raise backends.BackendError("connection", detail) from exc
+    except requests.exceptions.ReadTimeout as exc:
+        raise backends.BackendError(
+            "timeout", f"no response within {profile.read_timeout_s}s from {profile.base_url}"
+        ) from exc
+    except requests.exceptions.RequestException as exc:
+        raise backends.BackendError("transport", f"{exc.__class__.__name__}: {exc}") from exc
+    if resp.status_code == 429:
+        retry_after = resp.headers.get("Retry-After", "unspecified")
+        raise backends.BackendError(
+            "rate-limit", f"HTTP 429 after {profile.retries} retries (Retry-After: {retry_after})"
+        )
+    if resp.status_code >= 400:
+        raise backends.BackendError(f"http-{resp.status_code}", resp.text[:300])
+    try:
+        return resp.json()
+    except ValueError as exc:
+        detail = f"response is not JSON: {resp.text[:300]}"
+        raise backends.BackendError("invalid-response", detail) from exc
 
 
 def _openai_tool_from_mcp(tool: Any) -> dict[str, Any]:
@@ -108,9 +123,13 @@ def _initial_messages(req: CellRequest, system: str, user: str) -> list[dict[str
 
 
 def _tool_reply(
-    req: CellRequest, messages: list[dict[str, Any]], tool_specs: list[dict[str, Any]]
+    req: CellRequest,
+    messages: list[dict[str, Any]],
+    tool_specs: list[dict[str, Any]],
+    session: requests.Session,
+    profile: backends.BackendProfile,
 ) -> dict[str, Any]:
-    reply = _chat_completions(req.host, req.model, messages, tool_specs)
+    reply = _chat_completions(session, profile, messages, tool_specs)
     message = reply["choices"][0]["message"]
     messages.append(message)
     append_transcript(
@@ -155,7 +174,22 @@ def _deliver_json(req: CellRequest, final: str) -> None:
     )
 
 
+def _profile_and_session(req: CellRequest) -> tuple[backends.BackendProfile, requests.Session]:
+    profile = req.profile or backends.fallback_profile(req.host, req.model)
+    return profile, backends.build_session(profile)
+
+
 def ollama_arm_a(req: CellRequest) -> None:
+    profile, session = _profile_and_session(req)
+    try:
+        return _ollama_arm_a(req, session, profile)
+    finally:
+        session.close()
+
+
+def _ollama_arm_a(
+    req: CellRequest, session: requests.Session, profile: backends.BackendProfile
+) -> None:
     fixture = fixture_fc(req.task_path, req.task)
     tool_specs, _ = asyncio.run(_mcp_tool_specs())
     system = (
@@ -168,7 +202,7 @@ def ollama_arm_a(req: CellRequest) -> None:
     user = f"{req.task['prompt']}\n\nFixture file ({fixture_file}):\n{json.dumps(fixture)}"
     messages = _initial_messages(req, system, user)
     for _step in range(_MAX_TOOL_STEPS):
-        message = _tool_reply(req, messages, tool_specs)
+        message = _tool_reply(req, messages, tool_specs, session, profile)
         tool_calls = message.get("tool_calls") or []
         if not tool_calls:
             break
@@ -179,12 +213,24 @@ def ollama_arm_a(req: CellRequest) -> None:
 _ARM_B_SYSTEM = (
     "You solve one GIS task by writing a Python script. Use only the standard "
     "library plus geopandas/shapely/pyproj. The fixture is available as "
-    "'input.geojson' in the working directory. Print the deliverable "
-    f"({RESULT_JSON} or {RESULT_GEOJSON}) as a single JSON object to stdout and nothing else."
+    "'input.geojson' in the working directory. Reply with ONLY a single "
+    "```python fenced code block containing the complete script; no prose and "
+    f"no other fences. The script must print the deliverable ({RESULT_JSON} or "
+    f"{RESULT_GEOJSON}) as a single JSON object to stdout and nothing else."
 )
 
 
 def ollama_arm_b(req: CellRequest) -> None:
+    profile, session = _profile_and_session(req)
+    try:
+        return _ollama_arm_b(req, session, profile)
+    finally:
+        session.close()
+
+
+def _ollama_arm_b(
+    req: CellRequest, session: requests.Session, profile: backends.BackendProfile
+) -> None:
     fixture = fixture_fc(req.task_path, req.task)
     (req.cell / "input.geojson").write_bytes(fixture_path(req.task_path, req.task).read_bytes())
     system = _ARM_B_SYSTEM
@@ -192,10 +238,12 @@ def ollama_arm_b(req: CellRequest) -> None:
     head = json.dumps(fixture)[:_TOOL_RESULT_CAP]
     user = f"{req.task['prompt']}\n\nFixture head (input.geojson, {size} bytes):\n{head}"
     messages = _initial_messages(req, system, user)
-    reply = _chat_completions(req.host, req.model, messages, None)
+    reply = _chat_completions(session, profile, messages, None)
     content = reply["choices"][0]["message"].get(_K_CONTENT) or ""
     append_transcript(req.cell, {_K_ROLE: "assistant", _K_CONTENT: content})
-    blocks = re.findall(r"```(?:python)?\s*(.*?)```", content, re.DOTALL)
+    # Only ```/```py/```python fences are code; a bare language tag (e.g. ```json)
+    # must not leak into the captured source and get executed as Python.
+    blocks = re.findall(r"```(?:python|py)?[ \t]*\r?\n(.*?)```", content, re.DOTALL | re.IGNORECASE)
     if not blocks:
         append_transcript(req.cell, {_K_ROLE: "harness", _K_CONTENT: "no python block found"})
         return

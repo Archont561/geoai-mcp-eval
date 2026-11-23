@@ -94,11 +94,11 @@ rules:
     level: error
     message: "experiment/ must have a src/experiment/ package (__init__.py)."
 
-  - id: require-experiment-qgis-plugin-src-package
+  - id: require-experiment-qgis-plugin-package
     kind: file_exists
-    paths: experiment-qgis-plugin/src/experiment_plugin/__init__.py
+    paths: experiment-qgis-plugin/experiment_plugin/__init__.py
     level: error
-    message: "experiment-qgis-plugin/ must have a src/experiment_plugin/ package (__init__.py)."
+    message: "experiment-qgis-plugin/ must have an experiment_plugin/ package at the project root (__init__.py) — the layout qgis-sdk expects."
 
   - id: require-experiment-qgis-plugin-tests
     kind: file_exists

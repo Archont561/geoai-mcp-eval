@@ -5,7 +5,7 @@ status: To Do
 assignee: []
 created_date: '2026-11-16T00:00:00Z'
 labels: []
-milestone: m-2
+milestone: m-3
 dependencies:
   - GEO-005
 ordinal: 6000

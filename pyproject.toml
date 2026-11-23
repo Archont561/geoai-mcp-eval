@@ -21,7 +21,7 @@ select = [
 known-first-party = ["experiment", "experiment_plugin"]
 
 [tool.pytest.ini_options]
-pythonpath = ["experiment/src", "experiment-qgis-plugin/src"]
+pythonpath = ["experiment/src", "experiment-qgis-plugin"]
 testpaths = ["experiment/tests", "experiment-qgis-plugin/tests"]
 addopts = "-q"
 

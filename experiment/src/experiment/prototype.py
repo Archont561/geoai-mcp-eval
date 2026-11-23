@@ -122,6 +122,7 @@ def _run_one_cell(
         model=spec.model,
         host=spec.host,
         run_id=output_root.name,
+        profile=spec.profile,
     )
     return run_cell(req)
 

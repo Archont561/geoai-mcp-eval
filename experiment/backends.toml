@@ -1,0 +1,35 @@
+# Chat-completion backend profiles for the agent runs.
+# Secrets never go here: api_key_env names the environment variable that holds
+# the key. A profile is used with: pixi run experiment proto run --backend <name>
+
+# Local Ollama (default; also the fallback when this file is absent).
+[backends.local]
+base_url = "http://127.0.0.1:11434/v1"
+model = "qwen2.5-coder:0.5b"
+max_tokens = 2048
+temperature = 0.0
+retries = 3
+
+# Remote Ollama reached over an SSH tunnel:
+#   ssh -fN -L 11434:127.0.0.1:11434 myhost
+# Keep the pinned model identical to `local` for comparable measurements.
+[backends.remote-ollama]
+base_url = "http://127.0.0.1:11434/v1"
+model = "qwen2.5-coder:0.5b"
+max_tokens = 2048
+temperature = 0.0
+retries = 3
+read_timeout_s = 600.0
+
+# Free hosted open model (OpenAI-compatible). Export the key, never commit it:
+#   export OPENROUTER_API_KEY=...
+# Expect rate limits (429 after retries fails the cell); endpoint and model
+# digest are recorded in the manifest for provenance.
+[backends.free-open]
+base_url = "https://openrouter.ai/api/v1"
+model = "qwen/qwen-2.5-coder-32b-instruct:free"
+api_key_env = "OPENROUTER_API_KEY"
+max_tokens = 2048
+temperature = 0.0
+retries = 2
+read_timeout_s = 120.0

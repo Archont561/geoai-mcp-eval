@@ -37,7 +37,7 @@ experimental = true
 # tags = "vector"
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["."]  # qgis-sdk flat layout: the plugin package lives at the project root
 testpaths = ["tests"]
 # The SDK's pytest plugin: the `qgis` and `desktop` markers, the `qgis_app` and
 # `qgis_iface` fixtures, and the guard `qgis-sdk test` relies on. Plain `pytest`

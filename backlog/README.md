@@ -15,8 +15,9 @@ Project-local Markdown planning managed by [Backlog.md](https://github.com/MrLes
 
 | Milestone | Focus |
 |---|---|
+| `instrument` | Harness completion: backends, usage accounting, cache, remote preflight, analysis contract (GEO-008 to GEO-012) |
 | `pilot` | 3 tasks × {A@N3, B} × r=2 (GEO-001 to GEO-004) |
-| `pre-freeze` | Directory hash, fixture checksums, contamination audit (GEO-005) |
+| `pre-freeze` | Directory hash, fixture checksums, contamination audit (GEO-005, GEO-013) |
 | `v1.0-prereg` | Freeze tag + seed table (GEO-006) |
 | `scaled-study` | N ≥ 80 tasks × r=4 confirmatory runs (GEO-007) |
 

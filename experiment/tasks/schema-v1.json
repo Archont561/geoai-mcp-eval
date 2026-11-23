@@ -81,10 +81,11 @@
           "minItems": 1,
           "items": {
             "type": "object",
-            "required": ["id", "type"],
+            "required": ["id", "predicate", "type"],
             "properties": {
               "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
               "type": { "type": "string", "enum": ["geojson_feature_count", "representative_point_matches", "de9im_relation", "jenks_classification"] },
+              "predicate": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
               "preserve_fields": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
             }
           }

@@ -13,7 +13,10 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from experiment.backends import BackendProfile
 
 TASK_ROOT = Path(__file__).resolve().parents[2] / "tasks"
 RESULTS_ROOT = TASK_ROOT.parent.parent / "results"
@@ -39,13 +42,18 @@ def model_label(driver: str, model: str) -> str:
 
 @dataclass(frozen=True)
 class RunSpec:
-    """What to run: arms, task filter, driver, model, host."""
+    """What to run: arms, task filter, driver, model, host.
+
+    profile is the validated backend profile for the run (from backends.toml);
+    None means "driver should synthesize one from host/model" (tests, ad-hoc runs).
+    """
 
     arms: tuple[str, ...]
     task_ids: tuple[str, ...] | None
     driver: str
     model: str
     host: str
+    profile: BackendProfile | None = None
 
 
 @dataclass(frozen=True)
@@ -60,6 +68,7 @@ class CellRequest:
     model: str
     host: str
     run_id: str
+    profile: BackendProfile | None = None
 
 
 def fixture_path(task_path: Path, task: dict[str, Any]) -> Path:
