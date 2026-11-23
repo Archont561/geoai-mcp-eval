@@ -14,6 +14,7 @@
 - [Interpretation](https://archont561.github.io/geoai-mcp-eval/interpretation/): Interpretation — ToDo (empty until analysis is locked)
 - [Summary](https://archont561.github.io/geoai-mcp-eval/summary/): Summary — ToDo (written last)
 - [GIS.SE analysis (raw marimo notebook)](https://archont561.github.io/geoai-mcp-eval/gis-se-analysis/): raw marimo source behind the SE demand analysis — embedded offline snapshot (retrieval date not independently verified), interactive in the browser
+- [Experiment analysis (raw marimo notebook)](https://archont561.github.io/geoai-mcp-eval/experiment-analysis/): raw marimo source behind the pilot/study analysis — flat predicate matrix, WSZ/OQS, pass^k, Jenks ground truth; no pinned runs yet, matrix rows are labelled illustrations
 - [Provenance & licensing](https://archont561.github.io/geoai-mcp-eval/provenance/): Provenance & licensing — GIS SE demand evidence, CC BY-SA 4.0
 - [SE demand analysis](https://archont561.github.io/geoai-mcp-eval/analysis/): SE demand analysis — frequency, complexity ranking, catalogue gaps; snapshot retrieval date not independently verified
 - [Reproducibility](https://archont561.github.io/geoai-mcp-eval/reproducibility/): Reproducibility — environment, pins, freeze contract

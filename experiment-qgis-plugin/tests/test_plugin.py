@@ -26,7 +26,14 @@ def test_the_plugin_starts_and_unloads_without_a_host() -> None:
 def test_declared_actions_are_the_plugins_public_surface() -> None:
     description = describe(app)
 
-    expected_ids = ["end_session", "hello", "log_note", "start_session"]
+    expected_ids = [
+        "abandon_session",
+        "end_session",
+        "hello",
+        "log_note",
+        "show_timer",
+        "start_session",
+    ]
     assert [action.id for action in description.actions] == expected_ids
 
 

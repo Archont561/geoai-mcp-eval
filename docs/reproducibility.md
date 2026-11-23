@@ -29,10 +29,12 @@ pixi install --locked --environment docs
 pixi run --environment docs -- npm exec --yes --package=mystmd@1.13.0 -- myst build --html --strict --ci
 ```
 
-- The `docs/analyses/` page is a raw marimo notebook rendered at build time through
-  the `jupyter-book-marimo` executable plugin (registered in `docs/myst.yml`). It uses
-  an embedded public-source snapshot, not a committed API cache; the snapshot's retrieval
-  date and values are not independently verified, so validate them before relying on the analysis.
+- The `docs/analyses/` pages are raw marimo notebooks rendered at build time through
+  the `jupyter-book-marimo` executable plugin (registered in `docs/myst.yml`). The GIS.SE page
+  uses an embedded public-source snapshot, not a committed API cache; its retrieval date and
+  values are not independently verified, so validate them before relying on the analysis.
+  The experiment-analysis page embeds clearly labelled illustration rows until pinned runs
+  execute; it holds no pilot data yet.
 
 ## Pins and determinism
 

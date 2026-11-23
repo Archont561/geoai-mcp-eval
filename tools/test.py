@@ -23,6 +23,7 @@ def test(ctx: ToolContext) -> None:
             "-m",
             "pytest",
             "--cov=experiment",
+            "--cov=experiment_plugin",  # flat layout; PYTHONPATH above already resolves it
             "--cov-report=term-missing",
             "--cov-report=xml:coverage.xml",
             "--cov-fail-under=90",

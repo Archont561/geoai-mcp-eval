@@ -73,8 +73,39 @@ recorded anywhere else and `human_baseline.status` in the task YAML stays
 | --- | --- |
 | `start_session` | `task_id` (default `prep-axis-order-001`), `base_dir` (default `$EXPERIMENT_TASK_DIR` or `experiment/tasks`), `participant_code` (optional). Validates the task id against the suite, hashes the task YAML and fixture, creates the gitignored per-session output dir `experiment/tasks/baselines/<task_id>/session-<started_at_utc>/`, starts the UTC timer, and connects best-effort host hooks (QGIS project layer add/remove, CRS change, project read; canvas extent/scale). The record's `network_disabled` stays `null`: the host cannot verify network isolation — disable the network yourself and record that in a `log_note`. |
 | `log_note` | `message` — records a note/deviation/interruption in the event log. |
+| `show_timer` | opens the non-modal **session panel** ("Human-baseline session", menu Plugins > Experiment Plugin): a tabbed window — see below. Opens idle when no session is active (press Start inside it); in a headless host without a GUI capability it answers with a message instead of raising. |
+| `abandon_session` | abandons the active session WITHOUT writing `human-reference-record.json`. The event log stays on disk and gains a `session_abandoned` marker event plus a `session-abandoned.json` next to it. Evidence is kept but never promoted to reference data; task YAML `human_baseline.status` is untouched. |
 | `end_session` | stops the timer, hashes every output file, writes `human-reference-record.json` and closes `events.jsonl` — both in this session's own `session-<started_at_utc>/` directory (restarts never share an evidence file). |
 | `hello` | original demo action, harmless. |
+
+### Session panel (Timer / Logs)
+
+`show_timer` opens one tabbed, non-modal window. Closing it never stops the
+recording.
+
+**Timer tab.** Task id field (prefilled, editable while idle), optional
+participant code, a live HH:MM:SS counter and three buttons that drive the
+actual session, not just the display:
+
+- **Start** — starts a session through the same path as `start_session`
+  (default task suite = `$EXPERIMENT_TASK_DIR` or `experiment/tasks`).
+- **Stop** — ends the session through the same path as `end_session`; the
+  record is written and the counter freezes on the last reading.
+- **Restart** — abandons the current session (evidence stays on disk, marked
+  `session-abandoned.json`, NO record written) and immediately starts a fresh
+  session with the same task/participant — only after a confirmation prompt.
+
+**Logs tab.** A live rendering of the active session's `events.jsonl` (auto-
+refreshes every 2 s; Refresh forces it), one line per event with sorted
+`key=value` fields. **Export…** writes the same human-readable rendering to a
+file you pick in a save dialog (`<session-dir>-events.txt` by default).
+After the session ends or is abandoned, the tab and Export keep showing the
+last finished session.
+
+Widgets carry `objectName`s (`sessionTaskEdit`, `sessionStartButton`, …) for
+agents and tests (decision-51). The Qt layer is exercised by fake-Qt unit
+tests in the pure suite and was additionally smoked with real Qt offscreen
+(`QT_QPA_PLATFORM=offscreen`).
 
 ### What is fetched automatically vs. what stays blank
 
@@ -91,10 +122,13 @@ experiment/tasks/baselines/<task_id>/session-<started_at_utc>` afterwards.
 
 ### Host notes
 
-Inside QGIS Desktop both toolbar/menu actions work with one click each. The
-host hooks connect lazily and degrade silently when the host provides no
-project or canvas (server hosts, standalone tests). The behavior event log
-(`events.jsonl`, one per session directory) is the raw evidence; the record is the summary. Cap: 2000
+Inside QGIS Desktop actions appear per their bindings; only `show_timer` is
+bound (Plugins > Experiment Plugin) today — the rest are unbound in the GUI
+for now; from the panel, Start / Stop / Restart reach them through the
+runtime like any bridge call. The host hooks connect lazily
+and degrade silently when the host provides no project or canvas (server
+hosts, standalone tests). The behavior event log (`events.jsonl`, one per
+session directory) is the raw evidence; the record is the summary. Cap: 2000
 events per session (extent events can flood).
 
 ## Known limitations
@@ -103,6 +137,10 @@ events per session (extent events can flood).
   (`_ACTIVE`); it cannot represent two concurrent sessions (e.g. two projects).
   Starting a second session while one is active is refused. A real fix needs a
   registry keyed by project, not the singleton.
+- **Restart is destructive to the timer, not the files.** `Restart` in the panel
+  abandons the current take: no record is written and the YAML status stays
+  `pending`, but `events.jsonl` and `session-abandoned.json` remain in the
+  session directory for audit. Abandoned takes are never reference evidence.
 - **Action results are human-readable strings**, not typed success/error values.
   `start_session` reports failure as text mixed with the success summary — fine
   for a desktop action label, unusable as a machine-readable status; do not parse it.

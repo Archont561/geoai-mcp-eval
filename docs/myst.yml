@@ -44,6 +44,7 @@ project:
     - title: Analyses
       children:
         - file: analyses/gis-se-analysis.md
+        - file: analyses/experiment-analysis.md
     - title: Reference
       children:
         - file: provenance.md
