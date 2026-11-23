@@ -40,13 +40,13 @@ outcomes remain descriptive (F-family) only, by judgement and never by oracle.
 ## Addendum — arm B prompt scaffold tightened (pre-freeze, 2026-11-22)
 
 Before Załącznik E freezes the scaffolds verbatim, the arm B system prompt was
-corrected: it instructed the model to "Print the deliverable ... to stdout"
+corrected: it instructed the model to "Print the deliverable … to stdout"
 without requiring a ```python fenced block, while the harness executes only
 ```python fences — so a compliant model that answered with a ```json block (as
 the task text suggests) was scored as failing, measuring instruction
 contradiction rather than code-generation ability. The frozen text therefore
 reads: "Reply with ONLY a single ```python fenced code block containing the
 complete script; no prose and no other fences. The script must print the
-deliverable ... to stdout". No other part of either scaffold changed; arm A was
+deliverable … to stdout". No other part of either scaffold changed; arm A was
 left untouched. Verified pre-freeze with the local 0.5B coding model and (to be
 recorded) the study pin on the runner.
