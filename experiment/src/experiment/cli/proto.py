@@ -45,6 +45,16 @@ MAX_CELL_TOKENS_OPTION = typer.Option(
     "--max-cell-tokens",
     help="abort a cell if reported total tokens exceed this positive integer cap",
 )
+NO_CACHE_OPTION = typer.Option(
+    False,
+    "--no-cache",
+    help="bypass the digest-keyed LLM completion cache and force fresh completions",
+)
+CACHE_DIR_OPTION = typer.Option(
+    None,
+    "--cache-dir",
+    help="override the LLM completion cache directory (defaults to .cache/llm)",
+)
 RUN_DIR_ARG = typer.Argument(..., help="prototype output dir containing <task>/arm-<A|B> cells")
 SHOW_DIR_ARG = typer.Argument(..., help="prototype output dir containing summary.json")
 
@@ -114,11 +124,21 @@ def run(  # noqa: CC102
     root: Path = ROOT_OPTION,
     backend: str = BACKEND_OPTION,
     max_cell_tokens: int | None = MAX_CELL_TOKENS_OPTION,
+    no_cache: bool = NO_CACHE_OPTION,
+    cache_dir: Path | None = CACHE_DIR_OPTION,
 ) -> None:
     """Run the 3 pilot tasks in arms A and/or B, then score with the oracle."""
     try:
         spec = runs.parse_run_spec(
-            driver, model, host, arm, task, backend, max_cell_tokens=max_cell_tokens
+            driver,
+            model,
+            host,
+            arm,
+            task,
+            backend,
+            max_cell_tokens=max_cell_tokens,
+            use_cache=not no_cache,
+            cache_dir=cache_dir,
         )
     except runs.RunSpecError as exc:
         raise typer.BadParameter(str(exc)) from exc

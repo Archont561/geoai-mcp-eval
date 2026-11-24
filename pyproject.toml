@@ -71,6 +71,12 @@ type = "forbidden"
 source_modules = ["experiment.services"]
 forbidden_modules = ["typer", "rich"]
 
+[[tool.importlinter.contracts]]
+name = "Analysis never imports or reads the LLM completion cache"
+type = "forbidden"
+source_modules = ["experiment.analyze", "experiment.cli.analyze"]
+forbidden_modules = ["experiment.adapters.llm_cache", "experiment.domain.cache_key"]
+
 [tool.pytest.ini_options]
 pythonpath = ["experiment/src", "experiment-qgis-plugin"]
 testpaths = ["experiment/tests", "experiment-qgis-plugin/tests"]

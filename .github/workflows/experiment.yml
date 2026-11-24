@@ -27,6 +27,10 @@ on:
         description: "artifact retention in days"
         type: string
         default: "90"
+      use-llm-cache:
+        description: "opt-in restore/save of .cache/llm completion cache (see ADR 0007)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -141,6 +145,16 @@ jobs:
           path: .ollama-models
           key: ollama-${{ inputs.model }}-${{ hashFiles('pixi.lock') }}
           restore-keys: ollama-${{ inputs.model }}-
+      - name: Restore LLM completion cache
+        if: inputs.use-llm-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/llm
+          key: llm-cache-${{ inputs.model }}-${{ matrix.arm }}-${{ matrix.task_id }}-${{ github.run_id }}
+          restore-keys: |
+            llm-cache-${{ inputs.model }}-${{ matrix.arm }}-${{ matrix.task_id }}-
+            llm-cache-${{ inputs.model }}-
+            llm-cache-
       - name: Run cell
         run: pixi run tools run experiment_run --arm ${{ matrix.arm }} --task-id ${{ matrix.task_id }} --repetition ${{ matrix.rep }} --stage ${{ inputs.stage }} --enforce ${{ inputs.enforce }} --model "$MODEL" --run-id "$RUN_ID"
       - name: Upload cell artefacts

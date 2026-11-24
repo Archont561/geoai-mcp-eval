@@ -113,3 +113,9 @@ Feature: Prototype runs and oracle scoring
     Then the command exits with code 2
     And the output contains "--max-cell-tokens must be a positive integer"
     And no output directory is created
+
+  Scenario: Digest-keyed cache reuses successful completions and --no-cache forces a fresh call
+    Given a prototype output directory
+    And a stubbed Ollama endpoint with digest "sha256:pin-1" counting calls
+    When I run a cached prototype cell twice and a third time with --no-cache
+    Then the endpoint was called 2 times with cache_hit false, true, false in summaries
