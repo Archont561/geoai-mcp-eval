@@ -55,38 +55,55 @@ def load_predicates(tasks_root: Path) -> dict[str, str]:
 def _check_lookup(checks: Any) -> dict[str, bool]:
     if not isinstance(checks, list):
         return {}
-    return {
-        str(check.get("assertion_id")): bool(check.get("passed"))
-        for check in checks
-        if isinstance(check, dict) and check.get("assertion_id") is not None
-    }
+    lookup: dict[str, bool] = {}
+    for check in checks:
+        if isinstance(check, dict):
+            assertion_id = check.get("assertion_id")
+            if assertion_id is not None:
+                lookup[str(assertion_id)] = bool(check.get("passed"))
+    return lookup
+
+
+def _load_score_parts(score_file: Path) -> tuple[dict[str, Any], list[Any]]:
+    data = run_store.read_json(score_file)
+    if not isinstance(data, dict):
+        raise ValueError(f"{score_file}: not a cell score.json (missing meta/checks)")
+    meta, checks = data.get("meta"), data.get("checks")
+    if type(meta) is not dict or not isinstance(checks, list):
+        raise ValueError(f"{score_file}: not a cell score.json (missing meta/checks)")
+    return meta, checks
+
+
+def _flatten_score_file(
+    score_file: Path,
+    predicates: dict[str, str],
+    predicate_columns: list[str],
+) -> dict[str, Any]:
+    meta, checks = _load_score_parts(score_file)
+    by_id = _check_lookup(checks)
+    unknown = sorted(set(by_id) - set(predicates))
+    if unknown:
+        raise ValueError(
+            f"{score_file}: assertions without predicate mapping: {', '.join(unknown)}"
+        )
+    row: dict[str, Any] = {key: meta.get(key) for key in KEY_COLUMNS}
+    for predicate in predicate_columns:
+        ids = [aid for aid, slug in predicates.items() if slug == predicate]
+        row[predicate] = int(all(by_id.get(assertion_id, False) for assertion_id in ids))
+    return row
 
 
 def flatten_rows(results_root: Path, tasks_root: Path) -> list[dict[str, Any]]:
     """One row per cell: KEY_COLUMNS plus one 0/1 column per predicate."""
     predicates = load_predicates(tasks_root)
     predicate_columns = sorted(set(predicates.values()))
-    rows: list[dict[str, Any]] = []
-    for score_file in run_store.discover_score_files(results_root):
-        data = run_store.read_json(score_file)
-        meta = data.get("meta") if isinstance(data, dict) else None
-        if not isinstance(meta, dict) or not isinstance(data.get("checks"), list):
-            raise ValueError(f"{score_file}: not a cell score.json (missing meta/checks)")
-        by_id = _check_lookup(data["checks"])
-        unknown = sorted(set(by_id) - set(predicates))
-        if unknown:
-            raise ValueError(
-                f"{score_file}: assertions without predicate mapping: {', '.join(unknown)}"
-            )
-        row: dict[str, Any] = {key: meta.get(key) for key in KEY_COLUMNS}
-        for predicate in predicate_columns:
-            ids = [aid for aid, slug in predicates.items() if slug == predicate]
-            row[predicate] = int(all(by_id.get(assertion_id, False) for assertion_id in ids))
-        rows.append(row)
-    return rows
+    return [
+        _flatten_score_file(score_file, predicates, predicate_columns)
+        for score_file in run_store.discover_score_files(results_root)
+    ]
 
 
 def flatten(results_root: Path, tasks_root: Path) -> pd.DataFrame:
     rows = flatten_rows(results_root, tasks_root)
-    predicates = sorted(set(load_predicates(tasks_root).values()))
-    return pd.DataFrame(rows, columns=[*KEY_COLUMNS, *predicates])
+    columns = [*KEY_COLUMNS, *sorted(set(load_predicates(tasks_root).values()))]
+    return pd.DataFrame(rows, columns=columns)

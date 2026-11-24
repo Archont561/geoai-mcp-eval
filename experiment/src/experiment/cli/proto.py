@@ -113,6 +113,29 @@ def _run_banner(spec: RunSpec, out: Path) -> Panel:
     )
 
 
+def _run_with_progress(root: Path, spec: RunSpec, out: Path) -> dict:
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+        transient=True,
+    ) as progress:
+        overall = progress.add_task("cells …", total=None)
+        summary = runs.run_experiment(root, spec, out)
+        progress.update(overall, description="cells done")
+    return summary
+
+
+def _finish_run(root: Path, spec: RunSpec, output_dir: Path | None) -> None:
+    out = resolve_output_dir(output_dir)
+    console.print(_run_banner(spec, out))
+    summary = _run_with_progress(root, spec, out)
+    _print_score_table(summary)
+    console.print(_artifacts_panel(out))
+    if any(cell["status"] != "ok" for cell in summary["cells"]):
+        raise typer.Exit(code=1)
+
+
 @app.command()
 def run(  # noqa: CC102
     driver: str = DRIVER_OPTION,
@@ -142,21 +165,7 @@ def run(  # noqa: CC102
         )
     except runs.RunSpecError as exc:
         raise typer.BadParameter(str(exc)) from exc
-    out = resolve_output_dir(output_dir)
-    console.print(_run_banner(spec, out))
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-        transient=True,
-    ) as progress:
-        overall = progress.add_task("cells …", total=None)
-        summary = runs.run_experiment(root, spec, out)
-        progress.update(overall, description="cells done")
-    _print_score_table(summary)
-    console.print(_artifacts_panel(out))
-    if any(cell["status"] != "ok" for cell in summary["cells"]):
-        raise typer.Exit(code=1)
+    _finish_run(root, spec, output_dir)
 
 
 def _artifacts_panel(out: Path) -> Panel:

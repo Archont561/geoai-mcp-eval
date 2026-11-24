@@ -70,6 +70,24 @@ def run_preflight(run_id: str = "") -> tuple[str, dict[str, str], Path]:
     return rid, pins, pins_path
 
 
+def _pull_and_smoke(ollama_bin: str, model: str, run_dir: Path) -> tuple[str, str]:
+    if not ollama_adapter.wait_ready(OLLAMA_API):
+        raise RuntimeError(
+            f"ollama did not become ready at {OLLAMA_API}; see {run_dir / 'ollama-serve.log'}"
+        )
+    rc = ollama_adapter.pull_model(ollama_bin, model)
+    if rc != 0:
+        raise RuntimeError(f"ollama pull {model} failed (exit {rc})")
+    digest = ollama_adapter.list_model_digest(ollama_bin, model, base_url=OLLAMA_API)
+    run_store.write_text(run_dir / "model-digest.txt", f"{model} {digest}\n")
+    payload = ollama_adapter.smoke_generate(model, base_url=OLLAMA_API)
+    response_text = str(payload.get("response", "")).strip()
+    if not response_text:
+        raise RuntimeError("model returned an empty completion; pin or connectivity is broken")
+    run_store.write_json(run_dir / "model-smoke.json", payload, indent=None)
+    return digest, response_text[:80]
+
+
 def run_model(model: str = "qwen2.5:3b", run_id: str = "") -> tuple[str, str, Path]:
     """Start Ollama, pull the pinned model, record digest, and prove one completion."""
     ollama_bin = subprocess_runner.which("ollama")
@@ -81,29 +99,17 @@ def run_model(model: str = "qwen2.5:3b", run_id: str = "") -> tuple[str, str, Pa
     repo_root = find_repo_root()
     rid = resolve_run_id(run_id)
     run_dir = run_store.ensure_dir(paths.results_root(repo_root) / rid)
-    serve_log = run_dir / "ollama-serve.log"
-
-    owner = ollama_adapter.start_ollama(ollama_bin, serve_log, base_url=OLLAMA_API)
+    owner = ollama_adapter.start_ollama(
+        ollama_bin, run_dir / "ollama-serve.log", base_url=OLLAMA_API
+    )
     try:
-        if not ollama_adapter.wait_ready(OLLAMA_API):
-            raise RuntimeError(f"ollama did not become ready at {OLLAMA_API}; see {serve_log}")
-        rc = ollama_adapter.pull_model(ollama_bin, model)
-        if rc != 0:
-            raise RuntimeError(f"ollama pull {model} failed (exit {rc})")
-        digest = ollama_adapter.list_model_digest(ollama_bin, model, base_url=OLLAMA_API)
-        run_store.write_text(run_dir / "model-digest.txt", f"{model} {digest}\n")
-        payload = ollama_adapter.smoke_generate(model, base_url=OLLAMA_API)
-        response_text = str(payload.get("response", "")).strip()
-        if not response_text:
-            raise RuntimeError("model returned an empty completion; pin or connectivity is broken")
-        run_store.write_json(run_dir / "model-smoke.json", payload, indent=None)
-        snippet = response_text[:80]
-        GitHubWorkflowAdapter().write_outputs(
-            {"run_id": rid, "model": model, "digest": digest, "smoke_response": snippet}
-        )
-        return digest, snippet, run_dir
+        digest, snippet = _pull_and_smoke(ollama_bin, model, run_dir)
     finally:
         ollama_adapter.stop_ollama(owner)
+    GitHubWorkflowAdapter().write_outputs(
+        {"run_id": rid, "model": model, "digest": digest, "smoke_response": snippet}
+    )
+    return digest, snippet, run_dir
 
 
 @dataclass(frozen=True)
@@ -156,14 +162,29 @@ def _refuse_pilot_stage(cell_dir: Path, spec: WorkflowCellSpec, base: dict[str, 
     )
 
 
-def run_workflow_cell(spec: WorkflowCellSpec) -> Path:
-    """Run one (arm, task, repetition) cell smoke probe, or refuse unimplemented pilot stage."""
-    repo_root = find_repo_root()
-    rid = resolve_run_id(spec.run_id)
-    cell_dir = run_store.ensure_dir(
-        paths.results_root(repo_root) / rid / spec.task_id / spec.arm / f"rep-{spec.repetition}"
+def _run_smoke_probe(repo_root: Path, cell_dir: Path, base: dict[str, object]) -> None:
+    rc = subprocess_runner.run_passthrough(
+        [sys.executable, "-m", "experiment", "hello", "hello"],
+        cwd=repo_root,
+        env=experiment_env(repo_root),
     )
-    base: dict[str, object] = {
+    if rc != 0:
+        raise RuntimeError(f"smoke hello check failed (exit {rc})")
+    record_meta = {
+        **base,
+        "status": "mock-smoke",
+        "note": "smoke probe only; NOT an agent run, NOT a study result",
+        "ts": datetime.now(UTC).isoformat(),
+    }
+    run_store.append_jsonl(cell_dir / "transcript.jsonl", record_meta)
+    _write_cell_manifest(
+        cell_dir,
+        {**base, "status": "mock-smoke", "artifacts": run_store.artifact_hashes(cell_dir)},
+    )
+
+
+def _cell_base_metadata(spec: WorkflowCellSpec, rid: str) -> dict[str, object]:
+    return {
         "run_id": rid,
         "arm": spec.arm,
         "task": spec.task_id,
@@ -172,32 +193,23 @@ def run_workflow_cell(spec: WorkflowCellSpec) -> Path:
         "model": spec.model,
         "enforce": spec.enforce if spec.arm == "A" else None,
     }
+
+
+def run_workflow_cell(spec: WorkflowCellSpec) -> Path:
+    """Run one (arm, task, repetition) cell smoke probe, or refuse unimplemented pilot stage."""
+    repo_root = find_repo_root()
+    rid = resolve_run_id(spec.run_id)
+    cell_dir = run_store.ensure_dir(
+        paths.results_root(repo_root) / rid / spec.task_id / spec.arm / f"rep-{spec.repetition}"
+    )
+    base = _cell_base_metadata(spec, rid)
+    if spec.stage == "pilot":
+        _refuse_pilot_stage(cell_dir, spec, base)
     owner: ollama_adapter.OllamaProcess | None = None
     try:
-        if spec.stage == "pilot":
-            _refuse_pilot_stage(cell_dir, spec, base)
         owner = _ensure_cell_ollama(subprocess_runner.which("ollama"), cell_dir)
-        rc = subprocess_runner.run_passthrough(
-            [sys.executable, "-m", "experiment", "hello", "hello"],
-            cwd=repo_root,
-            env=experiment_env(repo_root),
-        )
-        if rc != 0:
-            raise RuntimeError(f"smoke hello check failed (exit {rc})")
-        record_meta = {
-            **base,
-            "status": "mock-smoke",
-            "note": "smoke probe only; NOT an agent run, NOT a study result",
-            "ts": datetime.now(UTC).isoformat(),
-        }
-        run_store.append_jsonl(cell_dir / "transcript.jsonl", record_meta)
-        _write_cell_manifest(
-            cell_dir,
-            {**base, "status": "mock-smoke", "artifacts": run_store.artifact_hashes(cell_dir)},
-        )
+        _run_smoke_probe(repo_root, cell_dir, base)
         return cell_dir
-    except SystemExit:
-        raise
     except Exception as exc:
         _write_cell_manifest(
             cell_dir, {**base, "status": "error", "error": str(exc), "artifacts": []}
@@ -230,19 +242,16 @@ def _cell_label(arm: str, task: str, rep: int) -> str:
     return f"{task}/{arm}/rep-{rep}"
 
 
+def _valid_rep(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def _load_manifest(path: Path) -> tuple[tuple[str, str, int], dict[str, object]] | None:
     record = run_store.read_json_mapping(path)
     if record is None:
         return None
-    arm = record.get("arm")
-    task = record.get("task")
-    rep = record.get("rep")
-    if (
-        isinstance(arm, str)
-        and isinstance(task, str)
-        and isinstance(rep, int)
-        and not isinstance(rep, bool)
-    ):
+    arm, task, rep = record.get("arm"), record.get("task"), record.get("rep")
+    if isinstance(arm, str) and isinstance(task, str) and _valid_rep(rep):
         return (arm, task, rep), record
     return None
 
@@ -288,14 +297,11 @@ def _evaluate_cell(
     return "pass" if result.ok else f"fail(exit={result.returncode})"
 
 
-def run_harvest(cfg: HarvestConfig) -> dict[str, object]:
-    """Merge cell manifests, run the oracle determinism gate, and check completeness."""
-    repo_root = find_repo_root()
-    rid = resolve_run_id(cfg.run_id)
-    harvest = cfg.harvest_dir if cfg.harvest_dir.is_absolute() else (repo_root / cfg.harvest_dir)
-    records = _manifest_records(harvest)
-    run_store.write_jsonl(harvest / "manifest.jsonl", records.values())
-    pilot_tasks = _pilot_task_ids(repo_root)
+def _compare_cells(
+    records: dict[tuple[str, str, int], dict[str, object]],
+    cfg: HarvestConfig,
+    pilot_tasks: tuple[str, ...],
+) -> _Comparison:
     expected = {
         (arm, task, rep)
         for arm in cfg.arms
@@ -303,20 +309,18 @@ def run_harvest(cfg: HarvestConfig) -> dict[str, object]:
         for rep in range(1, cfg.repetitions + 1)
     }
     seen = set(records)
-    comp = _Comparison(
+    return _Comparison(
         expected=expected,
         seen=seen,
         missing=sorted(expected - seen),
         extra=sorted(seen - expected),
     )
-    out_dir = run_store.ensure_dir(harvest / "oracle")
-    oracle = {
-        _cell_label(a, t, r): _evaluate_cell(
-            repo_root, out_dir, harvest, (a, t, r), cfg.skip_oracle
-        )
-        for a, t, r in sorted(comp.seen)
-    }
-    summary: dict[str, object] = {
+
+
+def _build_harvest_summary(
+    rid: str, comp: _Comparison, oracle: dict[str, str]
+) -> dict[str, object]:
+    return {
         "run_id": rid,
         "expected_cells": sorted(_cell_label(a, t, r) for a, t, r in comp.expected),
         "logged_cells": sorted(_cell_label(a, t, r) for a, t, r in comp.seen),
@@ -326,18 +330,32 @@ def run_harvest(cfg: HarvestConfig) -> dict[str, object]:
         "complete": not comp.missing,
         "generated_at": datetime.now(UTC).isoformat(),
     }
+
+
+def run_harvest(cfg: HarvestConfig) -> dict[str, object]:
+    """Merge cell manifests, run the oracle determinism gate, and check completeness."""
+    repo_root = find_repo_root()
+    rid = resolve_run_id(cfg.run_id)
+    harvest = cfg.harvest_dir if cfg.harvest_dir.is_absolute() else (repo_root / cfg.harvest_dir)
+    records = _manifest_records(harvest)
+    run_store.write_jsonl(harvest / "manifest.jsonl", records.values())
+    comp = _compare_cells(records, cfg, _pilot_task_ids(repo_root))
+    out_dir = run_store.ensure_dir(harvest / "oracle")
+    oracle = {
+        _cell_label(a, t, r): _evaluate_cell(
+            repo_root, out_dir, harvest, (a, t, r), cfg.skip_oracle
+        )
+        for a, t, r in sorted(comp.seen)
+    }
+    summary = _build_harvest_summary(rid, comp, oracle)
     run_store.write_json(harvest / "summary.json", summary)
     GitHubWorkflowAdapter().write_outputs(
-        {
-            "run_id": rid,
-            "complete": not comp.missing,
-            "missing_count": len(comp.missing),
-        }
+        {"run_id": rid, "complete": not comp.missing, "missing_count": len(comp.missing)}
     )
     if comp.missing and cfg.fail_on_missing:
+        missing_str = ", ".join(_cell_label(a, t, r) for a, t, r in comp.missing)
         raise RuntimeError(
             f"completeness assertion failed: {len(comp.missing)} missing run(s): "
-            + ", ".join(_cell_label(a, t, r) for a, t, r in comp.missing)
-            + " — never invented; fix the cells and re-run"
+            f"{missing_str} — never invented; fix the cells and re-run"
         )
     return summary

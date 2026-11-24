@@ -8,7 +8,7 @@ outputs stay under --output-dir and retain their ``prototype`` label.
 from __future__ import annotations
 
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -40,6 +40,21 @@ class RunSpecError(ValueError):
     """A run cannot start with the requested driver, arm, or backend."""
 
 
+@dataclass(frozen=True)
+class _RunContext:
+    spec: RunSpec
+    output_root: Path
+    model_digest: str | None
+
+
+@dataclass(frozen=True)
+class _CellOutcome:
+    status: str
+    error: str | None
+    abort_reason: str | None
+    wall_s: float
+
+
 def _parse_arms(raw: str) -> tuple[str, ...]:
     mapping = {"both": ("A", "B"), "a": ("A",), "b": ("B",)}
     key = raw.strip().lower()
@@ -52,6 +67,18 @@ def _parse_tasks(raw: str) -> tuple[str, ...] | None:
     if raw.strip().lower() == "all":
         return None
     return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
+def _resolve_backend_profile(
+    driver: str, backend: str, host: str | None, model: str | None
+) -> backends.BackendProfile:
+    try:
+        profile = backends.resolve_profile(backend, host=host, model=model)
+        if driver == "ollama":
+            backends.require_api_key(profile)
+    except backends.BackendError as exc:
+        raise RunSpecError(str(exc)) from exc
+    return profile
 
 
 def parse_run_spec(  # noqa: CC102
@@ -71,12 +98,7 @@ def parse_run_spec(  # noqa: CC102
         raise RunSpecError(f"--driver must be one of {', '.join(DRIVERS)}")
     if max_cell_tokens is not None and max_cell_tokens < 1:
         raise RunSpecError("--max-cell-tokens must be a positive integer")
-    try:
-        profile = backends.resolve_profile(backend, host=host, model=model)
-        if driver == "ollama":
-            backends.require_api_key(profile)
-    except backends.BackendError as exc:
-        raise RunSpecError(str(exc)) from exc
+    profile = _resolve_backend_profile(driver, backend, host, model)
     return RunSpec(
         driver=driver,
         model=profile.model,
@@ -104,37 +126,31 @@ _DRIVER_DISPATCH = {
 }
 
 
-def run_cell(req: CellRequest) -> dict[str, Any]:
+def _execute_driver(active_req: CellRequest) -> _CellOutcome:
     started = time.time()
-    status, error, abort_reason = "ok", None, None
-    accumulator = req.usage or UsageAccumulator(max_cell_tokens=req.max_cell_tokens)
-    cache_stats = req.cache_stats or CacheStats()
-    active_req = replace(req, usage=accumulator, cache_stats=cache_stats)
     driver_fn = _DRIVER_DISPATCH.get((active_req.driver, active_req.arm))
     if driver_fn is None:
-        status, error = "error", f"unknown driver/arm {active_req.driver}/{active_req.arm}"
+        error = f"unknown driver/arm {active_req.driver}/{active_req.arm}"
         append_transcript(active_req.cell, {_K_ROLE: "harness", _K_CONTENT: f"cell error: {error}"})
-    else:
-        try:
-            driver_fn(active_req)
-        except TokenCapExceededError as exc:
-            status, error, abort_reason = "aborted", str(exc), exc.reason
-        except Exception as exc:
-            status, error = "error", str(exc)
-            append_transcript(
-                active_req.cell, {_K_ROLE: "harness", _K_CONTENT: f"cell error: {exc}"}
-            )
-    usage_summary = accumulator.to_summary()
-    append_transcript(
-        active_req.cell,
-        {
-            _K_ROLE: "harness",
-            "event": "usage_summary",
-            "usage": usage_summary,
-        },
-    )
-    score = score_cell(active_req.task_path, active_req.cell)
-    meta: dict[str, Any] = {
+        return _CellOutcome("error", error, None, round(time.time() - started, 2))
+    try:
+        driver_fn(active_req)
+        return _CellOutcome("ok", None, None, round(time.time() - started, 2))
+    except TokenCapExceededError as exc:
+        return _CellOutcome("aborted", str(exc), exc.reason, round(time.time() - started, 2))
+    except Exception as exc:
+        append_transcript(active_req.cell, {_K_ROLE: "harness", _K_CONTENT: f"cell error: {exc}"})
+        return _CellOutcome("error", str(exc), None, round(time.time() - started, 2))
+
+
+def _build_cell_meta(
+    active_req: CellRequest,
+    outcome: _CellOutcome,
+    score: dict[str, Any],
+    usage_summary: dict[str, Any],
+) -> dict[str, Any]:
+    cache_stats = active_req.cache_stats or CacheStats()
+    return {
         "run_id": active_req.run_id,
         "task": active_req.task.id,
         "arm": active_req.arm,
@@ -144,14 +160,27 @@ def run_cell(req: CellRequest) -> dict[str, Any]:
         "cache_hit": cache_stats.all_hit,
         "cache_hits": cache_stats.hits,
         "cache_misses": cache_stats.misses,
-        "status": status,
-        "error": error,
-        "abort_reason": abort_reason,
-        "wall_s": round(time.time() - started, 2),
+        "status": outcome.status,
+        "error": outcome.error,
+        "abort_reason": outcome.abort_reason,
+        "wall_s": outcome.wall_s,
         "oracle_passed": score["passed"],
         "usage": usage_summary,
         "prototype": True,
     }
+
+
+def run_cell(req: CellRequest) -> dict[str, Any]:
+    accumulator = req.usage or UsageAccumulator(max_cell_tokens=req.max_cell_tokens)
+    active_req = replace(req, usage=accumulator, cache_stats=req.cache_stats or CacheStats())
+    outcome = _execute_driver(active_req)
+    usage_summary = accumulator.to_summary()
+    append_transcript(
+        active_req.cell,
+        {_K_ROLE: "harness", "event": "usage_summary", "usage": usage_summary},
+    )
+    score = score_cell(active_req.task_path, active_req.cell)
+    meta = _build_cell_meta(active_req, outcome, score, usage_summary)
     run_store.write_json(active_req.cell / "score.json", {**score, "meta": meta})
     return {**meta, "checks": score["checks"]}
 
@@ -167,122 +196,110 @@ def _resolve_run_digest(spec: RunSpec) -> str | None:
         session.close()
 
 
-def _run_one_cell(  # noqa: CC102
-    task_path: Path,
-    task: Task,
-    arm: str,
-    spec: RunSpec,
-    output_root: Path,
-    model_digest: str | None,
-) -> dict[str, Any]:
-    cell = cell_dir(output_root, task.id, arm)
-    append_transcript(
-        cell,
-        {
-            _K_ROLE: "meta",
-            "task": task.id,
-            "arm": arm,
-            "driver": spec.driver,
-            "model": model_label(spec.driver, spec.model),
-            "model_digest": model_digest,
-            "use_cache": spec.use_cache,
-            "max_cell_tokens": spec.max_cell_tokens,
-            "prototype": True,
-            "required_traps": list(task.required_traps),
-        },
-    )
+def _cell_meta_record(task: Task, arm: str, ctx: _RunContext) -> dict[str, Any]:
+    return {
+        _K_ROLE: "meta",
+        "task": task.id,
+        "arm": arm,
+        "driver": ctx.spec.driver,
+        "model": model_label(ctx.spec.driver, ctx.spec.model),
+        "model_digest": ctx.model_digest,
+        "use_cache": ctx.spec.use_cache,
+        "max_cell_tokens": ctx.spec.max_cell_tokens,
+        "prototype": True,
+        "required_traps": list(task.required_traps),
+    }
+
+
+def _run_one_cell(task_path: Path, task: Task, arm: str, ctx: _RunContext) -> dict[str, Any]:
+    cell = cell_dir(ctx.output_root, task.id, arm)
+    append_transcript(cell, _cell_meta_record(task, arm, ctx))
     req = CellRequest(
         task_path=task_path,
         task=task,
         arm=arm,
-        driver=spec.driver,
+        driver=ctx.spec.driver,
         cell=cell,
-        model=spec.model,
-        host=spec.host,
-        run_id=output_root.name,
-        profile=spec.profile,
-        max_cell_tokens=spec.max_cell_tokens,
-        backend_id=spec.backend_id,
-        model_digest=model_digest,
-        use_cache=spec.use_cache,
-        cache_dir=spec.cache_dir,
+        model=ctx.spec.model,
+        host=ctx.spec.host,
+        run_id=ctx.output_root.name,
+        profile=ctx.spec.profile,
+        max_cell_tokens=ctx.spec.max_cell_tokens,
+        backend_id=ctx.spec.backend_id,
+        model_digest=ctx.model_digest,
+        use_cache=ctx.spec.use_cache,
+        cache_dir=ctx.spec.cache_dir,
     )
     return run_cell(req)
 
 
-def _write_manifest(  # noqa: CC102
-    output_root: Path,
-    spec: RunSpec,
+def _run_totals(cells: list[dict[str, Any]], run_usage: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "cells": len(cells),
+        "passed": sum(1 for c in cells if c["oracle_passed"]),
+        "aborted": sum(1 for c in cells if c["status"] == "aborted"),
+        "errored": sum(1 for c in cells if c["status"] == "error"),
+        "cache_hits": sum(int(c.get("cache_hits") or 0) for c in cells),
+        "cache_misses": sum(int(c.get("cache_misses") or 0) for c in cells),
+        "usage": run_usage,
+    }
+
+
+def _write_manifest(
+    ctx: _RunContext,
     cells: list[dict[str, Any]],
     run_usage: dict[str, Any],
     generated_at: str,
-    model_digest: str | None,
 ) -> dict[str, Any]:
     manifest = {
         "manifest_version": 1,
-        "run_id": output_root.name,
+        "run_id": ctx.output_root.name,
         "prototype": True,
         "generated_at": generated_at,
-        "driver": spec.driver,
-        "backend_id": spec.backend_id,
-        "model": model_label(spec.driver, spec.model),
-        "model_digest": model_digest,
-        "use_cache": spec.use_cache,
-        "host": spec.host,
-        "arms": list(spec.arms),
+        "driver": ctx.spec.driver,
+        "backend_id": ctx.spec.backend_id,
+        "model": model_label(ctx.spec.driver, ctx.spec.model),
+        "model_digest": ctx.model_digest,
+        "use_cache": ctx.spec.use_cache,
+        "host": ctx.spec.host,
+        "arms": list(ctx.spec.arms),
         "task_ids": sorted({cell["task"] for cell in cells}),
-        "max_cell_tokens": spec.max_cell_tokens,
-        "totals": {
-            "cells": len(cells),
-            "passed": sum(1 for c in cells if c["oracle_passed"]),
-            "aborted": sum(1 for c in cells if c["status"] == "aborted"),
-            "errored": sum(1 for c in cells if c["status"] == "error"),
-            "cache_hits": sum(int(c.get("cache_hits") or 0) for c in cells),
-            "cache_misses": sum(int(c.get("cache_misses") or 0) for c in cells),
-            "usage": run_usage,
-        },
+        "max_cell_tokens": ctx.spec.max_cell_tokens,
+        "totals": _run_totals(cells, run_usage),
     }
-    run_store.write_json(output_root / "manifest.json", manifest)
+    run_store.write_json(ctx.output_root / "manifest.json", manifest)
     return manifest
 
 
-def _write_summary(
-    output_root: Path,
-    spec: RunSpec,
-    cells: list[dict[str, Any]],
-    model_digest: str | None,
-) -> dict[str, Any]:
+def _write_summary(ctx: _RunContext, cells: list[dict[str, Any]]) -> dict[str, Any]:
     generated_at = datetime.now(UTC).isoformat()
     run_usage = aggregate_run_usage([cell.get("usage") or {} for cell in cells])
     summary = {
-        "run_id": output_root.name,
+        "run_id": ctx.output_root.name,
         "prototype": True,
-        "driver": spec.driver,
-        "backend_id": spec.backend_id,
-        "model": model_label(spec.driver, spec.model),
-        "model_digest": model_digest,
-        "use_cache": spec.use_cache,
+        "driver": ctx.spec.driver,
+        "backend_id": ctx.spec.backend_id,
+        "model": model_label(ctx.spec.driver, ctx.spec.model),
+        "model_digest": ctx.model_digest,
+        "use_cache": ctx.spec.use_cache,
         "generated_at": generated_at,
-        "max_cell_tokens": spec.max_cell_tokens,
+        "max_cell_tokens": ctx.spec.max_cell_tokens,
         "usage": run_usage,
         "cells": cells,
         "passed": sum(1 for c in cells if c["oracle_passed"]),
         "total": len(cells),
     }
-    run_store.write_json(output_root / "summary.json", summary)
-    _write_manifest(output_root, spec, cells, run_usage, generated_at, model_digest)
+    run_store.write_json(ctx.output_root / "summary.json", summary)
+    _write_manifest(ctx, cells, run_usage, generated_at)
     return summary
 
 
 def run_experiment(task_root: Path, spec: RunSpec, output_root: Path) -> dict[str, Any]:
-    model_digest = _resolve_run_digest(spec)
+    ctx = _RunContext(spec=spec, output_root=output_root, model_digest=_resolve_run_digest(spec))
     cells: list[dict[str, Any]] = []
     for task_path in discover_tasks(task_root):
         task = load_task(task_path)
         if spec.task_ids and task.id not in spec.task_ids:
             continue
-        cells.extend(
-            _run_one_cell(task_path, task, arm, spec, output_root, model_digest)
-            for arm in spec.arms
-        )
-    return _write_summary(output_root, spec, cells, model_digest)
+        cells.extend(_run_one_cell(task_path, task, arm, ctx) for arm in spec.arms)
+    return _write_summary(ctx, cells)

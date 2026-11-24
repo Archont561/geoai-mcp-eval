@@ -76,7 +76,18 @@ class BackendCheckResult:
     base_url: str
 
 
-def _default_run_cmd(cmd: list[str], *, timeout: float) -> subprocess_runner.CommandResult:
+@dataclass(frozen=True)
+class _CheckRuntime:
+    """Resolved runtime bundle threaded through HTTP probe stages."""
+
+    cfg: BackendCheckConfig
+    profile: backends.BackendProfile
+    session: Any
+    sleep: Callable[[float], None]
+
+
+def default_run_cmd(cmd: list[str], *, timeout: float) -> subprocess_runner.CommandResult:
+    """Default subprocess runner for SSH/ControlMaster probes."""
     return subprocess_runner.run_command(cmd, timeout=timeout)
 
 
@@ -156,16 +167,15 @@ def _is_token_limit(status_code: int, text: str) -> bool:
 def _request_with_policy(
     method: Callable[..., Any],
     url: str,
-    profile: backends.BackendProfile,
+    rt: _CheckRuntime,
     *,
-    sleep: Callable[[float], None],
     json_body: dict[str, Any] | None = None,
 ) -> Any:
     """Issue one HTTP request; retry ONLY on 429/5xx per profile.retries."""
-    policy = ollama_adapter.RetryPolicy(timeout=profile.timeout, retries=profile.retries)
+    policy = ollama_adapter.RetryPolicy(timeout=rt.profile.timeout, retries=rt.profile.retries)
     try:
         return ollama_adapter.request_with_retry(
-            method, url, policy, sleep=sleep, json_body=json_body
+            method, url, policy, sleep=rt.sleep, json_body=json_body
         )
     except ollama_adapter.HttpTransportError as exc:
         raise BackendCheckError(
@@ -176,20 +186,28 @@ def _request_with_policy(
         ) from exc
 
 
+def _entry_model_id(entry: Any) -> str | None:
+    if not isinstance(entry, dict):
+        return None
+    model_id = entry.get("id")
+    return str(model_id) if isinstance(model_id, str) else None
+
+
 def _extract_model_ids(payload: Any) -> set[str]:
     if not isinstance(payload, dict):
         return set()
     data = payload.get("data")
     if not isinstance(data, list):
         return set()
-    return {
-        str(entry["id"])
-        for entry in data
-        if isinstance(entry, dict) and isinstance(entry.get("id"), str)
-    }
+    ids: set[str] = set()
+    for entry in data:
+        model_id = _entry_model_id(entry)
+        if model_id is not None:
+            ids.add(model_id)
+    return ids
 
 
-def _check_models_status(resp: Any, url: str) -> set[str]:
+def _raise_for_models_http_status(resp: Any, url: str) -> None:
     if resp.status_code in (401, 403):
         raise BackendCheckError(
             "auth-error",
@@ -211,6 +229,10 @@ def _check_models_status(resp: Any, url: str) -> set[str]:
             f"HTTP {resp.status_code} from {url} after retries: {resp.text[:200]}",
             "inspect remote Ollama server logs",
         )
+
+
+def _check_models_status(resp: Any, url: str) -> set[str]:
+    _raise_for_models_http_status(resp, url)
     try:
         return _extract_model_ids(resp.json())
     except ValueError as exc:
@@ -222,37 +244,35 @@ def _check_models_status(resp: Any, url: str) -> set[str]:
         ) from exc
 
 
-def _poll_model_and_digest(
-    session: Any,
-    profile: backends.BackendProfile,
-    cfg: BackendCheckConfig,
-    *,
-    sleep: Callable[[float], None],
-) -> str:
-    deadline = time.monotonic() + max(0.0, cfg.poll_timeout_s)
-    last_reason = f"model {profile.model!r} not listed by {profile.models_url}"
+def _check_digest_once(rt: _CheckRuntime) -> tuple[str | None, str]:
+    resp = _request_with_policy(rt.session.get, rt.profile.models_url, rt)
+    model_ids = _check_models_status(resp, rt.profile.models_url)
+    candidates = {rt.profile.model, f"{rt.profile.model}:latest"}
+    if not (model_ids & candidates):
+        return None, f"model {rt.profile.model!r} not listed by {rt.profile.models_url}"
+    digest = backends.resolve_model_digest(rt.session, rt.profile)
+    expected = rt.cfg.expected_digest
+    if digest and (expected is None or digest == expected):
+        return digest, ""
+    if expected:
+        return None, f"model {rt.profile.model!r} digest {digest!r} != expected {expected!r}"
+    return None, f"model {rt.profile.model!r} reported no digest from /api/tags"
+
+
+def _poll_model_and_digest(rt: _CheckRuntime) -> str:
+    deadline = time.monotonic() + max(0.0, rt.cfg.poll_timeout_s)
     while True:
-        resp = _request_with_policy(session.get, profile.models_url, profile, sleep=sleep)
-        model_ids = _check_models_status(resp, profile.models_url)
-        candidates = {profile.model, f"{profile.model}:latest"}
-        if model_ids & candidates:
-            digest = backends.resolve_model_digest(session, profile)
-            if digest and (cfg.expected_digest is None or digest == cfg.expected_digest):
-                return digest
-            if cfg.expected_digest:
-                last_reason = (
-                    f"model {profile.model!r} digest {digest!r} != expected {cfg.expected_digest!r}"
-                )
-            else:
-                last_reason = f"model {profile.model!r} reported no digest from /api/tags"
+        digest, reason = _check_digest_once(rt)
+        if digest is not None:
+            return digest
         if time.monotonic() >= deadline:
             raise BackendCheckError(
                 "model-absent",
                 EXIT_MODEL_ABSENT,
-                last_reason,
-                f"pull/pin `{profile.model}` on the remote Ollama host and retry",
+                reason,
+                f"pull/pin `{rt.profile.model}` on the remote Ollama host and retry",
             )
-        sleep(cfg.poll_interval_s)
+        rt.sleep(rt.cfg.poll_interval_s)
 
 
 def _validate_completion_response(resp: Any, profile: backends.BackendProfile) -> None:
@@ -286,31 +306,14 @@ def _validate_completion_response(resp: Any, profile: backends.BackendProfile) -
         )
 
 
-def _run_tiny_completion(
-    session: Any,
-    profile: backends.BackendProfile,
-    cfg: BackendCheckConfig,
-    *,
-    sleep: Callable[[float], None],
-) -> None:
-    body = {
-        "model": profile.model,
-        "messages": [{"role": "user", "content": "Reply with OK."}],
-        "stream": False,
-        "temperature": 0.0,
-        "max_tokens": cfg.max_tokens,
-    }
-    resp = _request_with_policy(
-        session.post, profile.chat_url, profile, sleep=sleep, json_body=body
-    )
-    _validate_completion_response(resp, profile)
+def _parse_completion_payload(resp: Any, chat_url: str) -> None:
     try:
         payload = resp.json()
     except ValueError as exc:
         raise BackendCheckError(
             "completion-rejected",
             EXIT_COMPLETION_REJECTED,
-            f"invalid JSON from {profile.chat_url}",
+            f"invalid JSON from {chat_url}",
             "inspect remote proxy/Ollama response",
         ) from exc
     choices = payload.get("choices") if isinstance(payload, dict) else None
@@ -321,6 +324,19 @@ def _run_tiny_completion(
             "completion response contained no choices",
             "check remote Ollama model health",
         )
+
+
+def _run_tiny_completion(rt: _CheckRuntime) -> None:
+    body = {
+        "model": rt.profile.model,
+        "messages": [{"role": "user", "content": "Reply with OK."}],
+        "stream": False,
+        "temperature": 0.0,
+        "max_tokens": rt.cfg.max_tokens,
+    }
+    resp = _request_with_policy(rt.session.post, rt.profile.chat_url, rt, json_body=body)
+    _validate_completion_response(resp, rt.profile)
+    _parse_completion_payload(resp, rt.profile.chat_url)
 
 
 def emit_github_outputs(
@@ -339,16 +355,9 @@ def emit_github_outputs(
     )
 
 
-def run_backend_check(
-    cfg: BackendCheckConfig,
-    *,
-    run_cmd: Callable[..., Any] = _default_run_cmd,
-    session: Any | None = None,
-    sleep: Callable[[float], None] = time.sleep,
-) -> BackendCheckResult:
-    """Run the full remote-Ollama preflight check and return READY + digest pin."""
+def _resolve_check_profile(cfg: BackendCheckConfig) -> backends.BackendProfile:
     try:
-        profile = backends.resolve_profile(cfg.backend, host=cfg.host, model=cfg.model)
+        return backends.resolve_profile(cfg.backend, host=cfg.host, model=cfg.model)
     except backends.BackendError as exc:
         raise BackendCheckError(
             "client-error",
@@ -356,12 +365,24 @@ def run_backend_check(
             str(exc),
             "check --backend / experiment/backends.toml",
         ) from exc
+
+
+def run_backend_check(
+    cfg: BackendCheckConfig,
+    *,
+    run_cmd: Callable[..., Any] = default_run_cmd,
+    session: Any | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> BackendCheckResult:
+    """Run the full remote-Ollama preflight check and return READY + digest pin."""
+    profile = _resolve_check_profile(cfg)
     _verify_ssh_and_tunnel(cfg, run_cmd)
     owns_session = session is None
     active_session = session if session is not None else ollama_adapter.create_session()
+    rt = _CheckRuntime(cfg=cfg, profile=profile, session=active_session, sleep=sleep)
     try:
-        digest = _poll_model_and_digest(active_session, profile, cfg, sleep=sleep)
-        _run_tiny_completion(active_session, profile, cfg, sleep=sleep)
+        digest = _poll_model_and_digest(rt)
+        _run_tiny_completion(rt)
     finally:
         if owns_session:
             active_session.close()

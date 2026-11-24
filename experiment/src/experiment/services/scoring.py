@@ -33,9 +33,10 @@ def _rescore_cell(task_path: Path, cell: Path) -> dict[str, Any]:
     }
 
 
-def rescore_run(run_dir: Path, task_root: Path = TASK_ROOT) -> dict[str, Any] | None:
+def rescore_run(run_dir: Path, task_root: Path | None = None) -> dict[str, Any] | None:
     """Build a display summary, or return None when no known cells exist."""
-    task_by_id = {load_task(path).id: path for path in discover_task_files(task_root)}
+    suite_root = task_root if task_root is not None else TASK_ROOT
+    task_by_id = {load_task(path).id: path for path in discover_task_files(suite_root)}
     cells = [
         _rescore_cell(task_by_id[cell.parent.name], cell)
         for cell in run_store.discover_cell_dirs(run_dir, ARM_PREFIX)

@@ -113,6 +113,15 @@ def request_with_retry(
     return last_resp
 
 
+def _entry_digest(entry: object, candidates: set[str]) -> str | None:
+    if not isinstance(entry, dict):
+        return None
+    if not ({entry.get("name"), entry.get("model")} & candidates):
+        return None
+    digest = entry.get("digest")
+    return digest.strip() if isinstance(digest, str) and digest.strip() else None
+
+
 def extract_digest_from_tags(payload: object, model: str) -> str | None:
     """Extract the pinned digest for ``model`` from an Ollama ``/api/tags`` JSON payload."""
     if not isinstance(payload, dict):
@@ -122,13 +131,9 @@ def extract_digest_from_tags(payload: object, model: str) -> str | None:
         return None
     candidates = {model, f"{model}:latest"} if ":" not in model else {model}
     for entry in models:
-        if not isinstance(entry, dict):
-            continue
-        names = {entry.get("name"), entry.get("model")}
-        if names & candidates:
-            digest = entry.get("digest")
-            if isinstance(digest, str) and digest.strip():
-                return digest.strip()
+        digest = _entry_digest(entry, candidates)
+        if digest:
+            return digest
     return None
 
 

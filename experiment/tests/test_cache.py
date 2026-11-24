@@ -26,7 +26,9 @@ def _task_path(task_id: str) -> Path:
 
 
 def test_build_cache_key_requires_model_digest_and_varies_with_all_inputs() -> None:
-    base = cache_key.build_cache_key(
+    from dataclasses import replace
+
+    spec = cache_key.CacheKeySpec(
         backend_id="local",
         model_digest="sha256:aaaa",
         messages=[{"role": "user", "content": "hi"}],
@@ -34,74 +36,21 @@ def test_build_cache_key_requires_model_digest_and_varies_with_all_inputs() -> N
         temperature=0.0,
         max_tokens=512,
     )
+    base = cache_key.build_cache_key(spec)
     assert len(base) == 64
-    # Same inputs -> identical key
-    assert base == cache_key.build_cache_key(
-        backend_id="local",
-        model_digest="sha256:aaaa",
-        messages=[{"role": "user", "content": "hi"}],
-        tools=None,
-        temperature=0.0,
-        max_tokens=512,
+    assert base == cache_key.build_cache_key(replace(spec))
+    variations = (
+        replace(spec, backend_id="remote-ollama"),
+        replace(spec, model_digest="sha256:bbbb"),
+        replace(spec, messages=[{"role": "user", "content": "bye"}]),
+        replace(spec, tools=[{"type": "function", "function": {"name": "x"}}]),
+        replace(spec, temperature=0.5),
+        replace(spec, max_tokens=1024),
     )
-    # Changing ANY component changes the key
-    assert base != cache_key.build_cache_key(
-        backend_id="remote-ollama",
-        model_digest="sha256:aaaa",
-        messages=[{"role": "user", "content": "hi"}],
-        tools=None,
-        temperature=0.0,
-        max_tokens=512,
-    )
-    assert base != cache_key.build_cache_key(
-        backend_id="local",
-        model_digest="sha256:bbbb",
-        messages=[{"role": "user", "content": "hi"}],
-        tools=None,
-        temperature=0.0,
-        max_tokens=512,
-    )
-    assert base != cache_key.build_cache_key(
-        backend_id="local",
-        model_digest="sha256:aaaa",
-        messages=[{"role": "user", "content": "bye"}],
-        tools=None,
-        temperature=0.0,
-        max_tokens=512,
-    )
-    assert base != cache_key.build_cache_key(
-        backend_id="local",
-        model_digest="sha256:aaaa",
-        messages=[{"role": "user", "content": "hi"}],
-        tools=[{"type": "function", "function": {"name": "x"}}],
-        temperature=0.0,
-        max_tokens=512,
-    )
-    assert base != cache_key.build_cache_key(
-        backend_id="local",
-        model_digest="sha256:aaaa",
-        messages=[{"role": "user", "content": "hi"}],
-        tools=None,
-        temperature=0.5,
-        max_tokens=512,
-    )
-    assert base != cache_key.build_cache_key(
-        backend_id="local",
-        model_digest="sha256:aaaa",
-        messages=[{"role": "user", "content": "hi"}],
-        tools=None,
-        temperature=0.0,
-        max_tokens=1024,
-    )
+    for varied in variations:
+        assert base != cache_key.build_cache_key(varied)
     with pytest.raises(ValueError, match="model_digest"):
-        cache_key.build_cache_key(
-            backend_id="local",
-            model_digest="   ",
-            messages=[{"role": "user", "content": "hi"}],
-            tools=None,
-            temperature=0.0,
-            max_tokens=512,
-        )
+        cache_key.build_cache_key(replace(spec, model_digest="   "))
 
 
 def test_completion_cache_persists_successes_and_rejects_error_payloads(tmp_path: Path) -> None:
