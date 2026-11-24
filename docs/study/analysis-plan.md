@@ -39,3 +39,25 @@ description: >-
 11. **Scale path:** with N ≥ 80 (× r = 4): swap descriptive tags → confirmatory
     (same machinery, powered); retain strata analyses; add sequential-monitoring
     audit if runs span weeks (provider drift).
+
+---
+
+## Flat binary predicate matrix semantics
+
+`experiment analyze flatten <results-dir>` converts per-cell `score.json` files
+into a flat table with key columns (`run_id`, `task`, `arm`, `driver`, `model`)
+plus one 0/1 column per named predicate from the task YAMLs (`predicate:` keys,
+validated 1:1 against every assertion in the suite; missing mappings, duplicate
+predicates, and unknown assertions fail loudly).
+
+- **Cross-task zero semantics:** Every row carries every suite predicate column.
+  A cell scores `0` for predicates belonging to *other* tasks as well as for any
+  missing or failed check of its own task (strict WSZ semantics — never impute,
+  never `NaN`).
+- **Always filter by `task`:** When computing per-predicate pass rates, WSZ, or
+  OQS, filter rows to the owning `task` (or index by `TASK_PREDICATES[task]`);
+  never take an unfiltered column mean across tasks, which would dilute a
+  predicate's rate with structural cross-task zeros.
+- **Pilot shape check:** For the 3-task × 2-arm pilot suite (`feature_count`,
+  `natural_breaks`, `point_axis_order`, `touches`), a complete 1-repetition
+  pilot run flattens to shape `(6, 9)` (5 key columns + 4 predicate columns).
