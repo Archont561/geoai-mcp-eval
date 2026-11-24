@@ -17,6 +17,12 @@ from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
 from experiment import backends, mcp_client
+from experiment.domain.usage import (
+    ABORT_REASON_TOKEN_CAP,
+    TokenCapExceededError,
+    UsageSnapshot,
+    extract_response_usage,
+)
 from experiment.harness import (
     _K_CONTENT,
     _K_ID,
@@ -122,6 +128,41 @@ def _initial_messages(req: CellRequest, system: str, user: str) -> list[dict[str
     return messages
 
 
+def _record_completion_usage(req: CellRequest, reply: dict[str, Any]) -> UsageSnapshot:
+    snapshot = extract_response_usage(reply)
+    if req.usage is not None:
+        req.usage.record(snapshot)
+    return snapshot
+
+
+def _emit_usage_events(req: CellRequest, snapshot: UsageSnapshot) -> None:
+    if snapshot.warning:
+        append_transcript(
+            req.cell,
+            {
+                _K_ROLE: "harness",
+                "event": "usage_warning",
+                "warning": snapshot.warning,
+                _K_CONTENT: f"usage warning: {snapshot.warning}",
+            },
+        )
+    if req.usage is not None and req.usage.cap_exceeded and req.usage.max_cell_tokens is not None:
+        tokens_used = req.usage.observed_total_tokens
+        cap = req.usage.max_cell_tokens
+        append_transcript(
+            req.cell,
+            {
+                _K_ROLE: "harness",
+                "event": ABORT_REASON_TOKEN_CAP,
+                "reason": ABORT_REASON_TOKEN_CAP,
+                "tokens_used": tokens_used,
+                "max_cell_tokens": cap,
+                _K_CONTENT: f"{ABORT_REASON_TOKEN_CAP}: {tokens_used} > {cap}",
+            },
+        )
+        raise TokenCapExceededError(tokens_used=tokens_used, max_cell_tokens=cap)
+
+
 def _tool_reply(
     req: CellRequest,
     messages: list[dict[str, Any]],
@@ -130,16 +171,19 @@ def _tool_reply(
     profile: backends.BackendProfile,
 ) -> dict[str, Any]:
     reply = _chat_completions(session, profile, messages, tool_specs)
+    snapshot = _record_completion_usage(req, reply)
     message = reply["choices"][0]["message"]
     messages.append(message)
-    append_transcript(
-        req.cell,
-        {
-            _K_ROLE: "assistant",
-            _K_CONTENT: message.get(_K_CONTENT),
-            "tool_calls": message.get("tool_calls") or [],
-        },
-    )
+    entry: dict[str, Any] = {
+        _K_ROLE: "assistant",
+        _K_CONTENT: message.get(_K_CONTENT),
+        "tool_calls": message.get("tool_calls") or [],
+        "usage": snapshot.to_transcript_usage(),
+    }
+    if snapshot.warning:
+        entry["usage_warning"] = snapshot.warning
+    append_transcript(req.cell, entry)
+    _emit_usage_events(req, snapshot)
     return message
 
 
@@ -238,8 +282,17 @@ def _ollama_arm_b(
     user = f"{req.task.prompt}\n\nFixture head (input.geojson, {size} bytes):\n{head}"
     messages = _initial_messages(req, system, user)
     reply = _chat_completions(session, profile, messages, None)
+    snapshot = _record_completion_usage(req, reply)
     content = reply["choices"][0]["message"].get(_K_CONTENT) or ""
-    append_transcript(req.cell, {_K_ROLE: "assistant", _K_CONTENT: content})
+    entry: dict[str, Any] = {
+        _K_ROLE: "assistant",
+        _K_CONTENT: content,
+        "usage": snapshot.to_transcript_usage(),
+    }
+    if snapshot.warning:
+        entry["usage_warning"] = snapshot.warning
+    append_transcript(req.cell, entry)
+    _emit_usage_events(req, snapshot)
     # Only ```/```py/```python fences are code; a bare language tag (e.g. ```json)
     # must not leak into the captured source and get executed as Python.
     blocks = re.findall(r"```(?:python|py)?[ \t]*\r?\n(.*?)```", content, re.DOTALL | re.IGNORECASE)

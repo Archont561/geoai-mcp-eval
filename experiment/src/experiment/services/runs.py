@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,11 @@ from typing import Any
 from experiment import backends, drivers, scripted
 from experiment.adapters.task_repository import discover_task_files, load_task
 from experiment.domain.task import Task
+from experiment.domain.usage import (
+    TokenCapExceededError,
+    UsageAccumulator,
+    aggregate_run_usage,
+)
 from experiment.harness import (
     _K_CONTENT,
     _K_ROLE,
@@ -50,11 +56,20 @@ def _parse_tasks(raw: str) -> tuple[str, ...] | None:
 
 
 def parse_run_spec(
-    driver: str, model: str | None, host: str | None, arm: str, task: str, backend: str
+    driver: str,
+    model: str | None,
+    host: str | None,
+    arm: str,
+    task: str,
+    backend: str,
+    *,
+    max_cell_tokens: int | None = None,
 ) -> RunSpec:
     """Resolve the backend and validate a requested run before creating output."""
     if driver not in DRIVERS:
         raise RunSpecError(f"--driver must be one of {', '.join(DRIVERS)}")
+    if max_cell_tokens is not None and max_cell_tokens < 1:
+        raise RunSpecError("--max-cell-tokens must be a positive integer")
     try:
         profile = backends.resolve_profile(backend, host=host, model=model)
         if driver == "ollama":
@@ -68,6 +83,7 @@ def parse_run_spec(
         arms=_parse_arms(arm),
         task_ids=_parse_tasks(task),
         profile=profile,
+        max_cell_tokens=max_cell_tokens,
     )
 
 
@@ -86,31 +102,48 @@ _DRIVER_DISPATCH = {
 
 def run_cell(req: CellRequest) -> dict[str, Any]:
     started = time.time()
-    status, error = "ok", None
-    driver_fn = _DRIVER_DISPATCH.get((req.driver, req.arm))
+    status, error, abort_reason = "ok", None, None
+    accumulator = req.usage or UsageAccumulator(max_cell_tokens=req.max_cell_tokens)
+    active_req = replace(req, usage=accumulator)
+    driver_fn = _DRIVER_DISPATCH.get((active_req.driver, active_req.arm))
     if driver_fn is None:
-        status, error = "error", f"unknown driver/arm {req.driver}/{req.arm}"
-        append_transcript(req.cell, {_K_ROLE: "harness", _K_CONTENT: f"cell error: {error}"})
+        status, error = "error", f"unknown driver/arm {active_req.driver}/{active_req.arm}"
+        append_transcript(active_req.cell, {_K_ROLE: "harness", _K_CONTENT: f"cell error: {error}"})
     else:
         try:
-            driver_fn(req)
+            driver_fn(active_req)
+        except TokenCapExceededError as exc:
+            status, error, abort_reason = "aborted", str(exc), exc.reason
         except Exception as exc:
             status, error = "error", str(exc)
-            append_transcript(req.cell, {_K_ROLE: "harness", _K_CONTENT: f"cell error: {exc}"})
-    score = score_cell(req.task_path, req.cell)
-    meta = {
-        "run_id": req.run_id,
-        "task": req.task.id,
-        "arm": req.arm,
-        "driver": req.driver,
-        "model": model_label(req.driver, req.model),
+            append_transcript(
+                active_req.cell, {_K_ROLE: "harness", _K_CONTENT: f"cell error: {exc}"}
+            )
+    usage_summary = accumulator.to_summary()
+    append_transcript(
+        active_req.cell,
+        {
+            _K_ROLE: "harness",
+            "event": "usage_summary",
+            "usage": usage_summary,
+        },
+    )
+    score = score_cell(active_req.task_path, active_req.cell)
+    meta: dict[str, Any] = {
+        "run_id": active_req.run_id,
+        "task": active_req.task.id,
+        "arm": active_req.arm,
+        "driver": active_req.driver,
+        "model": model_label(active_req.driver, active_req.model),
         "status": status,
         "error": error,
+        "abort_reason": abort_reason,
         "wall_s": round(time.time() - started, 2),
         "oracle_passed": score["passed"],
+        "usage": usage_summary,
         "prototype": True,
     }
-    (req.cell / "score.json").write_text(
+    (active_req.cell / "score.json").write_text(
         json.dumps({**score, "meta": meta}, indent=JSON_INDENT, sort_keys=True), encoding=UTF8
     )
     return {**meta, "checks": score["checks"]}
@@ -128,6 +161,7 @@ def _run_one_cell(
             "arm": arm,
             "driver": spec.driver,
             "model": model_label(spec.driver, spec.model),
+            "max_cell_tokens": spec.max_cell_tokens,
             "prototype": True,
             "required_traps": list(task.required_traps),
         },
@@ -142,17 +176,54 @@ def _run_one_cell(
         host=spec.host,
         run_id=output_root.name,
         profile=spec.profile,
+        max_cell_tokens=spec.max_cell_tokens,
     )
     return run_cell(req)
 
 
+def _write_manifest(
+    output_root: Path,
+    spec: RunSpec,
+    cells: list[dict[str, Any]],
+    run_usage: dict[str, Any],
+    generated_at: str,
+) -> dict[str, Any]:
+    manifest = {
+        "manifest_version": 1,
+        "run_id": output_root.name,
+        "prototype": True,
+        "generated_at": generated_at,
+        "driver": spec.driver,
+        "model": model_label(spec.driver, spec.model),
+        "host": spec.host,
+        "arms": list(spec.arms),
+        "task_ids": sorted({cell["task"] for cell in cells}),
+        "max_cell_tokens": spec.max_cell_tokens,
+        "totals": {
+            "cells": len(cells),
+            "passed": sum(1 for c in cells if c["oracle_passed"]),
+            "aborted": sum(1 for c in cells if c["status"] == "aborted"),
+            "errored": sum(1 for c in cells if c["status"] == "error"),
+            "usage": run_usage,
+        },
+    }
+    (output_root / "manifest.json").write_text(
+        json.dumps(manifest, indent=JSON_INDENT, sort_keys=True), encoding=UTF8
+    )
+    return manifest
+
+
 def _write_summary(output_root: Path, spec: RunSpec, cells: list[dict[str, Any]]) -> dict[str, Any]:
+    generated_at = datetime.now(UTC).isoformat()
+    run_usage = aggregate_run_usage([cell.get("usage") or {} for cell in cells])
     summary = {
         "run_id": output_root.name,
         "prototype": True,
         "driver": spec.driver,
         "model": model_label(spec.driver, spec.model),
-        "generated_at": datetime.now(UTC).isoformat(),
+        "generated_at": generated_at,
+        "max_cell_tokens": spec.max_cell_tokens,
+        "usage": run_usage,
         "cells": cells,
         "passed": sum(1 for c in cells if c["oracle_passed"]),
         "total": len(cells),
@@ -160,6 +231,7 @@ def _write_summary(output_root: Path, spec: RunSpec, cells: list[dict[str, Any]]
     (output_root / "summary.json").write_text(
         json.dumps(summary, indent=JSON_INDENT, sort_keys=True), encoding=UTF8
     )
+    _write_manifest(output_root, spec, cells, run_usage, generated_at)
     return summary
 
 
