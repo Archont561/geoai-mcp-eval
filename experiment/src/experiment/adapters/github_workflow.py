@@ -9,13 +9,22 @@ from __future__ import annotations
 
 import os
 import secrets
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 import requests
+
+
+def _escape_command_data(text: str) -> str:
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _escape_command_property(text: str) -> str:
+    return _escape_command_data(text).replace(":", "%3A").replace(",", "%2C")
 
 
 @dataclass(frozen=True)
@@ -107,6 +116,23 @@ class GitHubWorkflowAdapter:
         text = markdown if markdown.endswith("\n") else markdown + "\n"
         with path.open("a", encoding="utf-8") as handle:
             handle.write(text)
+        return True
+
+    def write_notice(
+        self,
+        title: str,
+        message: str,
+        *,
+        stream: TextIO | None = None,
+    ) -> bool:
+        """Emit a GitHub Actions ``::notice::`` annotation when running in CI."""
+        if not self.is_actions:
+            return False
+        escaped_title = _escape_command_property(title)
+        escaped_msg = _escape_command_data(message)
+        out = sys.stdout if stream is None else stream
+        out.write(f"::notice title={escaped_title}::{escaped_msg}\n")
+        out.flush()
         return True
 
     def _api_headers(self, token: str) -> dict[str, str]:

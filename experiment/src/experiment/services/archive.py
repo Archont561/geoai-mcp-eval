@@ -30,7 +30,7 @@ from experiment.domain.run import (
     arm_to_paradigm,
     enforce_code_to_level,
 )
-from experiment.services import workflow, workflow_summary
+from experiment.services import archive_notices, workflow, workflow_summary
 from experiment.services.measurement import TrialMeasurementOptions, measure_trial
 
 
@@ -278,6 +278,7 @@ def pack_archive(opts: PackOptions) -> tuple[ExperimentRun, Path]:
     summary_md = workflow_summary.render_summary(harvest_dir=source_dir, run_id=rid)
     output_zip = opts.output_zip or _default_zip_path(source_dir, rid)
     RunArchive.write(output_zip, run, trial_files=trial_payloads, summary_markdown=summary_md)
+    archive_notices.emit_ci_notices(run, trial_payloads)
     if harvest_error is not None:
         raise harvest_error
     return run, output_zip

@@ -194,3 +194,16 @@ def test_prune_run_artifacts_deletes_intermediates_and_noops_locally() -> None:
         "https://api.github.com/repos/Archont561/geoai-mcp-eval/actions/artifacts/1",
         "https://api.github.com/repos/Archont561/geoai-mcp-eval/actions/artifacts/3",
     ]
+
+
+def test_write_notice_noops_locally_and_escapes_in_actions() -> None:
+    import io
+
+    local = GitHubWorkflowAdapter(env={})
+    buf = io.StringIO()
+    assert local.write_notice("Title", "hello", stream=buf) is False
+    assert buf.getvalue() == ""
+
+    ci = GitHubWorkflowAdapter(env={"GITHUB_ACTIONS": "true"})
+    assert ci.write_notice("Run: A,B", "100%\nline2\r", stream=buf) is True
+    assert buf.getvalue() == "::notice title=Run%3A A%2CB::100%25%0Aline2%0D\n"

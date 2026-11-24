@@ -368,3 +368,10 @@ def test_github_run_client_errors(tmp_path: Path) -> None:
         empty_client.load_latest()
     with pytest.raises(GitHubRunError, match="no experiment-run"):
         empty_client.download_run(111)
+
+
+def test_github_run_client_default_cache_dir() -> None:
+    from experiment.adapters import paths
+
+    client = GitHubRunClient()
+    assert client.cache_dir == paths.find_repo_root() / ".cache" / "gh-runs"
