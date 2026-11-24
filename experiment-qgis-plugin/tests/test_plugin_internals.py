@@ -17,6 +17,20 @@ import pytest
 
 from experiment_plugin import plugin, session
 
+
+def test_fake_qt_isolates_preloaded_qgis_host_modules(monkeypatch) -> None:
+    from importlib import import_module
+
+    from plugin_harness import install_fake_qt
+
+    for name in ("qgis.core", "qgis.utils"):
+        monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
+    install_fake_qt(monkeypatch)
+    for name in ("qgis.core", "qgis.utils"):
+        with pytest.raises(ModuleNotFoundError):
+            import_module(name)
+
+
 # --- fixtures --------------------------------------------------------------
 
 
