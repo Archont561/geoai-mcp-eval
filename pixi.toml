@@ -85,6 +85,10 @@ shellcheck = "*"
 
 [feature.lint.pypi-dependencies]
 alint = "==0.22.1"
+# Enforces the layer boundaries declared in pyproject.toml's [tool.importlinter]
+# section. alint checks repository layout, not import graphs, so the architecture
+# contract needs its own checker; `pixi run tools run architecture` runs it.
+import-linter = "==2.17"
 rumdl = "==0.3.4"
 
 # gherlint moved to its own environment (gherlint-env) because it requires

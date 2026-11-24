@@ -178,6 +178,7 @@ def test_extract_iso_preserves_order_and_values(payload: list[tuple[str, str]]) 
 #     Assert on the geometry, never on the FeatureCollection.
 
 GIS_FIXTURES = Path(__file__).resolve().parents[1] / "tasks" / "fixtures"
+FEATURES_KEY = "features"
 
 
 def _fixture(relative: str) -> dict:
@@ -189,7 +190,7 @@ COUNTRIES = _fixture("cartography/countries.geojson")
 
 
 def _union_of(collection: dict):
-    return unary_union([shape(feature["geometry"]) for feature in collection["features"]])
+    return unary_union([shape(feature["geometry"]) for feature in collection[FEATURES_KEY]])
 
 
 @given(distance=st.floats(min_value=0.0, max_value=2.0, allow_nan=False, allow_infinity=False))
@@ -205,7 +206,7 @@ def test_buffer_grows_monotonically_and_keeps_the_input(distance: float) -> None
 @given(distance=st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False))
 def test_buffering_never_drops_a_feature(distance: float) -> None:
     buffered = gis_ops.buffer_geometries(POLAND_CZECHIA, distance)
-    assert len(buffered["features"]) == len(POLAND_CZECHIA["features"])
+    assert len(buffered[FEATURES_KEY]) == len(POLAND_CZECHIA[FEATURES_KEY])
 
 
 @given(
@@ -215,8 +216,8 @@ def test_reproject_round_trip_restores_the_bounding_box(crs: str) -> None:
     """Projection is lossy in the last digits only; the bbox must come back."""
     projected = gis_ops.reproject(POLAND_CZECHIA, "EPSG:4326", crs)
     restored = gis_ops.reproject(projected, crs, "EPSG:4326")
-    original_box = gis_ops._bbox_of(POLAND_CZECHIA["features"])
-    restored_box = gis_ops._bbox_of(restored["features"])
+    original_box = gis_ops._bbox_of(POLAND_CZECHIA[FEATURES_KEY])
+    restored_box = gis_ops._bbox_of(restored[FEATURES_KEY])
     assert all(abs(a - b) < 1e-6 for a, b in zip(original_box, restored_box, strict=True))
 
 
@@ -239,16 +240,21 @@ def test_geodesic_and_projected_area_agree(crs: str) -> None:
 def test_union_is_idempotent_in_geometry() -> None:
     once = gis_ops.union_geometries(POLAND_CZECHIA)
     twice = gis_ops.union_geometries(once)
-    assert shape(once["features"][0]["geometry"]).equals(shape(twice["features"][0]["geometry"]))
-    assert len(once["features"]) == 1
+    once_geometry = shape(once[FEATURES_KEY][0]["geometry"])
+    twice_geometry = shape(twice[FEATURES_KEY][0]["geometry"])
+    assert once_geometry.equals(twice_geometry)
+    assert len(once[FEATURES_KEY]) == 1
 
 
-@given(iso_a3=st.sampled_from([f["properties"]["ISO_A3"] for f in COUNTRIES["features"]]))
+COUNTRY_IDS = [feature["properties"]["ISO_A3"] for feature in COUNTRIES[FEATURES_KEY]]
+
+
+@given(iso_a3=st.sampled_from(COUNTRY_IDS))
 def test_filter_returns_a_subsequence_of_the_input(iso_a3: str) -> None:
     """Filtering never invents a feature and never reorders the survivors."""
-    input_ids = [feature["properties"]["ISO_A3"] for feature in COUNTRIES["features"]]
+    input_ids = [feature["properties"]["ISO_A3"] for feature in COUNTRIES[FEATURES_KEY]]
     filtered = gis_ops.filter_features(COUNTRIES, "ISO_A3", iso_a3)
-    output_ids = [feature["properties"]["ISO_A3"] for feature in filtered["features"]]
+    output_ids = [feature["properties"]["ISO_A3"] for feature in filtered[FEATURES_KEY]]
     assert output_ids, f"{iso_a3} is in the fixture, so it must survive its own filter"
     assert set(output_ids) <= set(input_ids)
     assert output_ids == [value for value in input_ids if value in set(output_ids)]
@@ -258,10 +264,10 @@ def test_centroid_of_every_country_lies_inside_its_bounding_box() -> None:
     centroids = gis_ops.centroid(COUNTRIES)
     bounds = {
         feature["properties"]["ISO_A3"]: shape(feature["geometry"]).bounds
-        for feature in COUNTRIES["features"]
+        for feature in COUNTRIES[FEATURES_KEY]
     }
-    assert len(centroids["features"]) == len(COUNTRIES["features"])
-    for feature in centroids["features"]:
+    assert len(centroids[FEATURES_KEY]) == len(COUNTRIES[FEATURES_KEY])
+    for feature in centroids[FEATURES_KEY]:
         point = shape(feature["geometry"])
         min_x, min_y, max_x, max_y = bounds[feature["properties"]["ISO_A3"]]
         assert min_x <= point.x <= max_x and min_y <= point.y <= max_y
@@ -271,7 +277,7 @@ def test_centroid_of_every_country_lies_inside_its_bounding_box() -> None:
 def test_nearest_feature_is_never_negative_distance(longitude: float, latitude: float) -> None:
     """The nearest feature exists for any point on Earth and cannot be behind it."""
     nearest = gis_ops.nearest_feature([longitude, latitude], COUNTRIES)
-    assert 0 <= nearest["index"] < len(COUNTRIES["features"])
+    assert 0 <= nearest["index"] < len(COUNTRIES[FEATURES_KEY])
     assert nearest["distance"] >= 0.0
 
 
