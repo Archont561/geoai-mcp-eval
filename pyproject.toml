@@ -20,6 +20,34 @@ select = [
 [tool.ruff.lint.isort]
 known-first-party = ["experiment", "experiment_plugin"]
 
+# Architecture contracts — enforced by `pixi run tools run architecture`
+# (import-linter), wired into `pixi run tools check` through the `architecture`
+# tool's dependency.
+#
+# These describe the *target* boundaries. While the refactor is in flight the
+# contracts that do not yet hold are marked non-breaking; flip `contracts` to
+# emptiness as each layer lands. A contract that never fails is worthless, so
+# `test_architecture_contracts_bite` pins that the shipped graph is exercised.
+[tool.importlinter]
+root_package = "experiment"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Domain is pure: no I/O, no framework, no experiment layer above it"
+type = "forbidden"
+source_modules = ["experiment.domain"]
+forbidden_modules = [
+  "typer", "rich", "requests", "yaml", "jsonschema", "mcp", "subprocess",
+  "pathlib", "tomllib", "os",
+  "experiment.cli", "experiment.oracle", "experiment.gis_ops",
+]
+
+[[tool.importlinter.contracts]]
+name = "The arm A catalogue never imports the oracle"
+type = "forbidden"
+source_modules = ["experiment.gis_ops"]
+forbidden_modules = ["experiment.oracle"]
+
 [tool.pytest.ini_options]
 pythonpath = ["experiment/src", "experiment-qgis-plugin"]
 testpaths = ["experiment/tests", "experiment-qgis-plugin/tests"]
