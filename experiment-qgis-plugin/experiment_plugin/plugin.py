@@ -8,6 +8,7 @@ from qgis_sdk import QgisSdkPlugin, menu
 from qgis_sdk.core import PluginContext
 from qgis_sdk.ui.surfaces import Dialog
 
+from experiment_plugin import review as session_review
 from experiment_plugin import session as baseline
 
 # Keep the former plugin-module helpers available to existing callers.
@@ -658,3 +659,30 @@ def end_session(_ctx: PluginContext, manual_review_complete: bool = False) -> st
         "note: task YAML human_baseline.status stays 'pending' until you review it",
     ]
     return "\n".join(lines)
+
+
+@app.action(id="review_session", title="Review recorded human-baseline session")
+def review_session(
+    _ctx: PluginContext,
+    session_dir: str,
+    manual_actions: list[session_review.ReviewActionInput] | None = None,
+    mark_reviewed: bool = False,
+    reviewer: str = "",
+    notes: str = "",
+    processing_log: str = "",
+    output_dir: str = "",
+) -> str:
+    """Audit a completed session take and emit separate reviewed artifacts."""
+    try:
+        result = session_review.review_session(
+            session_dir,
+            manual_actions=manual_actions or (),
+            mark_reviewed=mark_reviewed,
+            reviewer=reviewer or None,
+            notes=notes or None,
+            processing_log=processing_log or None,
+            output_dir=output_dir or None,
+        )
+    except (session_review.ReviewError, ValueError) as exc:
+        return f"cannot review session: {exc}"
+    return session_review.format_review_summary(result)

@@ -34,6 +34,7 @@ def test_declared_actions_are_the_plugins_public_surface() -> None:
         "hello",
         "log_manual_action",
         "log_note",
+        "review_session",
         "show_timer",
         "start_session",
     ]
@@ -80,6 +81,37 @@ def watch_import(name, *args, **kwargs):
 
 builtins.__import__ = watch_import
 import experiment_plugin.host_observation
+assert not native_imports, native_imports
+assert 'experiment_plugin.plugin' not in sys.modules
+"""
+    plugin_root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(plugin_root)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_review_module_import_has_no_native_or_plugin_dependency() -> None:
+    """Post-session review must stay pure Python with no QGIS, Qt, or SDK imports."""
+    script = """
+import builtins
+import sys
+
+sys.path.insert(0, sys.argv[1])
+original_import = builtins.__import__
+native_imports = []
+
+def watch_import(name, *args, **kwargs):
+    if name.split('.')[0] in {'qgis', 'qgis_sdk', 'PyQt6', 'PyQt5'}:
+        native_imports.append(name)
+        raise ImportError(f'{name} is unavailable')
+    return original_import(name, *args, **kwargs)
+
+builtins.__import__ = watch_import
+import experiment_plugin.review
 assert not native_imports, native_imports
 assert 'experiment_plugin.plugin' not in sys.modules
 """

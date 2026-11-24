@@ -27,7 +27,7 @@ Complete a copy of `human-reference-record.template.json` (`record_version: 2`) 
 
 3. Preserve the JSON gate report with the evidence. The gate evaluates a fixed file three times; it does not repeat the human session and does not establish human reproducibility.
 4. A failed oracle result remains a failed H record. Investigate only as a task-design issue before freeze; do not tune the oracle against a completed session.
-5. After review, the user may update the task YAML's human-reference fields and archive only sanitized, non-identifying metadata in the repository. Recordings and raw workspaces remain outside Git.
+5. After review, the user may run the non-destructive post-session review step (`python -m experiment_plugin.review <session_dir> --mark-reviewed ...` or the plugin's `review_session` action) to emit separate `human-reference-record.reviewed.json` and `human_trajectory.jsonl` artifacts without mutating raw `events.jsonl` or `human-reference-record.json`, and then update the task YAML's human-reference fields and archive only sanitized, non-identifying metadata in the repository. Recordings and raw workspaces remain outside Git.
 
 ## Evidence checklist
 
