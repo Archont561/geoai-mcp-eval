@@ -63,7 +63,7 @@ class WorkflowRunSummary:
 
 
 def _default_cache_dir() -> Path:
-    return paths.repo_root() / ".cache" / "gh-runs"
+    return paths.find_repo_root() / ".cache" / "gh-runs"
 
 
 def _default_runner(argv: Sequence[str]) -> CommandResult:
