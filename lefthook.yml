@@ -9,6 +9,10 @@ pre-commit:
       glob: "**/*.py"
       run: pixi run tools run lint
 
+    - name: clean-code
+      glob: "{**/*.py,rude.toml}"
+      run: pixi run tools run clean_code
+
     - name: lint-repo
       run: pixi run tools run alint
 
@@ -18,6 +22,9 @@ pre-commit:
 pre-push:
   parallel: false
   jobs:
+    - name: clean-code
+      run: pixi run tools run clean_code
+
     - name: test
       run: pixi run tools run test
 

@@ -17,7 +17,10 @@ Verify the layer boundaries with import-linter.
 
 ### `pixi run tools run check` (`check`)
 Run the offline-friendly repository quality gate.
-- Depends: alint, lint, architecture, test, md
+- Depends: alint, lint, clean_code, architecture, test, md
+
+### `pixi run tools run clean_code` (`clean_code`)
+Fail on any rude Clean Code (CC, C901) violation in production Python code.
 
 ### `pixi run tools run experiment backend-check` (`experiment.backend-check`)
 Verify remote-ollama SSH tunnel, poll /v1/models digest, and run one tiny completion.
