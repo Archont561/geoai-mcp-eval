@@ -23,6 +23,7 @@ from cli_harness import check, write_cell, write_jenks_artifact
 from cli_harness import write_point_artifact as _write_point
 from cli_harness import write_relation_artifact as _write_relation
 from pytest_bdd import given, parsers, scenarios, then, when
+from rich.text import Text
 from typer.testing import CliRunner
 
 from experiment.cli._loader import app
@@ -62,9 +63,19 @@ def run_cli(cli: CliRunner, command: str, **substitutions: str) -> dict:
     }
 
 
+def _plain_output(result: dict) -> str:
+    """Check visible text rather than Rich's optional terminal styling."""
+    return Text.from_ansi(result["output"].replace("\r\n", "\n")).plain
+
+
 def _unwrapped_output(result: dict) -> str:
     """Remove console line wraps without inserting spaces into long paths."""
-    return result["output"].replace("\r\n", "\n").replace("\n", "")
+    return _plain_output(result).replace("\n", "")
+
+
+def _long_path(parent: Path, leaf: str) -> Path:
+    """Make path diagnostics wrap at the usual terminal width."""
+    return parent / ("long-directory-name-for-wrapping-" * 4) / leaf
 
 
 @when(parsers.parse('I run the command "{command}"'), target_fixture="result")
@@ -104,9 +115,22 @@ def command_exits_with_code(result: dict, code: int) -> None:
     assert result["exit_code"] == code, result["output"]
 
 
+@given("a terminal that requests colored output")
+def terminal_requests_color(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.setenv("TTY_COMPATIBLE", "1")
+    monkeypatch.setenv("TERM", "xterm")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+
 @then(parsers.parse('the output contains "{expected}"'))
 def output_contains(result: dict, expected: str) -> None:
-    assert expected in result["output"]
+    assert expected in _plain_output(result), result["output"]
+
+
+@then("the output contains terminal styling")
+def output_contains_terminal_styling(result: dict) -> None:
+    assert "\x1b[" in result["output"], result["output"]
 
 
 @then("the output names the assertions that have no predicate mapping")
@@ -369,9 +393,9 @@ def harness_with_pyqgis(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "qgis.core", core)
 
 
-@given("a sandbox script path that does not exist", target_fixture="script")
+@given("a long sandbox script path that does not exist", target_fixture="script")
 def sandbox_script_missing(tmp_path: Path) -> Path:
-    return tmp_path / "nope.py"
+    return _long_path(tmp_path, "nope.py")
 
 
 @given(parsers.parse('a sandbox script that prints "{text}"'), target_fixture="script")
@@ -589,6 +613,11 @@ def output_says_no_scores(result: dict) -> None:
 @given("a prototype output directory", target_fixture="output")
 def a_prototype_output_directory(tmp_path: Path) -> Path:
     return tmp_path / "out"
+
+
+@given("a prototype output directory with a long path", target_fixture="output")
+def a_long_prototype_output_directory(tmp_path: Path) -> Path:
+    return _long_path(tmp_path, "out")
 
 
 @given("the hosted backend has no API key")
