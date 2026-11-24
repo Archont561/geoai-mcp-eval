@@ -26,3 +26,69 @@ packages = [{include = "experiment", from = "src"}]
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-v"
+
+[tool.tasknest.tasks.preflight]
+cmd = [
+    "python",
+    "-c",
+    "import runpy, sys; sys.path.insert(0, 'src'); runpy.run_module('experiment', run_name='__main__')",
+    "workflow",
+    "preflight",
+]
+description = "Validate the pilot task suite and pin the run environment."
+marks = ["ci", "workflow"]
+
+[tool.tasknest.tasks.model]
+cmd = [
+    "python",
+    "-c",
+    "import runpy, sys; sys.path.insert(0, 'src'); runpy.run_module('experiment', run_name='__main__')",
+    "workflow",
+    "model",
+]
+description = "Start Ollama, pull the pinned model, and record its digest."
+marks = ["ci", "workflow", "setup"]
+
+[tool.tasknest.tasks.run]
+cmd = [
+    "python",
+    "-c",
+    "import runpy, sys; sys.path.insert(0, 'src'); runpy.run_module('experiment', run_name='__main__')",
+    "workflow",
+    "run",
+]
+description = "Run one experiment cell (arm, task, repetition)."
+marks = ["ci", "workflow"]
+
+[tool.tasknest.tasks.harvest]
+cmd = [
+    "python",
+    "-c",
+    "import runpy, sys; sys.path.insert(0, 'src'); runpy.run_module('experiment', run_name='__main__')",
+    "workflow",
+    "harvest",
+]
+description = "Merge cell outputs, re-run the oracle gate, and assert completeness."
+marks = ["ci", "workflow"]
+
+[tool.tasknest.tasks.summary]
+cmd = [
+    "python",
+    "-c",
+    "import runpy, sys; sys.path.insert(0, 'src'); runpy.run_module('experiment', run_name='__main__')",
+    "workflow",
+    "summary",
+]
+description = "Write the experiment step summary (artifacts, pins, completeness)."
+marks = ["ci", "workflow"]
+
+[tool.tasknest.tasks.backend-check]
+cmd = [
+    "python",
+    "-c",
+    "import runpy, sys; sys.path.insert(0, 'src'); runpy.run_module('experiment', run_name='__main__')",
+    "workflow",
+    "backend-check",
+]
+description = "Verify remote-ollama SSH tunnel, poll /v1/models digest, and run one tiny completion."
+marks = ["workflow"]

@@ -13,6 +13,9 @@ path = "tools"
 namespace = ""
 project_root = "."
 
+[[discovery.manifests]]
+path = "experiment"
+
 [checks]
 strict = true
 require_description = true

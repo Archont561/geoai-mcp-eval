@@ -1,0 +1,231 @@
+"""Tests for experiment workflow CLI commands and Tasknest manifest autodiscovery."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+from typer.testing import CliRunner
+
+from experiment.cli import app
+from experiment.services import workflow
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+runner = CliRunner()
+
+
+def test_tasknest_autodiscovers_experiment_tasks_from_manifest() -> None:
+    from tasknest.discovery import discover_tasks
+    from tasknest.validation import validate_registry
+
+    tools_dir = REPO_ROOT / "tools"
+    assert not list(tools_dir.glob("experiment_*.py"))
+    assert not (tools_dir / "_experiment_common.py").exists()
+
+    registry = discover_tasks(REPO_ROOT)
+    validate_registry(registry)
+
+    expected = {
+        "experiment.preflight",
+        "experiment.model",
+        "experiment.run",
+        "experiment.harvest",
+        "experiment.summary",
+        "experiment.backend-check",
+    }
+    discovered = {
+        name for name, task in registry.tasks.items() if task.package_name == "experiment"
+    }
+    assert expected.issubset(discovered)
+    for name in expected:
+        task = registry.tasks[name]
+        assert task.is_manifest is True
+        assert task.source_path == REPO_ROOT / "experiment" / "pyproject.toml"
+
+
+def test_workflow_preflight_writes_env_pins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "pixi.lock").write_text("lock-bytes", encoding="utf-8")
+    monkeypatch.setattr(workflow, "find_repo_root", lambda: tmp_path)
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **_kwargs: Any) -> SimpleNamespace:
+        calls.append(cmd)
+        return SimpleNamespace(returncode=0, stdout="v1.0.0\n", stderr="")
+
+    monkeypatch.setattr(workflow.subprocess, "run", fake_run)
+    res = runner.invoke(app, ["workflow", "preflight", "--run-id", "rid-1"])
+    assert res.exit_code == 0, res.output
+    pins = (tmp_path / "results" / "rid-1" / "env-pins.txt").read_text(encoding="utf-8")
+    assert "repo_sha=v1.0.0" in pins
+    assert "pixi_lock_sha256=" in pins
+    assert any("validate" in cmd for cmd in calls)
+
+
+def test_workflow_model_records_digest_and_smoke(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(workflow, "find_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(workflow.shutil, "which", lambda _name: "/usr/bin/ollama")
+    monkeypatch.setattr(workflow, "serve_running", lambda: True)
+    monkeypatch.setattr(workflow, "wait_ready", lambda: True)
+    monkeypatch.setattr(
+        workflow,
+        "_smoke_model",
+        lambda _model: {"response": "OK"},
+    )
+
+    def fake_run(cmd: list[str], **_kwargs: Any) -> SimpleNamespace:
+        if "list" in cmd:
+            return SimpleNamespace(returncode=0, stdout="qwen2.5:3b abcdef123456\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(workflow.subprocess, "run", fake_run)
+    res = runner.invoke(app, ["workflow", "model", "--model", "qwen2.5:3b", "--run-id", "rid-m"])
+    assert res.exit_code == 0, res.output
+    run_dir = tmp_path / "results" / "rid-m"
+    assert (run_dir / "model-digest.txt").read_text(encoding="utf-8").strip() == (
+        "qwen2.5:3b abcdef123456"
+    )
+    assert json.loads((run_dir / "model-smoke.json").read_text(encoding="utf-8")) == {
+        "response": "OK"
+    }
+
+
+def test_workflow_run_refuses_pilot_and_runs_smoke(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(workflow, "find_repo_root", lambda: tmp_path)
+    pilot_res = runner.invoke(
+        app,
+        [
+            "workflow",
+            "run",
+            "--arm",
+            "A",
+            "--task-id",
+            "analysis-de9im-001",
+            "--stage",
+            "pilot",
+            "--run-id",
+            "rid-p",
+        ],
+    )
+    assert pilot_res.exit_code != 0
+    cell_p = tmp_path / "results" / "rid-p" / "analysis-de9im-001" / "A" / "rep-1"
+    assert json.loads((cell_p / "manifest.json").read_text(encoding="utf-8"))["status"] == (
+        "harness-missing"
+    )
+
+    monkeypatch.setattr(workflow.shutil, "which", lambda _name: "/usr/bin/ollama")
+    monkeypatch.setattr(workflow, "serve_running", lambda: True)
+    monkeypatch.setattr(
+        workflow.subprocess,
+        "run",
+        lambda _cmd, **_kw: SimpleNamespace(returncode=0, stdout="hello\n", stderr=""),
+    )
+    smoke_res = runner.invoke(
+        app,
+        [
+            "workflow",
+            "run",
+            "--arm",
+            "B",
+            "--task-id",
+            "analysis-de9im-001",
+            "--stage",
+            "smoke",
+            "--run-id",
+            "rid-s",
+        ],
+    )
+    assert smoke_res.exit_code == 0, smoke_res.output
+    cell_s = tmp_path / "results" / "rid-s" / "analysis-de9im-001" / "B" / "rep-1"
+    manifest = json.loads((cell_s / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "mock-smoke"
+    assert (cell_s / "transcript.jsonl").is_file()
+
+
+def test_workflow_harvest_and_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(workflow, "find_repo_root", lambda: tmp_path)
+    harvest = tmp_path / "harvest"
+    cell = harvest / "experiment-A-analysis-de9im-001-rep1"
+    cell.mkdir(parents=True)
+    (cell / "manifest.json").write_text(
+        json.dumps({"arm": "A", "task": "analysis-de9im-001", "rep": 1, "status": "ok"}),
+        encoding="utf-8",
+    )
+    (harvest / "env-pins.txt").write_text("repo_sha=deadbeef\npython=3.13\n", encoding="utf-8")
+
+    # Missing cells fail loudly by default
+    fail_res = runner.invoke(
+        app,
+        [
+            "workflow",
+            "harvest",
+            "--harvest-dir",
+            str(harvest),
+            "--repetitions",
+            "1",
+            "--skip-oracle",
+            "--run-id",
+            "rid-h",
+        ],
+    )
+    assert fail_res.exit_code != 0
+
+    # With --no-fail-on-missing succeeds and writes summary.json
+    ok_res = runner.invoke(
+        app,
+        [
+            "workflow",
+            "harvest",
+            "--harvest-dir",
+            str(harvest),
+            "--repetitions",
+            "1",
+            "--no-fail-on-missing",
+            "--skip-oracle",
+            "--run-id",
+            "rid-h",
+        ],
+    )
+    assert ok_res.exit_code == 0, ok_res.output
+    summary = json.loads((harvest / "summary.json").read_text(encoding="utf-8"))
+    assert summary["complete"] is False
+    assert "analysis-de9im-001/A/rep-1" in summary["logged_cells"]
+
+    step_summary = tmp_path / "step_summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(step_summary))
+    sum_res = runner.invoke(
+        app,
+        ["workflow", "summary", "--harvest-dir", str(harvest), "--run-id", "rid-h"],
+    )
+    assert sum_res.exit_code == 0, sum_res.output
+    md = (harvest / "summary.md").read_text(encoding="utf-8")
+    assert "rid-h" in md
+    assert "deadbeef" in md
+    assert "INCOMPLETE" in md
+    assert step_summary.read_text(encoding="utf-8") == md
+
+
+def test_tasknest_manifest_executes_experiment_summary_end_to_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tasknest.testing import CliRunner as TasknestRunner
+
+    harvest = tmp_path / "harvest"
+    harvest.mkdir()
+    (harvest / "env-pins.txt").write_text("repo_sha=abc123\n", encoding="utf-8")
+    monkeypatch.setenv("EXPERIMENT_HARVEST_DIR", str(harvest))
+    monkeypatch.setenv("RUN_ID", "manifest-e2e")
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+
+    res = TasknestRunner(REPO_ROOT).invoke(["run", "experiment", "summary"])
+    assert res.exit_code == 0, res.stdout + res.stderr
+    assert (harvest / "summary.md").is_file()
+    assert "manifest-e2e" in (harvest / "summary.md").read_text(encoding="utf-8")
