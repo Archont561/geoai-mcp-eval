@@ -1,0 +1,391 @@
+"""Tests for GEO-010: remote-ollama preflight check (SSH, tunnel, /v1/models, tiny completion)."""
+
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+
+from experiment.services.backend_check import (
+    EXIT_AUTH_CLIENT,
+    EXIT_COMPLETION_REJECTED,
+    EXIT_MODEL_ABSENT,
+    EXIT_SSH_UNREACHABLE,
+    EXIT_TOKEN_LIMIT,
+    EXIT_TUNNEL_DEAD,
+    BackendCheckConfig,
+    BackendCheckError,
+    run_backend_check,
+)
+
+
+class _StubResponse:
+    def __init__(
+        self,
+        status_code: int,
+        payload: Any = None,
+        text: str = "",
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self.status_code = status_code
+        self._payload = payload
+        self.text = text or ("" if payload is None else str(payload))
+        self.headers = headers or {}
+
+    def json(self) -> Any:
+        if isinstance(self._payload, Exception):
+            raise self._payload
+        return self._payload
+
+
+class _StubSession:
+    def __init__(
+        self,
+        get_map: dict[str, list[_StubResponse | Exception]],
+        post_list: list[_StubResponse | Exception] | None = None,
+    ) -> None:
+        self._get_map = {k: list(v) for k, v in get_map.items()}
+        self._post_list = list(post_list or [])
+        self.get_calls: list[str] = []
+        self.post_calls: list[str] = []
+
+    def get(self, url: str, **_kwargs: Any) -> _StubResponse:
+        self.get_calls.append(url)
+        for suffix, queue in self._get_map.items():
+            if url.endswith(suffix):
+                item = queue.pop(0) if len(queue) > 1 else queue[0]
+                if isinstance(item, Exception):
+                    raise item
+                return item
+        raise AssertionError(f"unexpected GET {url}")
+
+    def post(self, url: str, **_kwargs: Any) -> _StubResponse:
+        self.post_calls.append(url)
+        item = self._post_list.pop(0) if len(self._post_list) > 1 else self._post_list[0]
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    def close(self) -> None:
+        return None
+
+
+def _ok_cmd(cmd: list[str], **_kw: Any) -> SimpleNamespace:
+    return SimpleNamespace(returncode=0, stdout="Master running (pid=1234)\n", stderr="")
+
+
+def _cfg(tmp_path: Path, **overrides: Any) -> BackendCheckConfig:
+    sock = tmp_path / "ollama.sock"
+    sock.write_text("", encoding="utf-8")
+    defaults: dict[str, Any] = {
+        "backend": "remote-ollama",
+        "model": "qwen2.5:3b",
+        "ssh_host": "gpu-box",
+        "control_path": sock,
+        "expected_digest": "sha256:pinned123",
+        "poll_timeout_s": 0.05,
+        "poll_interval_s": 0.0,
+    }
+    defaults.update(overrides)
+    return BackendCheckConfig(**defaults)
+
+
+def test_ready_exits_with_pinned_digest_only_after_tiny_completion(tmp_path: Path) -> None:
+    session = _StubSession(
+        get_map={
+            "/v1/models": [_StubResponse(200, {"data": [{"id": "qwen2.5:3b"}]})],
+            "/api/tags": [
+                _StubResponse(
+                    200,
+                    {"models": [{"name": "qwen2.5:3b", "digest": "sha256:pinned123"}]},
+                )
+            ],
+        },
+        post_list=[
+            _StubResponse(
+                200,
+                {
+                    "choices": [
+                        {"message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}
+                    ]
+                },
+            )
+        ],
+    )
+    result = run_backend_check(
+        _cfg(tmp_path),
+        run_cmd=_ok_cmd,
+        session=session,  # type: ignore[arg-type]
+        sleep=lambda _s: None,
+    )
+    assert result.status == "READY"
+    assert result.model == "qwen2.5:3b"
+    assert result.digest == "sha256:pinned123"
+    assert len(session.post_calls) == 1
+
+
+def test_ssh_unreachable_produces_distinct_error(tmp_path: Path) -> None:
+    def fail_ssh(cmd: list[str], **_kw: Any) -> SimpleNamespace:
+        if "-O" in cmd:
+            return SimpleNamespace(returncode=0, stdout="Master running\n", stderr="")
+        return SimpleNamespace(returncode=255, stdout="", stderr="ssh: Could not resolve hostname")
+
+    with pytest.raises(BackendCheckError) as exc_info:
+        run_backend_check(_cfg(tmp_path), run_cmd=fail_ssh, sleep=lambda _s: None)
+    assert exc_info.value.kind == "ssh-unreachable"
+    assert exc_info.value.exit_code == EXIT_SSH_UNREACHABLE
+    assert "gpu-box" in str(exc_info.value)
+
+
+def test_dead_controlmaster_tunnel_produces_distinct_error(tmp_path: Path) -> None:
+    def dead_tunnel(cmd: list[str], **_kw: Any) -> SimpleNamespace:
+        if "-O" in cmd:
+            return SimpleNamespace(returncode=255, stdout="", stderr="Control socket connect: dead")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with pytest.raises(BackendCheckError) as exc_info:
+        run_backend_check(_cfg(tmp_path), run_cmd=dead_tunnel, sleep=lambda _s: None)
+    assert exc_info.value.kind == "tunnel-dead"
+    assert exc_info.value.exit_code == EXIT_TUNNEL_DEAD
+
+
+def test_missing_control_socket_reports_tunnel_dead(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path, control_path=tmp_path / "does-not-exist.sock")
+    with pytest.raises(BackendCheckError) as exc_info:
+        run_backend_check(cfg, run_cmd=_ok_cmd, sleep=lambda _s: None)
+    assert exc_info.value.kind == "tunnel-dead"
+    assert exc_info.value.exit_code == EXIT_TUNNEL_DEAD
+
+
+def test_absent_model_or_digest_mismatch_fails_distinctly(tmp_path: Path) -> None:
+    session = _StubSession(
+        get_map={
+            "/v1/models": [_StubResponse(200, {"data": [{"id": "other:1b"}]})],
+            "/api/tags": [
+                _StubResponse(200, {"models": [{"name": "other:1b", "digest": "sha256:other"}]})
+            ],
+        },
+        post_list=[],
+    )
+    with pytest.raises(BackendCheckError) as exc_info:
+        run_backend_check(
+            _cfg(tmp_path, poll_timeout_s=0.01),
+            run_cmd=_ok_cmd,
+            session=session,  # type: ignore[arg-type]
+            sleep=lambda _s: None,
+        )
+    assert exc_info.value.kind == "model-absent"
+    assert exc_info.value.exit_code == EXIT_MODEL_ABSENT
+    assert session.post_calls == []
+
+
+def test_no_silent_retry_on_auth_or_4xx(tmp_path: Path) -> None:
+    session = _StubSession(
+        get_map={"/v1/models": [_StubResponse(401, text="invalid api key")]},
+    )
+    with pytest.raises(BackendCheckError) as exc_info:
+        run_backend_check(
+            _cfg(tmp_path),
+            run_cmd=_ok_cmd,
+            session=session,  # type: ignore[arg-type]
+            sleep=lambda _s: None,
+        )
+    assert exc_info.value.kind == "auth-error"
+    assert exc_info.value.exit_code == EXIT_AUTH_CLIENT
+    # Strictly one request — zero silent retries on 401!
+    assert len(session.get_calls) == 1
+
+
+def test_retries_only_on_429_or_5xx_then_succeeds(tmp_path: Path) -> None:
+    session = _StubSession(
+        get_map={
+            "/v1/models": [
+                _StubResponse(503, text="overloaded"),
+                _StubResponse(200, {"data": [{"id": "qwen2.5:3b"}]}),
+            ],
+            "/api/tags": [
+                _StubResponse(
+                    200,
+                    {"models": [{"name": "qwen2.5:3b", "digest": "sha256:pinned123"}]},
+                )
+            ],
+        },
+        post_list=[
+            _StubResponse(429, text="slow down"),
+            _StubResponse(
+                200,
+                {
+                    "choices": [
+                        {"message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}
+                    ]
+                },
+            ),
+        ],
+    )
+    result = run_backend_check(
+        _cfg(tmp_path),
+        run_cmd=_ok_cmd,
+        session=session,  # type: ignore[arg-type]
+        sleep=lambda _s: None,
+    )
+    assert result.status == "READY"
+    assert len(session.post_calls) == 2
+
+
+def test_token_limit_rejection_is_distinct_and_not_retried_on_400(tmp_path: Path) -> None:
+    session = _StubSession(
+        get_map={
+            "/v1/models": [_StubResponse(200, {"data": [{"id": "qwen2.5:3b"}]})],
+            "/api/tags": [
+                _StubResponse(
+                    200,
+                    {"models": [{"name": "qwen2.5:3b", "digest": "sha256:pinned123"}]},
+                )
+            ],
+        },
+        post_list=[
+            _StubResponse(400, text="maximum context length / token limit exceeded"),
+        ],
+    )
+    with pytest.raises(BackendCheckError) as exc_info:
+        run_backend_check(
+            _cfg(tmp_path),
+            run_cmd=_ok_cmd,
+            session=session,  # type: ignore[arg-type]
+            sleep=lambda _s: None,
+        )
+    assert exc_info.value.kind == "token-limit"
+    assert exc_info.value.exit_code == EXIT_TOKEN_LIMIT
+    assert len(session.post_calls) == 1
+
+
+def test_completion_rejected_on_empty_choices(tmp_path: Path) -> None:
+    session = _StubSession(
+        get_map={
+            "/v1/models": [_StubResponse(200, {"data": [{"id": "qwen2.5:3b"}]})],
+            "/api/tags": [
+                _StubResponse(
+                    200,
+                    {"models": [{"name": "qwen2.5:3b", "digest": "sha256:pinned123"}]},
+                )
+            ],
+        },
+        post_list=[_StubResponse(200, {"choices": []})],
+    )
+    with pytest.raises(BackendCheckError) as exc_info:
+        run_backend_check(
+            _cfg(tmp_path),
+            run_cmd=_ok_cmd,
+            session=session,  # type: ignore[arg-type]
+            sleep=lambda _s: None,
+        )
+    assert exc_info.value.kind == "completion-rejected"
+    assert exc_info.value.exit_code == EXIT_COMPLETION_REJECTED
+
+
+def test_tasknest_tool_wrapper_prints_ready_and_propagates_exit_code(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tool_path = Path(__file__).resolve().parents[2] / "tools" / "experiment_backend_check.py"
+    spec = importlib.util.spec_from_file_location("experiment_backend_check", tool_path)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    from experiment.services import backend_check
+
+    monkeypatch.setattr(
+        backend_check,
+        "run_backend_check",
+        lambda _cfg: backend_check.BackendCheckResult(
+            status="READY",
+            backend="remote-ollama",
+            model="qwen2.5:3b",
+            digest="sha256:pinned123",
+            base_url="http://127.0.0.1:11435/v1",
+        ),
+    )
+    ctx = SimpleNamespace(repo_root=Path(__file__).resolve().parents[2])
+    mod.experiment_backend_check(ctx, ssh_host="gpu-box")
+    out = capsys.readouterr().out
+    assert "READY" in out and "sha256:pinned123" in out
+
+    def boom(_cfg: Any) -> Any:
+        raise BackendCheckError("tunnel-dead", EXIT_TUNNEL_DEAD, "socket closed", "restart ssh")
+
+    monkeypatch.setattr(backend_check, "run_backend_check", boom)
+    with pytest.raises(SystemExit) as sysexit:
+        mod.experiment_backend_check(ctx, ssh_host="gpu-box")
+    assert sysexit.value.code == EXIT_TUNNEL_DEAD
+
+
+def test_backend_check_edge_errors(tmp_path: Path) -> None:
+    import requests
+
+    # Missing ssh_host
+    with pytest.raises(BackendCheckError) as e1:
+        run_backend_check(_cfg(tmp_path, ssh_host=None), run_cmd=_ok_cmd, sleep=lambda _s: None)
+    assert e1.value.exit_code == EXIT_SSH_UNREACHABLE
+
+    # Unknown backend profile
+    with pytest.raises(BackendCheckError) as e2:
+        run_backend_check(_cfg(tmp_path, backend="no-such-backend"), run_cmd=_ok_cmd)
+    assert e2.value.exit_code == EXIT_AUTH_CLIENT
+
+    # Transport connection error -> tunnel-dead
+    conn_session = _StubSession(
+        get_map={"/v1/models": [requests.exceptions.ConnectionError("refused")]}
+    )
+    with pytest.raises(BackendCheckError) as e3:
+        run_backend_check(
+            _cfg(tmp_path),
+            run_cmd=_ok_cmd,
+            session=conn_session,  # type: ignore[arg-type]
+            sleep=lambda _s: None,
+        )
+    assert e3.value.exit_code == EXIT_TUNNEL_DEAD
+
+    # Exhausted 429 on completion -> token-limit after retries + 1 attempts
+    ok_models = {
+        "/v1/models": [_StubResponse(200, {"data": [{"id": "qwen2.5:3b"}]})],
+        "/api/tags": [
+            _StubResponse(200, {"models": [{"name": "qwen2.5:3b", "digest": "sha256:pinned123"}]})
+        ],
+    }
+    rl_session = _StubSession(get_map=ok_models, post_list=[_StubResponse(429, text="quota")])
+    with pytest.raises(BackendCheckError) as e4:
+        run_backend_check(
+            _cfg(tmp_path),
+            run_cmd=_ok_cmd,
+            session=rl_session,  # type: ignore[arg-type]
+            sleep=lambda _s: None,
+        )
+    assert e4.value.exit_code == EXIT_TOKEN_LIMIT
+    assert len(rl_session.post_calls) == 4  # 1 initial + 3 retries
+
+    # 401 on completion -> auth-error, 1 attempt only
+    auth_session = _StubSession(get_map=ok_models, post_list=[_StubResponse(401, text="denied")])
+    with pytest.raises(BackendCheckError) as e5:
+        run_backend_check(
+            _cfg(tmp_path),
+            run_cmd=_ok_cmd,
+            session=auth_session,  # type: ignore[arg-type]
+            sleep=lambda _s: None,
+        )
+    assert e5.value.exit_code == EXIT_AUTH_CLIENT
+    assert len(auth_session.post_calls) == 1
+
+    # 500 on completion -> completion-rejected after retries
+    err_session = _StubSession(get_map=ok_models, post_list=[_StubResponse(500, text="crash")])
+    with pytest.raises(BackendCheckError) as e6:
+        run_backend_check(
+            _cfg(tmp_path),
+            run_cmd=_ok_cmd,
+            session=err_session,  # type: ignore[arg-type]
+            sleep=lambda _s: None,
+        )
+    assert e6.value.exit_code == EXIT_COMPLETION_REJECTED
+    assert len(err_session.post_calls) == 4
