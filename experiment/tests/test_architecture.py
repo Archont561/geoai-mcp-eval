@@ -129,7 +129,8 @@ def test_the_shipped_contracts_pass_and_reject_violations(tmp_path: Path) -> Non
     svc_io = "Services delegate transport, subprocess, and storage I/O to adapters"
     cli_io = "CLI never performs transport or subprocess I/O directly"
     cli_adapters = "CLI calls services rather than importing adapters directly"
-    for name in (layers, no_frameworks, svc_io, cli_io, cli_adapters):
+    analysis_cache = "Analysis never imports or reads the LLM completion cache"
+    for name in (layers, no_frameworks, svc_io, cli_io, cli_adapters, analysis_cache):
         assert f"{name} KEPT" in result.stdout
     shutil.copytree(
         REPO_ROOT / "experiment" / "src" / "experiment",
@@ -198,14 +199,27 @@ def test_the_shipped_contracts_pass_and_reject_violations(tmp_path: Path) -> Non
             cli_adapters,
             "experiment.cli is not allowed to import experiment.adapters",
         ),
+        (
+            "analysis",
+            "from experiment.adapters import llm_cache\n",
+            analysis_cache,
+            "experiment.analysis is not allowed to import experiment.adapters.llm_cache",
+        ),
+        (
+            "analysis",
+            "from experiment.domain import cache_key\n",
+            analysis_cache,
+            "experiment.analysis is not allowed to import experiment.domain.cache_key",
+        ),
     ):
         _assert_shipped_contract_bites(tmp_path, package, source, contract, violation)
 
 
 def test_no_migrated_legacy_flat_modules_remain() -> None:
-    """Flat legacy modules retired in GEO-016 must stay inside Clean Architecture layers."""
+    """Flat legacy modules retired in GEO-016/GEO-020 must stay inside Clean Architecture layers."""
     pkg_root = REPO_ROOT / "experiment" / "src" / "experiment"
     retired = (
+        "analyze.py",
         "backends.py",
         "drivers.py",
         "harness.py",

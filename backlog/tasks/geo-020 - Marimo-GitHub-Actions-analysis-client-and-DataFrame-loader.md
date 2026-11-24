@@ -1,7 +1,7 @@
 ---
 id: GEO-020
 title: Marimo GitHub Actions analysis client and DataFrame loader
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-24T00:00:00Z'
 labels:
@@ -35,11 +35,11 @@ Capabilities:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `experiment/src/experiment/analysis/` exposes `GitHubRunClient` (download + cache via `gh`, plus offline `load_zip`) and `RunDataset` DataFrame projections (`measurements_df`, `predicates_df`, `cell_summary_df`, `assertions_df`).
-- [ ] #2 `predicates_df()` preserves strict 1:1 assertion-to-predicate validation and cross-task zero semantics (missing/failed checks score `0`, unknown assertions fail loudly).
-- [ ] #3 `import-linter` contract confirms `experiment.analysis` never imports `experiment.adapters.llm_cache` or `experiment.domain.cache_key`.
-- [ ] #4 `docs/analyses/experiment-analysis.md` uses the English ontology terms and demonstrates loading via `GitHubRunClient` while keeping GitHub Pages builds offline-safe.
-- [ ] #5 Unit tests cover cached `gh` downloads (mocked subprocess), offline zip loading, all four DataFrame projections, and lazy trial drill-down.
+- [x] #1 `experiment/src/experiment/analysis/` exposes `GitHubRunClient` (download + cache via `gh`, plus offline `load_zip`) and `RunDataset` DataFrame projections (`measurements_df`, `predicates_df`, `cell_summary_df`, `assertions_df`).
+- [x] #2 `predicates_df()` preserves strict 1:1 assertion-to-predicate validation and cross-task zero semantics (missing/failed checks score `0`, unknown assertions fail loudly).
+- [x] #3 `import-linter` contract confirms `experiment.analysis` never imports `experiment.adapters.llm_cache` or `experiment.domain.cache_key`.
+- [x] #4 `docs/analyses/experiment-analysis.md` uses the English ontology terms and demonstrates loading via `GitHubRunClient` while keeping GitHub Pages builds offline-safe.
+- [x] #5 Unit tests cover cached `gh` downloads (mocked subprocess), offline zip loading, all four DataFrame projections, and lazy trial drill-down.
 <!-- AC:END -->
 
 ## Implementation Plan

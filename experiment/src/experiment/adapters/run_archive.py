@@ -108,12 +108,18 @@ def collect_dir_files(root: Path) -> dict[str, bytes]:
     return result
 
 
+def _normalize_content(value: Any) -> str | None:
+    if value is None or isinstance(value, str):
+        return value
+    return json.dumps(value, sort_keys=True)
+
+
 def _parse_transcript_entry(raw: Mapping[str, Any]) -> TranscriptEntry:
     known: dict[str, Any] = {}
     extra: dict[str, Any] = {}
     for key, value in raw.items():
         if key in _TRANSCRIPT_KNOWN_FIELDS:
-            known[key] = value
+            known[key] = _normalize_content(value) if key == "content" else value
         else:
             extra[key] = value
     if "role" not in known:

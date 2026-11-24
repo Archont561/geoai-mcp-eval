@@ -199,8 +199,8 @@ jobs:
           merge-multiple: false
       - name: Harvest, verify oracle gate, pack RunArchive zip, and render summary
         env:
-          EXPERIMENT_HARVEST_DIR: harvest
-          EXPERIMENT_ARCHIVE_OUT: bundle/experiment-run-${{ github.run_id }}-${{ github.sha }}.zip
+          EXPERIMENT_HARVEST_DIR: ${{ github.workspace }}/harvest
+          EXPERIMENT_ARCHIVE_OUT: ${{ github.workspace }}/bundle/experiment-run-${{ github.run_id }}-${{ github.sha }}.zip
           EXPERIMENT_STAGE: ${{ inputs.stage }}
           EXPERIMENT_ARMS: A,B
           EXPERIMENT_REPETITIONS: ${{ inputs.repetitions }}
@@ -214,7 +214,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: experiment-run-${{ github.run_id }}-${{ github.sha }}
-          path: bundle/experiment-run-${{ github.run_id }}-${{ github.sha }}.zip
+          path: ${{ github.workspace }}/bundle/experiment-run-${{ github.run_id }}-${{ github.sha }}.zip
           compression-level: 0
           if-no-files-found: error
           retention-days: ${{ inputs.retention-days }}
