@@ -97,10 +97,31 @@ def test_workflow_model_records_digest_and_smoke(
     }
 
 
-def test_workflow_run_refuses_pilot_and_runs_smoke(
+def test_workflow_run_executes_pilot_and_smoke(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(workflow, "find_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(subprocess_runner, "which", lambda _name: "/usr/bin/ollama")
+    monkeypatch.setattr(ollama_adapter, "start_ollama", lambda *_a, **_kw: None)
+    monkeypatch.setattr(ollama_adapter, "list_model_digest", lambda *_a, **_kw: "sha256:abc123")
+    monkeypatch.setattr(
+        workflow.paths, "tasks_root", lambda _root=None: REPO_ROOT / "experiment" / "tasks"
+    )
+
+    seen_reqs: list[Any] = []
+
+    def fake_run_cell(req: Any) -> dict[str, Any]:
+        seen_reqs.append(req)
+        (req.cell / "score.json").write_text('{"passed": true}', encoding="utf-8")
+        return {
+            "status": "ok",
+            "oracle_passed": True,
+            "usage": {"prompt_tokens": 12, "completion_tokens": 8, "total_tokens": 20},
+            "wall_s": 1.25,
+            "error": None,
+        }
+
+    monkeypatch.setattr(workflow.workflow_pilot.runs_service, "run_cell", fake_run_cell)
     pilot_res = runner.invoke(
         app,
         [
@@ -112,18 +133,25 @@ def test_workflow_run_refuses_pilot_and_runs_smoke(
             "analysis-de9im-001",
             "--stage",
             "pilot",
+            "--model",
+            "qwen2.5:3b",
             "--run-id",
             "rid-p",
         ],
     )
-    assert pilot_res.exit_code != 0
+    assert pilot_res.exit_code == 0, pilot_res.output
+    assert len(seen_reqs) == 1
+    assert seen_reqs[0].arm == "A"
+    assert seen_reqs[0].driver == "ollama"
+    assert seen_reqs[0].model == "qwen2.5:3b"
+    assert seen_reqs[0].model_digest == "sha256:abc123"
     cell_p = tmp_path / "results" / "rid-p" / "analysis-de9im-001" / "A" / "rep-1"
-    assert json.loads((cell_p / "manifest.json").read_text(encoding="utf-8"))["status"] == (
-        "harness-missing"
-    )
+    pilot_manifest = json.loads((cell_p / "manifest.json").read_text(encoding="utf-8"))
+    assert pilot_manifest["status"] == "ok"
+    assert pilot_manifest["oracle_passed"] is True
+    assert pilot_manifest["model_digest"] == "sha256:abc123"
+    assert (cell_p / "transcript.jsonl").is_file()
 
-    monkeypatch.setattr(subprocess_runner, "which", lambda _name: "/usr/bin/ollama")
-    monkeypatch.setattr(ollama_adapter, "start_ollama", lambda *_a, **_kw: None)
     monkeypatch.setattr(subprocess_runner, "run_passthrough", lambda _cmd, **_kw: 0)
     smoke_res = runner.invoke(
         app,
@@ -145,6 +173,24 @@ def test_workflow_run_refuses_pilot_and_runs_smoke(
     manifest = json.loads((cell_s / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["status"] == "mock-smoke"
     assert (cell_s / "transcript.jsonl").is_file()
+
+
+def test_resolve_pilot_digest_pulls_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    digests = iter(["unknown", "sha256:pulled999"])
+    pulled: list[str] = []
+    monkeypatch.setattr(ollama_adapter, "list_model_digest", lambda *_a, **_kw: next(digests))
+    monkeypatch.setattr(
+        ollama_adapter, "pull_model", lambda _bin, model: (pulled.append(model), 0)[1]
+    )
+    assert workflow.workflow_pilot.resolve_pilot_digest("/usr/bin/ollama", "qwen2.5:3b") == (
+        "sha256:pulled999"
+    )
+    assert pulled == ["qwen2.5:3b"]
+
+    monkeypatch.setattr(ollama_adapter, "list_model_digest", lambda *_a, **_kw: "unknown")
+    monkeypatch.setattr(ollama_adapter, "pull_model", lambda *_a, **_kw: 1)
+    with pytest.raises(RuntimeError, match="ollama pull qwen2.5:3b failed"):
+        workflow.workflow_pilot.resolve_pilot_digest("/usr/bin/ollama", "qwen2.5:3b")
 
 
 def test_workflow_harvest_and_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
