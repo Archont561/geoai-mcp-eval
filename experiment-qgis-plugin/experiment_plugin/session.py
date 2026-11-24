@@ -22,6 +22,7 @@ import platform
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any
 
 from experiment_plugin import __version__
@@ -249,8 +250,30 @@ class HumanBaselineSession:
         outputs = self._collect_outputs()
         record = self._build_record(ended, outputs)
         record_path = self.output_dir / "human-reference-record.json"
-        record_path.write_text(json.dumps(record, indent=2, sort_keys=True), encoding="utf-8")
-        self.tracker.record("session_end", outputs=len(outputs))
+        # Publish beside the event log only after its terminal event is written.
+        pending: Path | None = None
+        try:
+            with NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self.output_dir,
+                prefix=".human-reference-record-",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                pending = Path(handle.name)
+                handle.write(json.dumps(record, indent=2, sort_keys=True))
+            self.tracker.record("session_end", outputs=len(outputs))
+            pending.replace(record_path)
+        except BaseException as error:
+            if pending is not None:
+                try:
+                    pending.unlink(missing_ok=True)
+                except OSError as cleanup_error:
+                    raise BaseExceptionGroup(
+                        "record writing and cleanup failed", [error, cleanup_error]
+                    ) from None
+            raise
         self.status = "recorded"
         return record_path
 

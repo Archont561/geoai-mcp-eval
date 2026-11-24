@@ -12,6 +12,7 @@ from experiment_plugin import session as baseline
 
 # Keep the former plugin-module helpers available to existing callers.
 from experiment_plugin.host_observation import MAX_EVENTS as MAX_EVENTS
+from experiment_plugin.host_observation import HostHooks
 from experiment_plugin.host_observation import _log_capped as _log_capped
 from experiment_plugin.host_observation import _wire_canvas_hooks as _wire_canvas_hooks
 from experiment_plugin.host_observation import _wire_project_hooks as _wire_project_hooks
@@ -30,6 +31,61 @@ _ACTIVE: dict[str, baseline.HumanBaselineSession | None] = {"session": None}
 # The last session to reach a terminal state (ended or abandoned). The
 # panel's Logs tab and Export keep showing it once _ACTIVE is cleared.
 _LAST: dict[str, baseline.HumanBaselineSession | None] = {"session": None}
+
+# Resources belonging to the active session, if any.
+_SESSION_RESOURCES: _SessionResources | None = None
+
+
+class _SessionResources:
+    """Tie one session's host hooks to the plugin's SDK lifetime."""
+
+    def __init__(self, session: baseline.HumanBaselineSession, ctx: PluginContext | None) -> None:
+        self.session = session
+        self.hooks = HostHooks()
+        self.scope = ctx.scope.child() if ctx is not None else None
+        if self.scope is not None:
+            self.scope.on_close(self._on_scope_close)
+
+    def close(self) -> None:
+        if self.scope is not None:
+            self.scope.close()
+        else:
+            self._on_scope_close()
+
+    def _on_scope_close(self) -> None:
+        global _SESSION_RESOURCES
+
+        self.hooks.pause()
+        active = _ACTIVE["session"] is self.session
+        failure: BaseException | None = None
+        try:
+            if active:
+                baseline.abandon_session(self.session, reason="plugin unloaded")
+        except BaseException as exc:
+            self.session.status = "incomplete"
+            failure = exc
+        finally:
+            if active:
+                _LAST["session"] = self.session
+                _ACTIVE["session"] = None
+            if _SESSION_RESOURCES is self:
+                _SESSION_RESOURCES = None
+        try:
+            self.hooks.close()
+        except BaseException as cleanup_error:
+            if failure is not None:
+                raise BaseExceptionGroup(
+                    "abandonment and cleanup failed", [failure, cleanup_error]
+                ) from None
+            raise
+        if failure is not None:
+            raise failure
+
+
+def _exception_detail(error: BaseException) -> str:
+    if isinstance(error, BaseExceptionGroup):
+        return "; ".join(_exception_detail(child) for child in error.exceptions)
+    return str(error)
 
 
 def _format_elapsed(seconds: float) -> str:
@@ -64,21 +120,25 @@ class SessionPanelDialog(Dialog):
 
     def _call_action(self, name: str, **kwargs: object) -> str:
         """Call one of the plugin's own actions via the view's dispatcher."""
+        result, _succeeded = self._dispatch_action(name, **kwargs)
+        return result
+
+    def _dispatch_action(self, name: str, **kwargs: object) -> tuple[str, bool]:
         ctx = self.ctx
         try:
             if callable(getattr(ctx, "has", None)) and not ctx.has("actions"):
-                return "no actions capability in this host (a GUI host is required)"
+                return "no actions capability in this host (a GUI host is required)", False
             actions = ctx.actions
         except Exception as exc:
-            return f"actions unavailable: {exc}"
+            return f"actions unavailable: {exc}", False
         handler = getattr(actions, name, None)
         if handler is None:
-            return f"unknown action {name}"
+            return f"unknown action {name}", False
         try:
             result = handler(**kwargs)
         except Exception as exc:
-            return f"{name} failed: {exc}"
-        return str(result)
+            return f"{name} failed: {_exception_detail(exc)}", False
+        return str(result), True
 
     # -- panel construction (Qt imports stay inside the methods) -----------
 
@@ -223,7 +283,10 @@ class SessionPanelDialog(Dialog):
         self._refresh_controls()
         self._refresh_logs()
         self._tick()
-        self._parts["status_label"].setText(result.splitlines()[0] if result else fallback)
+        lines = result.splitlines()
+        summary = lines[0] if lines else fallback
+        hook_failures = [line for line in lines[1:] if line.startswith("host hook failed:")]
+        self._parts["status_label"].setText("\n".join([summary, *hook_failures]))
 
     def _on_start(self) -> None:
         task_id, participant = self._params()
@@ -260,7 +323,11 @@ class SessionPanelDialog(Dialog):
             self._parts["status_label"].setText("restart cancelled")
             return
         task_id, participant = self._params()
-        self._call_action("abandon_session")
+        previous = _ACTIVE["session"]
+        result, succeeded = self._dispatch_action("abandon_session")
+        if not succeeded or previous is None or previous.status != "abandoned":
+            self._after_change(result, "restart failed")
+            return
         result = self._call_action(
             "start_session",
             task_id=task_id,
@@ -386,6 +453,8 @@ def start_session(
     verify it). Failures are plain text mixed into the success output —
     fine for a desktop action label; do not parse it.
     """
+    global _SESSION_RESOURCES
+
     if (error := _active_session_error()) is not None:
         return error
     root = _task_dir(base_dir)
@@ -397,9 +466,15 @@ def start_session(
         )
     except (FileNotFoundError, KeyError) as exc:
         return f"cannot start session: {exc}"
-    hooks, failures = _connect_host_hooks(session)
+    resources = _SessionResources(session, _ctx)
+    _SESSION_RESOURCES = resources
     _ACTIVE["session"] = session
-    return _start_message(session, hooks, failures)
+    try:
+        hooks, failures = _connect_host_hooks(session, resources.hooks)
+        return _start_message(session, hooks, failures)
+    except BaseException as error:
+        _retire_failed_session(session, resources, error, "starting")
+        raise
 
 
 @menu("Plugins/Experiment Plugin")
@@ -443,6 +518,33 @@ def log_note(_ctx: PluginContext, message: str) -> str:
     return f"note recorded ({session.tracker.event_count} events so far)"
 
 
+def _retire_session(
+    session: baseline.HumanBaselineSession, resources: _SessionResources | None
+) -> None:
+    global _SESSION_RESOURCES
+
+    _LAST["session"] = session
+    _ACTIVE["session"] = None
+    _SESSION_RESOURCES = None
+    if resources is not None:
+        resources.close()
+
+
+def _retire_failed_session(
+    session: baseline.HumanBaselineSession,
+    resources: _SessionResources | None,
+    error: BaseException,
+    operation: str,
+) -> None:
+    session.status = "incomplete"
+    try:
+        _retire_session(session, resources)
+    except BaseException as cleanup_error:
+        raise BaseExceptionGroup(
+            f"{operation} and cleanup failed", [error, cleanup_error]
+        ) from None
+
+
 @app.action(id="abandon_session", title="Abandon human-baseline session")
 def abandon_session(_ctx: PluginContext) -> str:
     """Abandon the active session WITHOUT writing human-reference-record.json.
@@ -455,9 +557,17 @@ def abandon_session(_ctx: PluginContext) -> str:
     session = _ACTIVE["session"]
     if session is None:
         return "no active session"
-    marker = baseline.abandon_session(session)
-    _LAST["session"] = session
-    _ACTIVE["session"] = None
+    resources = _SESSION_RESOURCES
+    if resources is not None:
+        resources.hooks.pause()
+    try:
+        marker = baseline.abandon_session(session)
+    except BaseException as error:
+        # Abandonment may have appended its terminal event before a marker
+        # write failed; never resume observation or promote that partial take.
+        _retire_failed_session(session, resources, error, "abandonment")
+        raise
+    _retire_session(session, resources)
     return (
         f"session abandoned for {session.task_id} — no record written; evidence marked at {marker}"
     )
@@ -469,9 +579,34 @@ def end_session(_ctx: PluginContext) -> str:
     session = _ACTIVE["session"]
     if session is None:
         return "no active session"
-    record_path = session.finish()
-    _LAST["session"] = session
-    _ACTIVE["session"] = None
+    resources = _SESSION_RESOURCES
+    if resources is not None:
+        resources.hooks.pause()
+    # A failed append can write bytes without updating the tracker count.
+    try:
+        log_size = session.tracker.events_path.stat().st_size
+    except OSError:
+        log_size = None
+    try:
+        record_path = session.finish()
+    except BaseException as error:
+        try:
+            current_size = session.tracker.events_path.stat().st_size
+        except OSError:
+            current_size = None
+        if (
+            log_size is not None
+            and current_size == log_size
+            and not isinstance(error, BaseExceptionGroup)
+        ):
+            if resources is not None:
+                resources.hooks.resume()
+        else:
+            # A terminal event may already be on disk; keep the incomplete
+            # take closed even if the remaining write or cleanup failed.
+            _retire_failed_session(session, resources, error, "ending")
+        raise
+    _retire_session(session, resources)
     lines = [
         f"session ended for {session.task_id}",
         f"events: {session.tracker.event_count}  tools: {', '.join(session.tools_used) or 'none'}",
