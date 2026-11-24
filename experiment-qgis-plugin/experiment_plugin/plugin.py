@@ -412,7 +412,13 @@ def hello(_ctx: PluginContext, name: str) -> str:
 
 
 def _task_dir(base_dir: str) -> str:
-    return base_dir or os.environ.get("EXPERIMENT_TASK_DIR") or "experiment/tasks"
+    explicit = base_dir.strip()
+    if explicit:
+        return explicit
+    from_env = (os.environ.get("EXPERIMENT_TASK_DIR") or "").strip()
+    if from_env:
+        return from_env
+    return str(baseline.discover_task_dir())
 
 
 def _active_session_error() -> str | None:

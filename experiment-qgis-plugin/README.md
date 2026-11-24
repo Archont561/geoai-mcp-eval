@@ -73,12 +73,12 @@ recorded anywhere else and `human_baseline.status` in the task YAML stays
 
 | action | what it does |
 | --- | --- |
-| `start_session` | `task_id` (default `prep-axis-order-001`), `base_dir` (default `$EXPERIMENT_TASK_DIR` or `experiment/tasks`), `participant_code` (optional). Validates the task id against the suite, hashes the task YAML and fixture, creates the gitignored per-session output dir `experiment/tasks/baselines/<task_id>/session-<started_at_utc>/`, starts the UTC timer, and connects best-effort host hooks (QGIS project layer add/remove, CRS change, project read; canvas extent/scale; QGIS Processing history via `QgsGui.historyProviderRegistry().entryAdded`). The record's `network_disabled` stays `null`: the host cannot verify network isolation — disable the network yourself and record that in a `log_note`. |
+| `start_session` | `task_id` (default `prep-axis-order-001`), `base_dir` (default `$EXPERIMENT_TASK_DIR`, or `experiment/tasks` discovered from the current working directory or plugin checkout ancestors), `participant_code` (optional). Validates the task id against the suite, hashes the task YAML and fixture, creates the gitignored per-session output dir `experiment/tasks/baselines/<task_id>/session-<started_at_utc>/`, starts the UTC timer, and connects best-effort host hooks (QGIS project layer add/remove, CRS change, project read; canvas extent/scale; QGIS Processing history via `QgsGui.historyProviderRegistry().entryAdded`). The record's `network_disabled` stays `null`: the host cannot verify network isolation — disable the network yourself and record that in a `log_note`. |
 | `log_note` | `message` — records a raw note/deviation/interruption (`source: note`) in `events.jsonl`. Notes are observational evidence and are never counted as study steps or tools. |
 | `log_manual_action` | `action_group`, optional `tool` — records one explicitly identified manual GIS action group (`source: manual`) in `events.jsonl` and `study_metrics.manual_action_groups`. Omitting `tool` leaves it `null` instead of fabricating a tool name. |
 | `show_timer` | opens the non-modal **session panel** ("Human-baseline session", menu Plugins > Experiment Plugin): a tabbed window — see below. Opens idle when no session is active (press Start inside it); in a headless host without a GUI capability it answers with a message instead of raising. |
 | `abandon_session` | abandons the active session WITHOUT writing `human-reference-record.json`. The event log stays on disk and gains a `session_abandoned` marker event plus a `session-abandoned.json` next to it. Host hooks are disconnected; evidence is kept but never promoted to reference data, and task YAML `human_baseline.status` is untouched. |
-| `end_session` | optional `manual_review_complete` (default `false`). Stops the timer and host observations, hashes top-level output files other than the event log and record, appends `session_end` to `events.jsonl`, and publishes `human-reference-record.json` (`record_version: 2`) — both in this session's own `session-<started_at_utc>/` directory (restarts never share an evidence file). Without both Processing history coverage and completed manual review, `session.steps` and `session.tools` stay `null` (`metrics_status: "pending_review"`). |
+| `end_session` | optional `manual_review_complete` (default `false`). Stops the timer and host observations, hashes output files recursively (skipping symlinks and recorder metadata files, using relative POSIX paths), appends `session_end` to `events.jsonl`, and publishes `human-reference-record.json` (`record_version: 2`) — both in this session's own `session-<started_at_utc>/` directory (restarts never share an evidence file). Without both Processing history coverage and completed manual review, `session.steps` and `session.tools` stay `null` (`metrics_status: "pending_review"`). |
 | `hello` | original demo action, harmless. |
 
 ### Session panel (Timer / Logs)
@@ -115,8 +115,9 @@ tests in the pure suite and was additionally smoked with real Qt offscreen
 Fetched automatically: task id, task YAML SHA-256, fixture SHA-256, UTC
 start/end and elapsed minutes, QGIS / GDAL / GEOS / PROJ software versions
 from the host (or `null` outside QGIS), Python/platform facts (no hostname or
-user name), SHA-256 and size of each top-level output file other than the event
-log and record, raw host observations (`observations`: raw event count, source
+user name), SHA-256 and size of each output file under the session directory
+(recursively, using relative POSIX paths, excluding symlinks and recorder
+metadata files), raw host observations (`observations`: raw event count, source
 tags such as `host:project`, `host:canvas`, `note`, connected hooks, and hook
 failures), and any observed QGIS Processing history executions
 (`study_metrics.processing_executions`, `processing_step_count`, and

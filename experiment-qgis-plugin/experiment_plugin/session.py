@@ -16,6 +16,7 @@ Both files live in the session's own directory; the record is written at end_ses
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
 import platform
@@ -76,6 +77,28 @@ def resolve_task_dir(base_dir: str | Path) -> Path:
     return path.resolve()
 
 
+def _search_task_dir(start: Path) -> Path | None:
+    for parent in (start, *start.parents):
+        candidate = parent / "experiment" / "tasks"
+        if candidate.is_dir():
+            return candidate.resolve()
+    return None
+
+
+def discover_task_dir(*, cwd: Path | None = None, anchor: Path | None = None) -> Path:
+    """Locate experiment/tasks from cwd ancestors, then package ancestors."""
+    current = (cwd or Path.cwd()).resolve()
+    found = _search_task_dir(current)
+    if found is not None:
+        return found
+    package_anchor = (anchor or Path(__file__)).resolve()
+    search_start = package_anchor if package_anchor.is_dir() else package_anchor.parent
+    found = _search_task_dir(search_start)
+    if found is not None:
+        return found
+    return (current / "experiment" / "tasks").resolve()
+
+
 def _load_yaml_mapping(path: Path) -> dict[str, Any]:
     import yaml  # local import: pyyaml ships with the pixi env
 
@@ -84,6 +107,10 @@ def _load_yaml_mapping(path: Path) -> dict[str, Any]:
 
 
 def find_task_yaml(base_dir: Path, task_id: str) -> Path:
+    if not base_dir.is_dir():
+        raise FileNotFoundError(
+            f"task directory does not exist: {base_dir} (set EXPERIMENT_TASK_DIR or pass base_dir)"
+        )
     parse_errors: list[str] = []
     for candidate in sorted(base_dir.glob("*.yaml")):
         try:
@@ -138,26 +165,91 @@ def template_skeleton() -> dict[str, Any]:
     }
 
 
+def _clean_version(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _safe_call(obj: object, method_name: str, *args: object) -> object:
+    method = getattr(obj, method_name, None)
+    if not callable(method):
+        return None
+    try:
+        return method(*args)
+    except Exception:
+        return None
+
+
+def _qgis_version(qgis_core: object) -> str | None:
+    qgis_cls = getattr(qgis_core, "Qgis", None)
+    return _clean_version(
+        _safe_call(qgis_cls, "version")
+        or getattr(qgis_cls, "QGIS_VERSION", None)
+        or getattr(qgis_core, "QGIS_VERSION", None)
+    )
+
+
+def _geos_version(qgis_core: object) -> str | None:
+    qgis_cls = getattr(qgis_core, "Qgis", None)
+    return _clean_version(
+        _safe_call(qgis_cls, "geosVersion") or getattr(qgis_core, "GEOS_VERSION", None)
+    )
+
+
+def _gdal_version(qgis_core: object) -> str | None:
+    direct = _clean_version(getattr(qgis_core, "GDAL_VERSION", None))
+    if direct is not None:
+        return direct
+    try:
+        from osgeo import gdal  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    return _clean_version(
+        _safe_call(gdal, "VersionInfo", "RELEASE_NAME") or getattr(gdal, "__version__", None)
+    )
+
+
+def _proj_version(qgis_core: object) -> str | None:
+    direct = _clean_version(getattr(qgis_core, "PROJ_VERSION", None))
+    if direct is not None:
+        return direct
+    try:
+        from osgeo import osr  # type: ignore[import-not-found]
+
+        major = _safe_call(osr, "GetPROJVersionMajor")
+        minor = _safe_call(osr, "GetPROJVersionMinor")
+        micro = _safe_call(osr, "GetPROJVersionMicro")
+        if isinstance(major, int) and major > 0 and isinstance(minor, int):
+            suffix = f".{micro}" if isinstance(micro, int) else ""
+            return f"{major}.{minor}{suffix}"
+    except ImportError:
+        pass
+    proj_utils = getattr(qgis_core, "QgsProjUtils", None)
+    major = _safe_call(proj_utils, "projVersionMajor")
+    minor = _safe_call(proj_utils, "projVersionMinor")
+    if isinstance(major, int) and major > 0 and isinstance(minor, int):
+        return f"{major}.{minor}"
+    return None
+
+
 def host_software_versions() -> dict[str, str | None]:
     """Best-effort versions; each is None when the host did not say."""
     versions: dict[str, str | None] = {
-        "qgis": os.environ.get("QGIS_VERSION"),
-        "gdal": os.environ.get("GDAL_VERSION"),
-        "geos": os.environ.get("GEOS_VERSION"),
-        "proj": os.environ.get("PROJ_VERSION"),
+        "qgis": _clean_version(os.environ.get("QGIS_VERSION")),
+        "gdal": _clean_version(os.environ.get("GDAL_VERSION")),
+        "geos": _clean_version(os.environ.get("GEOS_VERSION")),
+        "proj": _clean_version(os.environ.get("PROJ_VERSION")),
     }
     try:  # PyQGIS hosts usually can answer properly
-        import qgis.core  # type: ignore[import-not-found]
-
-        versions["qgis"] = versions["qgis"] or getattr(qgis.core, "QGIS_VERSION", None)
-        for key, attr in (
-            ("gdal", "GDAL_VERSION"),
-            ("geos", "GEOS_VERSION"),
-            ("proj", "PROJ_VERSION"),
-        ):
-            versions[key] = versions[key] or getattr(qgis.core, attr, None)
+        qgis_core = importlib.import_module("qgis.core")
     except ImportError:
-        pass
+        return versions
+    versions["qgis"] = versions["qgis"] or _qgis_version(qgis_core)
+    versions["gdal"] = versions["gdal"] or _gdal_version(qgis_core)
+    versions["geos"] = versions["geos"] or _geos_version(qgis_core)
+    versions["proj"] = versions["proj"] or _proj_version(qgis_core)
     return versions
 
 
@@ -286,12 +378,26 @@ class HumanBaselineSession:
 
     def _collect_outputs(self) -> list[dict[str, Any]]:
         outputs: list[dict[str, Any]] = []
-        excluded = {"events.jsonl", "human-reference-record.json"}
-        for path in sorted(self.output_dir.glob("*")):
-            if path.is_file() and path.name not in excluded:
-                outputs.append(
-                    {"path": path.name, "sha256": sha256_file(path), "bytes": path.stat().st_size}
-                )
+        root_excluded = {
+            "events.jsonl",
+            "human-reference-record.json",
+            "session-abandoned.json",
+        }
+        candidates: list[tuple[str, Path]] = []
+        for dirpath, _dirnames, filenames in os.walk(self.output_dir, followlinks=False):
+            current_dir = Path(dirpath)
+            for name in filenames:
+                path = current_dir / name
+                if path.is_symlink() or not path.is_file():
+                    continue
+                rel = path.relative_to(self.output_dir).as_posix()
+                if rel in root_excluded:
+                    continue
+                if "/" not in rel and name.startswith(".human-reference-record-"):
+                    continue
+                candidates.append((rel, path))
+        for rel, path in sorted(candidates, key=lambda item: item[0]):
+            outputs.append({"path": rel, "sha256": sha256_file(path), "bytes": path.stat().st_size})
         return outputs
 
     def _build_record(

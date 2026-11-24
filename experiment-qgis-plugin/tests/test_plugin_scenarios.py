@@ -1769,6 +1769,155 @@ def no_session_processing_listener_remains(host: dict) -> None:
     assert host["history"].entryAdded.slots == [host["other_processing_listener"]]
 
 
+@given("a QGIS 4 host reporting versions for QGIS, GDAL, GEOS, and PROJ", target_fixture="host")
+def qgis4_host_with_versions(monkeypatch: pytest.MonkeyPatch) -> dict:
+    import sys
+    import types
+
+    for key in ("QGIS_VERSION", "GDAL_VERSION", "GEOS_VERSION", "PROJ_VERSION"):
+        monkeypatch.delenv(key, raising=False)
+    project = FakeProject("readProject")
+    canvas = FakeCanvas()
+    install_host(monkeypatch, project=project, canvas=lambda: canvas)
+
+    class FakeQgis:
+        @staticmethod
+        def version() -> str:
+            return "4.2.3-Belém do Pará"
+
+        @staticmethod
+        def geosVersion() -> str:
+            return "3.14.1-CAPI-1.20.5"
+
+    sys.modules["qgis.core"].Qgis = FakeQgis
+
+    osgeo_pkg = types.ModuleType("osgeo")
+    gdal_mod = types.ModuleType("osgeo.gdal")
+    gdal_mod.VersionInfo = lambda req="RELEASE_NAME": "3.13.3" if req == "RELEASE_NAME" else "31303"
+    osr_mod = types.ModuleType("osgeo.osr")
+    osr_mod.GetPROJVersionMajor = lambda: 9
+    osr_mod.GetPROJVersionMinor = lambda: 9
+    osr_mod.GetPROJVersionMicro = lambda: 0
+    osgeo_pkg.gdal = gdal_mod
+    osgeo_pkg.osr = osr_mod
+    monkeypatch.setitem(sys.modules, "osgeo", osgeo_pkg)
+    monkeypatch.setitem(sys.modules, "osgeo.gdal", gdal_mod)
+    monkeypatch.setitem(sys.modules, "osgeo.osr", osr_mod)
+    return {"project": project, "canvas": canvas}
+
+
+@then("the record captures the QGIS, GDAL, GEOS, and PROJ versions")
+def record_captures_qgis4_versions(running: dict) -> None:
+    record = read_record(running["output_dir"])
+    assert record["session"]["software_versions"] == {
+        "qgis": "4.2.3-Belém do Pará",
+        "gdal": "3.13.3",
+        "geos": "3.14.1-CAPI-1.20.5",
+        "proj": "9.9.0",
+    }
+
+
+@then("the record leaves host software versions as null")
+def record_leaves_software_versions_null(running: dict) -> None:
+    record = read_record(running["output_dir"])
+    assert record["session"]["software_versions"] == {
+        "qgis": None,
+        "gdal": None,
+        "geos": None,
+        "proj": None,
+    }
+
+
+@given(
+    "no EXPERIMENT_TASK_DIR is configured and cwd is nested inside a task checkout",
+    target_fixture="checkout",
+)
+def nested_checkout_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    from plugin_harness import DEMO_MANIFEST
+
+    repo = tmp_path / "checkout"
+    tasks_dir = repo / "experiment" / "tasks"
+    tasks_dir.mkdir(parents=True)
+    (tasks_dir / f"{DEMO_TASK_ID}.yaml").write_text(DEMO_MANIFEST, encoding="utf-8")
+    (tasks_dir / "fixture.geojson").write_text("{}", encoding="utf-8")
+    nested = repo / "experiment-qgis-plugin" / "subdir"
+    nested.mkdir(parents=True)
+    monkeypatch.delenv("EXPERIMENT_TASK_DIR", raising=False)
+    monkeypatch.chdir(nested)
+    return repo
+
+
+@when(
+    parsers.parse('I start a session using the default task directory for task "{task_id}"'),
+    target_fixture="started",
+)
+def start_session_default_task_dir(loaded: PluginHandle, task_id: str) -> dict:
+    reply = loaded.call("start_session", task_id=task_id, base_dir="")
+    recorder = plugin._ACTIVE["session"]
+    return {
+        "reply": reply,
+        "output_dir": recorder.output_dir if recorder else None,
+        "recorder": recorder,
+    }
+
+
+@when(
+    parsers.parse('I start a session for task "{task_id}" with a missing task directory'),
+    target_fixture="started",
+)
+def start_session_missing_task_dir(loaded: PluginHandle, tmp_path: Path, task_id: str) -> dict:
+    missing = tmp_path / "does-not-exist" / "tasks"
+    reply = loaded.call("start_session", task_id=task_id, base_dir=str(missing))
+    recorder = plugin._ACTIVE["session"]
+    return {
+        "reply": reply,
+        "output_dir": recorder.output_dir if recorder else None,
+        "recorder": recorder,
+    }
+
+
+@then("the started session belongs to that checkout's baselines folder")
+def started_session_belongs_to_checkout(started: dict, checkout: Path) -> None:
+    assert started["recorder"] is not None, started["reply"]
+    expected = (checkout / "experiment" / "tasks" / "baselines" / DEMO_TASK_ID).resolve()
+    assert started["output_dir"].parent == expected
+
+
+@then("the plugin explains that the task directory does not exist and mentions EXPERIMENT_TASK_DIR")
+def plugin_explains_missing_task_dir(started: dict) -> None:
+    assert started["recorder"] is None
+    assert "cannot start session:" in started["reply"]
+    assert "task directory does not exist" in started["reply"]
+    assert "EXPERIMENT_TASK_DIR" in started["reply"]
+
+
+@when("the participant saves top-level and nested output files into the session directory")
+def participant_saves_nested_outputs(running: dict) -> None:
+    root = running["output_dir"]
+    (root / "summary.geojson").write_text('{"type": "FeatureCollection"}\n', encoding="utf-8")
+    bundle = root / "shapefile" / "poland"
+    bundle.mkdir(parents=True)
+    (bundle / "layer.shp").write_bytes(b"\x00\x01\x02shp")
+    (bundle / "layer.prj").write_text("EPSG:2180\n", encoding="utf-8")
+
+
+@then("the record hashes both top-level and nested output files with relative POSIX paths")
+def record_hashes_nested_outputs(running: dict) -> None:
+    import hashlib
+
+    record = read_record(running["output_dir"])
+    paths = [output["path"] for output in record["outputs"]]
+    assert paths == [
+        "shapefile/poland/layer.prj",
+        "shapefile/poland/layer.shp",
+        "summary.geojson",
+    ]
+    for output in record["outputs"]:
+        disk_path = running["output_dir"] / output["path"]
+        assert output["sha256"] == hashlib.sha256(disk_path.read_bytes()).hexdigest()
+        assert output["bytes"] == disk_path.stat().st_size
+
+
 @then("the session is still running")
 def the_session_is_still_running(loaded: PluginHandle) -> None:
     reply = loaded.call("start_session", task_id="another-task")
