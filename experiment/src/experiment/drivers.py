@@ -198,8 +198,7 @@ def _ollama_arm_a(
         f"deliverable as a single JSON code block ({RESULT_JSON}) or a raw GeoJSON object "
         f"({RESULT_GEOJSON}), no prose."
     )
-    fixture_file = req.task["fixtures"]["input"]
-    user = f"{req.task['prompt']}\n\nFixture file ({fixture_file}):\n{json.dumps(fixture)}"
+    user = f"{req.task.prompt}\n\nFixture file ({req.task.fixture_input}):\n{json.dumps(fixture)}"
     messages = _initial_messages(req, system, user)
     for _step in range(_MAX_TOOL_STEPS):
         message = _tool_reply(req, messages, tool_specs, session, profile)
@@ -236,7 +235,7 @@ def _ollama_arm_b(
     system = _ARM_B_SYSTEM
     size = len(json.dumps(fixture))
     head = json.dumps(fixture)[:_TOOL_RESULT_CAP]
-    user = f"{req.task['prompt']}\n\nFixture head (input.geojson, {size} bytes):\n{head}"
+    user = f"{req.task.prompt}\n\nFixture head (input.geojson, {size} bytes):\n{head}"
     messages = _initial_messages(req, system, user)
     reply = _chat_completions(session, profile, messages, None)
     content = reply["choices"][0]["message"].get(_K_CONTENT) or ""

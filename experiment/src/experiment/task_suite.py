@@ -6,9 +6,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-import yaml
 from jsonschema import Draft202012Validator, SchemaError
 from pydantic.dataclasses import dataclass
+
+from experiment.adapters.task_repository import TaskLoadError, read_task_document
 
 SUPPORTED_ORACLE_TYPES = {
     "de9im_relation",
@@ -292,13 +293,14 @@ def _load_task_files(
     if not files:
         issues.append(ValidationIssue(str(root), "no task YAML files found"))
     for path in files:
+        # The validator reports a malformed task as an *issue*; it must not raise.
+        # That is why it goes through the repository's document reader rather
+        # than load_task, which validates and would raise on the very files this
+        # command exists to describe.
         try:
-            task = yaml.safe_load(path.read_text(encoding="utf-8"))
-        except (OSError, yaml.YAMLError) as exc:
-            issues.append(ValidationIssue(path.name, f"cannot parse YAML: {exc}"))
-            continue
-        if not isinstance(task, dict):
-            issues.append(ValidationIssue(path.name, "task document must be a YAML mapping"))
+            task = read_task_document(path)
+        except TaskLoadError as exc:
+            issues.append(ValidationIssue(path.name, exc.reason))
             continue
         task_issues = _schema_validation_issues(task, schema)
         issues.extend(

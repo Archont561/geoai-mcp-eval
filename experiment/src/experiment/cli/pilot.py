@@ -6,10 +6,10 @@ import json
 from pathlib import Path
 
 import typer
-import yaml
 from rich.console import Console
 from rich.text import Text
 
+from experiment.adapters.task_repository import TaskNotFoundError, find_task_file
 from experiment.oracle import run_determinism_gate
 from experiment.task_suite import validate_suite
 
@@ -22,14 +22,15 @@ ARTIFACTS_OPTION = typer.Option(..., "--artifacts-dir")
 
 
 def _find_task(root: Path, task_id: str) -> Path:
-    for path in sorted(root.glob("*.yaml")):
-        try:
-            task = yaml.safe_load(path.read_text(encoding="utf-8"))
-        except (OSError, yaml.YAMLError):
-            continue
-        if isinstance(task, dict) and task.get("id") == task_id:
-            return path
-    raise typer.BadParameter(f"unknown task ID: {task_id}")
+    """The task file for TASK_ID, or a CLI error naming it.
+
+    The scan itself lives in the repository; this only translates its absence
+    into the message the command line promises.
+    """
+    try:
+        return find_task_file(root, task_id)
+    except TaskNotFoundError as exc:
+        raise typer.BadParameter(f"unknown task ID: {task_id}") from exc
 
 
 @app.command()

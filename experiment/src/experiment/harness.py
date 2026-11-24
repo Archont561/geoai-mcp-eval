@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from experiment.backends import BackendProfile
+    from experiment.domain.task import Task
 
 TASK_ROOT = Path(__file__).resolve().parents[2] / "tasks"
 RESULTS_ROOT = TASK_ROOT.parent.parent / "results"
@@ -61,7 +62,7 @@ class CellRequest:
     """Everything one (task, arm) cell needs; threaded through drivers."""
 
     task_path: Path
-    task: dict[str, Any]
+    task: Task
     arm: str
     driver: str
     cell: Path
@@ -71,9 +72,13 @@ class CellRequest:
     profile: BackendProfile | None = None
 
 
-def fixture_path(task_path: Path, task: dict[str, Any]) -> Path:
-    relative = task["fixtures"]["input"]
-    path = (task_path.parent / relative).resolve()
+def fixture_path(task_path: Path, task: Task) -> Path:
+    """The input fixture, resolved against the task file's directory.
+
+    The model holds a *relative* path; joining it to the filesystem is the
+    adapter's job, which keeps the domain value free of the filesystem.
+    """
+    path = (task_path.parent / task.fixture_input).resolve()
     if not path.is_file():
         raise ValueError(f"fixture not found: {path}")
     return path
@@ -101,9 +106,8 @@ def append_transcript(cell: Path, record: dict[str, Any]) -> None:
         handle.write(json.dumps(record, sort_keys=True, default=str) + "\n")
 
 
-def deliverable_name(task: dict[str, Any]) -> str:
-    assertions = task["oracle"]["assertions"]
-    if any(a.get("output") == RESULT_GEOJSON for a in assertions):
+def deliverable_name(task: Task) -> str:
+    if any(a.get("output") == RESULT_GEOJSON for a in task.oracle.assertions):
         return RESULT_GEOJSON
     return RESULT_JSON
 
@@ -141,7 +145,7 @@ def run_python_sandboxed(
     )
 
 
-def fixture_fc(task_path: Path, task: dict[str, Any]) -> dict[str, Any]:
+def fixture_fc(task_path: Path, task: Task) -> dict[str, Any]:
     return json.loads(fixture_path(task_path, task).read_text(encoding="utf-8"))
 
 

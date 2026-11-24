@@ -299,3 +299,21 @@ def test_determinism_gate_records_exception_and_rejects_bad_run_count(tmp_path: 
     bad_report = run_determinism_gate(bad_task_path, tmp_path)
     assert not bad_report.passed
     assert any("exactly 3" in issue for issue in bad_report.issues)
+
+
+def test_determinism_gate_reports_an_unloadable_task_instead_of_raising(
+    tmp_path: Path,
+) -> None:
+    """A broken task is a gate *issue*, not an exception past the caller.
+
+    The gate runs before scoring, so a task file that cannot be validated must
+    show up as a readable reason on the report; raising would turn a bad task
+    into a crashed command with no report.
+    """
+    broken = tmp_path / "broken.yaml"
+    broken.write_text("id: [unclosed\n", encoding=UTF8)
+
+    report = run_determinism_gate(broken, tmp_path)
+
+    assert not report.passed
+    assert any(issue.startswith("task could not be loaded: ") for issue in report.issues)

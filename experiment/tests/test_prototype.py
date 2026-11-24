@@ -10,8 +10,50 @@ import yaml
 
 import experiment.drivers as drivers
 from experiment import harness, prototype
+from experiment.adapters.task_repository import TaskLoadError
+from experiment.domain.task import Task
 
 TASK_ROOT = harness.TASK_ROOT
+
+
+def _task_document(**overrides: object) -> Task:
+    """A complete, valid task, for helpers that only read one field of it."""
+    document = {
+        "schema_version": 1,
+        "id": "fixture-task",
+        "title": "fixture task",
+        "prompt": "fixture prompt",
+        "family": "A",
+        "difficulty_rubric": {
+            "tier": 2,
+            "n_tools_human": 1,
+            "n_steps_human": 1,
+            "expressible": "medium",
+        },
+        "provenance": {
+            "source": "constructed",
+            "source_url": "https://example.invalid",
+            "source_file": "fixture.geojson",
+            "source_commit": "0" * 40,
+            "license": "CC0",
+            "contamination": "constructed",
+        },
+        "fixtures": {"input": "fixtures/fixture.geojson"},
+        "human_baseline": {
+            "status": "pending",
+            "artifact_dir": "baselines/fixture",
+            "produced_with": None,
+            "human_time_min": None,
+            "human_steps": None,
+            "human_tools": [],
+        },
+        "oracle": {"determinism_runs": 3, "assertions": []},
+        "budget_bounds": {"max_tool_calls": 10, "max_wall_s": 60},
+        "runs": 2,
+        "required_traps": [],
+    }
+    document.update(overrides)
+    return Task.model_validate(document)
 
 
 def _task_path(task_id: str) -> Path:
@@ -28,15 +70,15 @@ def test_discover_tasks_finds_three() -> None:
 def test_load_task_rejects_non_task(tmp_path: Path) -> None:
     bad = tmp_path / "bad.yaml"
     bad.write_text("- not a mapping\n", encoding="utf-8")
-    with pytest.raises(ValueError):
+    with pytest.raises(TaskLoadError):
         prototype.load_task(bad)
 
 
 def test_fixture_path_errors(tmp_path: Path) -> None:
     task_path = tmp_path / "t.yaml"
-    task_path.write_text(yaml.safe_dump({"id": "x", "fixtures": {"input": "missing.geojson"}}))
+    task = _task_document(fixtures={"input": "missing.geojson"})
     with pytest.raises(ValueError, match="fixture"):
-        harness.fixture_path(task_path, {"fixtures": {"input": "missing.geojson"}})
+        harness.fixture_path(task_path, task)
 
 
 def test_resolve_output_dir_explicit_and_default(tmp_path: Path) -> None:
@@ -49,7 +91,7 @@ def test_resolve_output_dir_explicit_and_default(tmp_path: Path) -> None:
 def test_deliverable_name() -> None:
     for task_path in prototype.discover_tasks(TASK_ROOT):
         task = prototype.load_task(task_path)
-        expected = "result.geojson" if task["id"] == "prep-axis-order-001" else "result.json"
+        expected = "result.geojson" if task.id == "prep-axis-order-001" else "result.json"
         assert harness.deliverable_name(task) == expected
 
 

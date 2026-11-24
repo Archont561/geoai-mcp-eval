@@ -15,24 +15,23 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import yaml
+
+from experiment.adapters.task_repository import load_suite
 
 KEY_COLUMNS = ("run_id", "task", "arm", "driver", "model")
 
 
 def load_predicates(tasks_root: Path) -> dict[str, str]:
-    """Map assertion id -> predicate slug across the task suite."""
+    """Map assertion id -> predicate slug across the task suite.
+
+    The task shape is the repository's business; this only reads the two fields
+    it needs. A suite holding an unloadable task raises rather than silently
+    omitting its predicates -- a missing predicate mapping scores a passing
+    check as zero, which is a wrong result, not a missing one.
+    """
     mapping: dict[str, str] = {}
-    for path in sorted(tasks_root.glob("*.yaml")):
-        task = yaml.safe_load(path.read_text(encoding="utf-8"))
-        if not isinstance(task, dict):
-            continue
-        assertions = task.get("oracle", {}).get("assertions", [])
-        if not isinstance(assertions, list):
-            continue
-        for assertion in assertions:
-            if not isinstance(assertion, dict):
-                continue
+    for task in load_suite(tasks_root):
+        for assertion in task.oracle.assertions:
             assertion_id, predicate = assertion.get("id"), assertion.get("predicate")
             if isinstance(assertion_id, str) and isinstance(predicate, str):
                 mapping[assertion_id] = predicate

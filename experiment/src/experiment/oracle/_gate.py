@@ -6,7 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
+from experiment.adapters.task_repository import TaskLoadError
+from experiment.adapters.task_repository import load_task as _load_task
 
 from ._base import DeterminismReport, OracleVerdict
 from ._evaluators import evaluate_task as _evaluate_task
@@ -47,14 +48,27 @@ def _gate_fingerprints_match(fingerprints: list[RunFingerprint | None], required
     return len(present) == required_runs and len(set(present)) == 1
 
 
+REQUIRED_DETERMINISM_RUNS = 3
+
+
 def _gate_task_issue(task_path: Path) -> str | None:
-    task = yaml.safe_load(task_path.read_text(encoding="utf-8"))
-    if not isinstance(task, dict):
-        return "task YAML must contain a mapping"
-    oracle = task.get("oracle", {})
-    required_runs = oracle.get("determinism_runs") if isinstance(oracle, dict) else None
-    if type(required_runs) is not int or required_runs != 3:
-        return f"schema requires exactly 3 determinism runs; found {required_runs!r}"
+    """Why this task cannot be gated, or None when it can.
+
+    The task is loaded through the repository so the gate sees the same
+    validated document the runner does. An unloadable task is a gate *issue*
+    rather than an exception: the report is what a caller reads, and it should
+    say why the gate could not run instead of raising past them.
+    """
+    try:
+        task = _load_task(task_path)
+    except TaskLoadError as exc:
+        return f"task could not be loaded: {exc.reason}"
+    required_runs = task.oracle.determinism_runs
+    if required_runs != REQUIRED_DETERMINISM_RUNS:
+        return (
+            f"schema requires exactly {REQUIRED_DETERMINISM_RUNS} determinism runs; "
+            f"found {required_runs!r}"
+        )
     return None
 
 
