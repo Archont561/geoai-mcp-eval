@@ -6,7 +6,7 @@ without a desktop host.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from threading import RLock
 
 from experiment_plugin import session as baseline
@@ -74,11 +74,11 @@ class HostHooks:
 
 
 def _log_capped(
-    session: baseline.HumanBaselineSession, event: str, tool: str, **fields: object
+    session: baseline.HumanBaselineSession, event: str, source: str, **fields: object
 ) -> None:
     """Log HOST event unless the per-session event cap is reached."""
     if session.tracker.event_count < MAX_EVENTS:
-        session.log(event, tool=tool, **fields)  # type: ignore[arg-type]
+        session.log(event, source=source, **fields)  # type: ignore[arg-type]
 
 
 def _wire_project_hooks(
@@ -153,6 +153,64 @@ def _wire_canvas_hooks(
     connections.connect(canvas, "scaleChanged", scale_changed)
 
 
+def _wire_processing_hooks(
+    session: baseline.HumanBaselineSession,
+    registry: object,
+    connections: HostHooks | None = None,
+) -> None:
+    connections = connections if connections is not None else HostHooks()
+
+    def entry_added(entry_id: object, entry: object, *_args: object) -> None:
+        if getattr(entry, "providerId", None) != "processing":
+            return
+        details = getattr(entry, "entry", None)
+        parsed_id = entry_id if isinstance(entry_id, int) else None
+        alg_id = details.get("algorithm_id") if isinstance(details, Mapping) else None
+        if isinstance(alg_id, str) and alg_id.strip():
+            session.record_processing_execution(
+                alg_id.strip(),
+                parameters=details.get("parameters") if isinstance(details, Mapping) else None,
+                history_entry_id=parsed_id,
+                entry_timestamp=getattr(entry, "timestamp", None),
+            )
+            return
+        session.record_unparsed_processing_entry(
+            history_entry_id=parsed_id, detail="missing algorithm_id"
+        )
+
+    connections.connect(registry, "entryAdded", entry_added)
+
+
+def _can_query_qgis_gui() -> bool:
+    """Guard against calling real PyQGIS QgsGui singletons without QgsApplication."""
+    from qgis.core import QgsApplication
+
+    if getattr(QgsApplication, "__module__", "") == "qgis._core":
+        return QgsApplication.instance() is not None
+    return True
+
+
+def _connect_processing_hook(
+    session: baseline.HumanBaselineSession,
+    connections: HostHooks,
+    connected: list[str],
+    failures: list[str],
+) -> None:
+    try:
+        if not _can_query_qgis_gui():
+            return
+        from qgis.gui import QgsGui
+
+        registry = QgsGui.historyProviderRegistry()
+        if registry is not None:
+            _wire_processing_hooks(session, registry, connections)
+            connected.append("processing")
+    except ImportError:
+        pass
+    except Exception as exc:  # host hooks are best-effort; report instead of crashing
+        failures.append(f"processing: {exc}")
+
+
 def connect_host_hooks(
     session: baseline.HumanBaselineSession, connections: HostHooks | None = None
 ) -> tuple[list[str], list[str]]:
@@ -177,4 +235,5 @@ def connect_host_hooks(
             connected.append("canvas")
     except Exception as exc:  # host hooks are best-effort; report instead of crashing
         failures.append(f"canvas: {exc}")
+    _connect_processing_hook(session, connections, connected, failures)
     return connected, failures

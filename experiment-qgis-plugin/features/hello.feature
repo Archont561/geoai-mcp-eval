@@ -16,7 +16,7 @@ Feature: Greeting the user from inside QGIS
     Then the action replies "Hello, !"
 
   Scenario: The plugin exposes exactly its documented actions
-    Then the plugin offers the actions "abandon_session, end_session, hello, log_note, show_timer, start_session"
+    Then the plugin offers the actions "abandon_session, end_session, hello, log_manual_action, log_note, show_timer, start_session"
 
   Scenario: Asking for an action the plugin never declared is an error
     When I call the undeclared action "missing"

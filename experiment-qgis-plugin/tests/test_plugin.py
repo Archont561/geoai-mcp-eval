@@ -32,6 +32,7 @@ def test_declared_actions_are_the_plugins_public_surface() -> None:
         "abandon_session",
         "end_session",
         "hello",
+        "log_manual_action",
         "log_note",
         "show_timer",
         "start_session",

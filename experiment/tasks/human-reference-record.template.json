@@ -1,5 +1,5 @@
 {
-  "record_version": 1,
+  "record_version": 2,
   "status": "not_started",
   "task_id": null,
   "task_file_sha256": null,
@@ -15,7 +15,8 @@
     "ended_at_utc": null,
     "elapsed_minutes": null,
     "steps": null,
-    "tools": [],
+    "tools": null,
+    "metrics_status": "not_started",
     "software_versions": {
       "qgis": null,
       "gdal": null,
@@ -24,6 +25,17 @@
     },
     "network_disabled": null,
     "deviations_or_interruptions": []
+  },
+  "study_metrics": {
+    "status": "not_started",
+    "pending_reasons": [],
+    "processing_hook_connected": null,
+    "processing_step_count": null,
+    "processing_tools": null,
+    "processing_executions": [],
+    "manual_action_groups": [],
+    "manual_step_count": null,
+    "manual_review_completed": false
   },
   "outputs": [],
   "oracle_report_path": null,

@@ -23,10 +23,10 @@ def test_fake_qt_isolates_preloaded_qgis_host_modules(monkeypatch) -> None:
 
     from plugin_harness import install_fake_qt
 
-    for name in ("qgis.core", "qgis.utils"):
+    for name in ("qgis.core", "qgis.gui", "qgis.utils"):
         monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
     install_fake_qt(monkeypatch)
-    for name in ("qgis.core", "qgis.utils"):
+    for name in ("qgis.core", "qgis.gui", "qgis.utils"):
         with pytest.raises(ModuleNotFoundError):
             import_module(name)
 
@@ -207,11 +207,11 @@ def test_log_capped_logs_below_cap() -> None:
     class _Session:
         tracker = _Tracker()
 
-        def log(self, event, tool=None, **fields):
-            logged.append((event, tool, fields))
+        def log(self, event, source=None, **fields):
+            logged.append((event, source, fields))
 
-    plugin._log_capped(_Session(), "evt", "tool", key="value")
-    assert logged == [("evt", "tool", {"key": "value"})]
+    plugin._log_capped(_Session(), "evt", "host:project", key="value")
+    assert logged == [("evt", "host:project", {"key": "value"})]
 
 
 def test_log_capped_swallows_at_cap() -> None:
@@ -223,10 +223,10 @@ def test_log_capped_swallows_at_cap() -> None:
     class _Session:
         tracker = _Tracker()
 
-        def log(self, event, tool=None, **fields):
-            logged.append((event, tool, fields))
+        def log(self, event, source=None, **fields):
+            logged.append((event, source, fields))
 
-    plugin._log_capped(_Session(), "evt", "tool")
+    plugin._log_capped(_Session(), "evt", "host:project")
     assert logged == []
 
 
@@ -278,16 +278,18 @@ def test_host_software_versions_without_qgis(monkeypatch) -> None:
     assert versions["qgis"] == "9.9.9"
 
 
-def test_session_log_without_tool_keeps_tools_empty(tmp_path) -> None:
+def test_session_log_tracks_observation_sources_not_study_tools(tmp_path) -> None:
     (tmp_path / "t.yaml").write_text(
         "id: demo-task-001\nfixtures:\n  input: f.geojson\n", encoding="utf-8"
     )
     (tmp_path / "f.geojson").write_text("{}", encoding="utf-8")
     sess = session.start_session("demo-task-001", tmp_path)
-    sess.log("bare_event")  # no tool: exercises the `tool is None` branch
-    sess.log("tooled", tool="note")  # first time: appended
-    sess.log("tooled_again", tool="note")  # already seen: not duplicated
-    assert sess.tools_used == ["note"]
+    sess.log("bare_event")  # no source: exercises the `source is None` branch
+    sess.log("noted", source="note")  # first time: appended
+    sess.log("noted_again", source="note")  # already seen: not duplicated
+    assert sess.metrics.observation_sources == ["note"]
+    assert sess.metrics.raw_event_count == 3
+    assert sess.metrics.processing_tools() is None
 
 
 # --- panel formatting -------------------------------------------------------
