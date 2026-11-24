@@ -1,7 +1,7 @@
 ---
 id: GEO-019
 title: Consolidate GitHub Actions experiment workflow into a single zip artifact
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-24T00:00:00Z'
 labels:
@@ -30,10 +30,10 @@ Pipeline flow:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `.github/workflows/experiment.yml` uses the refactored `experiment` Tasknest one-liners and folds summary rendering into `harvest`.
-- [ ] #2 `GitHubWorkflowAdapter.prune_run_artifacts(keep_name)` safely deletes intermediate artifacts for `$GITHUB_RUN_ID` only after bundle upload succeeds, and safely no-ops locally.
-- [ ] #3 Workflow-level `permissions` remain `contents: read`, with `actions: write` scoped strictly to the `harvest` job; `alint` and `actionlint` pass.
-- [ ] #4 A live GitHub Actions dispatch (`stage=smoke` and `stage=pilot`) completes cleanly and exposes exactly 1 artifact (`experiment-run-<run_id>.zip`) containing `run.json`, `summary.md`, JSON Schema, and all cell evidence.
+- [x] #1 `.github/workflows/experiment.yml` uses the refactored `experiment` Tasknest one-liners and folds summary rendering into `harvest`.
+- [x] #2 `GitHubWorkflowAdapter.prune_run_artifacts(keep_name)` safely deletes intermediate artifacts for `$GITHUB_RUN_ID` only after bundle upload succeeds, and safely no-ops locally.
+- [x] #3 Workflow-level `permissions` remain `contents: read`, with `actions: write` scoped strictly to the `harvest` job; `alint` and `actionlint` pass.
+- [x] #4 A live GitHub Actions dispatch (`stage=smoke` and `stage=pilot`) completes cleanly and exposes exactly 1 artifact (`experiment-run-<run_id>.zip`) containing `run.json`, `summary.md`, JSON Schema, and all cell evidence.
 <!-- AC:END -->
 
 ## Implementation Plan
