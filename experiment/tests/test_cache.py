@@ -179,8 +179,10 @@ def test_http_errors_are_never_cached(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
 def test_analysis_path_contains_no_cache_reads_or_imports() -> None:
     repo = Path(__file__).resolve().parents[2]
-    for rel in ("experiment/src/experiment/analyze.py",):
-        tree = ast.parse((repo / rel).read_text(encoding="utf-8"))
+    analysis_files = sorted((repo / "experiment/src/experiment/analysis").glob("*.py"))
+    assert analysis_files
+    for path in analysis_files:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:

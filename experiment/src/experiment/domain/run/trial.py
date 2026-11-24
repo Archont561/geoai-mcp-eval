@@ -86,7 +86,7 @@ class TranscriptEntry(BaseModel):
     tool_name: str | None = None
     returncode: int | None = None
     cache_hit: bool | None = None
-    usage: dict[str, int | None] | None = None
+    usage: dict[str, Any] | None = None
     usage_warning: str | None = None
     timestamp: datetime | None = None
     extra_fields: dict[str, Any] = Field(default_factory=dict)

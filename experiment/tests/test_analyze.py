@@ -1,22 +1,46 @@
-"""Unit tests for analysis data preparation.
-
-The predicate matrix itself is specified in ``features/analysis.feature`` and
-driven through the CLI. What remains here are the predicate mapping's shape and
-the helper's exception type, neither of which is exposed directly by the command.
-"""
+"""Unit tests for the notebook-first analysis client and DataFrame projections (GEO-020)."""
 
 from __future__ import annotations
 
+import json
+import shutil
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 import yaml
-from cli_harness import check, write_cell
 
-from experiment import analyze
+from experiment.adapters.run_archive import RunArchive
+from experiment.adapters.subprocess_runner import CommandResult
+from experiment.analysis import (
+    ASSERTION_COLUMNS,
+    CELL_SUMMARY_COLUMNS,
+    MEASUREMENT_COLUMNS,
+    GitHubRunClient,
+    GitHubRunError,
+    RunDataset,
+    load_predicates,
+    task_predicates,
+)
+from experiment.domain.run import (
+    AssertionResult,
+    CostAndProcessMetrics,
+    EnvironmentPin,
+    ExperimentRun,
+    RunProvenance,
+    TokenUsage,
+    Treatment,
+    TrialKey,
+    TrialMeasurement,
+    TrialRecord,
+)
+from experiment.services import archive as archive_service
+from experiment.services import runs
 
-# The task document is validated on load, so these fixtures must be complete
-# tasks rather than the two fields the predicate mapping reads.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+REAL_TASKS = REPO_ROOT / "experiment" / "tasks"
+
 _CONTEXT = {
     "schema_version": 1,
     "title": "fixture task",
@@ -91,24 +115,38 @@ def _write_tasks(root: Path) -> Path:
     return tasks
 
 
-def test_unknown_assertion_raises_value_error(results: dict) -> None:
-    write_cell(results, "analysis-de9im-001", "B", [check("mystery-assertion", True)])
-    with pytest.raises(ValueError, match="mystery-assertion"):
-        analyze.flatten_rows(results["dir"], results["tasks"])
+def _build_packed_pilot_zip(tmp_path: Path) -> Path:
+    out_dir = tmp_path / "pilot-run"
+    spec = runs.parse_run_spec("scripted", None, None, "both", "all", "local")
+    runs.run_experiment(REAL_TASKS, spec, out_dir)
+    zip_path = tmp_path / "experiment-run-pilot-001.zip"
+    archive_service.pack_archive(
+        archive_service.PackOptions(
+            source_dir=out_dir,
+            output_zip=zip_path,
+            run_id="pilot-001",
+            stage="pilot",
+            run_harvest=False,
+        )
+    )
+    return zip_path
 
 
-def test_load_predicates_roundtrip(tmp_path: Path) -> None:
+def test_load_predicates_and_task_predicates_roundtrip(tmp_path: Path) -> None:
     tasks = _write_tasks(tmp_path)
-    assert analyze.load_predicates(tasks) == {
+    assert load_predicates(tasks) == {
         "shared-boundary-relation": "touches",
         "single-output-feature": "feature_count",
         "representative-point-axis-order": "point_axis_order",
     }
+    assert task_predicates(tasks) == {
+        "analysis-de9im-001": ("touches",),
+        "prep-axis-order-001": ("feature_count", "point_axis_order"),
+    }
 
 
 def test_real_suite_predicates_unique_and_present() -> None:
-    repo = Path(__file__).resolve().parents[2]
-    mapping = analyze.load_predicates(repo / "experiment" / "tasks")
+    mapping = load_predicates(REAL_TASKS)
     assert mapping == {
         "shared-boundary-relation": "touches",
         "single-output-feature": "feature_count",
@@ -118,9 +156,9 @@ def test_real_suite_predicates_unique_and_present() -> None:
     assert len(mapping) == len(set(mapping.values()))
 
 
-def test_load_predicates_rejects_missing_predicate_key(tmp_path: Path) -> None:
-    tasks = tmp_path / "tasks"
-    tasks.mkdir()
+def test_load_predicates_rejects_missing_and_duplicate_keys(tmp_path: Path) -> None:
+    missing_dir = tmp_path / "missing"
+    missing_dir.mkdir()
     doc = {
         **_CONTEXT,
         "id": "missing-pred-001",
@@ -129,15 +167,13 @@ def test_load_predicates_rejects_missing_predicate_key(tmp_path: Path) -> None:
             "assertions": [{"id": "unmapped-assertion", "type": "de9im_relation"}],
         },
     }
-    (tasks / "missing-pred-001.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+    (missing_dir / "missing-pred-001.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
     with pytest.raises(ValueError, match="missing a predicate"):
-        analyze.load_predicates(tasks)
+        load_predicates(missing_dir)
 
-
-def test_load_predicates_rejects_duplicate_predicate_slug(tmp_path: Path) -> None:
-    tasks = tmp_path / "tasks"
-    tasks.mkdir()
-    doc = {
+    dup_dir = tmp_path / "dup"
+    dup_dir.mkdir()
+    dup_doc = {
         **_CONTEXT,
         "id": "dup-pred-001",
         "oracle": {
@@ -148,58 +184,187 @@ def test_load_predicates_rejects_duplicate_predicate_slug(tmp_path: Path) -> Non
             ],
         },
     }
-    (tasks / "dup-pred-001.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+    (dup_dir / "dup-pred-001.yaml").write_text(yaml.safe_dump(dup_doc), encoding="utf-8")
     with pytest.raises(ValueError, match="1:1"):
-        analyze.load_predicates(tasks)
+        load_predicates(dup_dir)
 
 
-def test_flatten_full_pilot_results_matrix_shape_mapping_and_cross_task_zeros(
-    tmp_path: Path,
-) -> None:
-    import json
+def test_run_dataset_projections_and_lazy_trial_inspection(tmp_path: Path) -> None:
+    zip_path = _build_packed_pilot_zip(tmp_path)
+    with RunDataset.from_zip(zip_path) as dataset:
+        assert dataset.run.run_id == "pilot-001"
 
-    from experiment.services import runs
+        meas = dataset.measurements_df()
+        assert list(meas.columns) == list(MEASUREMENT_COLUMNS)
+        assert len(meas) == 6
+        assert set(meas["paradigm"]) == {"typed_mcp", "codegen"}
+        assert set(meas["task_success"]) == {1}
 
-    repo = Path(__file__).resolve().parents[2]
-    tasks_root = repo / "experiment" / "tasks"
-    out_dir = tmp_path / "pilot-run"
-    spec = runs.parse_run_spec("scripted", None, None, "both", "all", "local")
-    runs.run_experiment(tasks_root, spec, out_dir)
+        preds = dataset.predicates_df(REAL_TASKS)
+        assert preds.shape == (6, 10)
+        assert not preds.isna().any().any()
+        de9im = preds[preds["task_id"] == "analysis-de9im-001"]
+        assert list(de9im["touches"]) == [1, 1]
+        assert list(de9im["natural_breaks"]) == [0, 0]
+        assert list(de9im["feature_count"]) == [0, 0]
+        assert list(de9im["point_axis_order"]) == [0, 0]
+        axis = preds[preds["task_id"] == "prep-axis-order-001"]
+        assert list(axis["feature_count"]) == [1, 1]
+        assert list(axis["point_axis_order"]) == [1, 1]
+        assert list(axis["touches"]) == [0, 0]
 
-    df = analyze.flatten(out_dir, tasks_root)
-    assert df.shape == (6, 9)
-    assert list(df.columns) == [
-        "run_id",
-        "task",
-        "arm",
-        "driver",
-        "model",
-        "feature_count",
-        "natural_breaks",
-        "point_axis_order",
-        "touches",
-    ]
-    # Every assertion emitted by the pilot maps 1:1 to the suite predicates (no missing, no orphans)
-    emitted: set[str] = set()
-    for score_file in out_dir.rglob("score.json"):
-        data = json.loads(score_file.read_text(encoding="utf-8"))
-        emitted.update(c["assertion_id"] for c in data["checks"])
-    mapping = analyze.load_predicates(tasks_root)
-    assert emitted == set(mapping.keys())
-    assert len(mapping) == len(set(mapping.values()))
+        summary = dataset.cell_summary_df()
+        assert list(summary.columns) == list(CELL_SUMMARY_COLUMNS)
+        assert len(summary) == 6
+        assert all(summary["pass_at_k"])
+        assert all(summary["task_success_rate"] == 1.0)
+        assert all(summary["predicate_score_median"] == 1.0)
 
-    # Cross-task zero semantics: cells score 1 on their own predicates and 0 on other tasks'
-    de9im = df[df["task"] == "analysis-de9im-001"]
-    assert list(de9im["touches"]) == [1, 1]
-    assert list(de9im["natural_breaks"]) == [0, 0]
-    assert list(de9im["feature_count"]) == [0, 0]
-    assert list(de9im["point_axis_order"]) == [0, 0]
+        asserts = dataset.assertions_df(REAL_TASKS)
+        assert list(asserts.columns) == list(ASSERTION_COLUMNS)
+        assert len(asserts) == 8  # (1 + 2 + 1) assertions * 2 paradigms
+        assert set(asserts["tier"]) <= {"trivial", "spatial", "value"}
 
-    jenks = df[df["task"] == "cartography-jenks-001"]
-    assert list(jenks["natural_breaks"]) == [1, 1]
-    assert list(jenks["touches"]) == [0, 0]
+        # Lazy trial drill-down reads transcript & deliverable on demand
+        trial_id = "analysis-de9im-001/typed_mcp/semantic_repair/rep-1"
+        handle = dataset.trial(trial_id)
+        assert isinstance(handle.transcript, list)
+        assert len(handle.transcript) >= 1
+        assert handle.deliverable is not None
 
-    axis = df[df["task"] == "prep-axis-order-001"]
-    assert list(axis["feature_count"]) == [1, 1]
-    assert list(axis["point_axis_order"]) == [1, 1]
-    assert list(axis["touches"]) == [0, 0]
+
+def test_predicates_and_assertions_fail_loudly_on_unknown_assertion() -> None:
+    key = TrialKey(
+        task_id="analysis-de9im-001",
+        paradigm="codegen",
+        enforcement_level="none",
+        repetition=1,
+    )
+    record = TrialRecord(
+        key=key,
+        treatment=Treatment(paradigm="codegen", enforcement_level="none"),
+        driver="scripted",
+        status="ok",
+    )
+    meas = TrialMeasurement.build(
+        key=key,
+        assertions=(
+            AssertionResult(
+                assertion_id="mystery-assertion",
+                tier="spatial",
+                passed=True,
+                detail="ok",
+            ),
+        ),
+        economics=CostAndProcessMetrics(
+            wall_seconds=1.5,
+            tokens=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15),
+        ),
+    )
+    run = ExperimentRun(
+        run_id="bad-assert",
+        stage="pilot",
+        created_at=datetime.now(UTC),
+        provenance=RunProvenance(environment=EnvironmentPin()),
+        trials={key.slug: record},
+        measurements={key.slug: meas},
+    )
+    ds = RunDataset.from_run(run)
+    with pytest.raises(ValueError, match="mystery-assertion"):
+        ds.predicates_df(REAL_TASKS)
+    with pytest.raises(ValueError, match="mystery-assertion"):
+        ds.assertions_df(REAL_TASKS)
+    with pytest.raises(RuntimeError, match="zip-backed"):
+        ds.trial(key)
+
+    # Empty run yields empty cell summary with expected schema
+    empty_run = ExperimentRun(
+        run_id="empty",
+        stage="preflight",
+        created_at=datetime.now(UTC),
+        provenance=RunProvenance(environment=EnvironmentPin()),
+    )
+    empty_summary = RunDataset.from_run(empty_run).cell_summary_df()
+    assert empty_summary.empty
+    assert list(empty_summary.columns) == list(CELL_SUMMARY_COLUMNS)
+
+
+def test_github_run_client_download_cache_list_latest_and_offline(tmp_path: Path) -> None:
+    source_zip = _build_packed_pilot_zip(tmp_path / "src")
+    calls: list[list[str]] = []
+
+    def fake_runner(argv: Sequence[str]) -> CommandResult:
+        cmd = list(argv)
+        calls.append(cmd)
+        if cmd[:3] == ["gh", "run", "list"]:
+            payload = [
+                {
+                    "databaseId": 987654321,
+                    "headSha": "deadbeef",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "createdAt": "2026-11-24T12:00:00Z",
+                    "displayTitle": "Experiment",
+                    "url": "https://github.com/org/repo/actions/runs/987654321",
+                }
+            ]
+            return CommandResult(returncode=0, stdout=json.dumps(payload))
+        if cmd[:3] == ["gh", "run", "download"]:
+            dir_idx = cmd.index("--dir") + 1
+            dest = Path(cmd[dir_idx]) / "experiment-run-987654321-deadbeef"
+            dest.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source_zip, dest / "experiment-run-987654321-deadbeef.zip")
+            return CommandResult(returncode=0)
+        return CommandResult(returncode=1, stderr=f"unexpected command: {cmd}")
+
+    client = GitHubRunClient(
+        repo="Archont561/geoai-mcp-eval",
+        cache_dir=tmp_path / "cache",
+        runner=fake_runner,
+    )
+
+    runs_list = client.list_runs(limit=5, branch="main")
+    assert len(runs_list) == 1
+    assert runs_list[0].database_id == 987654321
+
+    # First load_latest downloads via gh; second load_run hits disk cache without calling gh
+    with client.load_latest(branch="main") as ds1:
+        assert len(ds1.measurements_df()) == 6
+    download_calls_before = sum(1 for c in calls if c[:3] == ["gh", "run", "download"])
+    assert download_calls_before == 1
+
+    with client.load_run(987654321) as ds2:
+        assert len(ds2.measurements_df()) == 6
+    download_calls_after = sum(1 for c in calls if c[:3] == ["gh", "run", "download"])
+    assert download_calls_after == 1
+
+    # cache="refresh" bypasses the cache
+    client.download_run(987654321, cache="refresh")
+    assert sum(1 for c in calls if c[:3] == ["gh", "run", "download"]) == 2
+
+    # Offline load_zip works without invoking gh at all
+    with client.load_zip(source_zip) as offline:
+        assert offline.run.run_id == "pilot-001"
+        with RunArchive.open(source_zip) as arc:
+            wrapped = RunDataset.from_archive(arc)
+            assert len(wrapped.measurements_df()) == 6
+
+
+def test_github_run_client_errors(tmp_path: Path) -> None:
+    def failing_runner(_argv: Sequence[str]) -> CommandResult:
+        return CommandResult(returncode=1, stderr="auth required")
+
+    client = GitHubRunClient(cache_dir=tmp_path / "cache", runner=failing_runner)
+    with pytest.raises(GitHubRunError, match="auth required"):
+        client.list_runs()
+
+    def empty_runner(argv: Sequence[str]) -> CommandResult:
+        if list(argv)[:3] == ["gh", "run", "list"]:
+            return CommandResult(returncode=0, stdout="[]")
+        return CommandResult(returncode=0, stdout="")
+
+    empty_client = GitHubRunClient(cache_dir=tmp_path / "cache2", runner=empty_runner)
+    with pytest.raises(GitHubRunError, match="no successful completed runs"):
+        empty_client.load_latest()
+    with pytest.raises(GitHubRunError, match="no experiment-run"):
+        empty_client.download_run(111)

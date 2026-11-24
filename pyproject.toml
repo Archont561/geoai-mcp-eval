@@ -25,9 +25,9 @@ known-first-party = ["experiment", "experiment_plugin"]
 # tool's dependency.
 #
 # All runtime modules live strictly inside cli / services / adapters / domain
-# (plus the isolated gis_ops catalogue, oracle engine, and analyze module until
-# GEO-020). The architecture tests run the shipped configuration against both
-# the repository and deliberately broken copies of its import graph.
+# (plus the isolated gis_ops catalogue, oracle engine, and notebook-first
+# analysis package). The architecture tests run the shipped configuration
+# against both the repository and deliberately broken copies of its import graph.
 [tool.importlinter]
 root_package = "experiment"
 include_external_packages = true
@@ -96,7 +96,7 @@ allow_indirect_imports = true
 [[tool.importlinter.contracts]]
 name = "Analysis never imports or reads the LLM completion cache"
 type = "forbidden"
-source_modules = ["experiment.analyze"]
+source_modules = ["experiment.analysis"]
 forbidden_modules = ["experiment.adapters.llm_cache", "experiment.domain.cache_key"]
 
 [tool.pytest.ini_options]
