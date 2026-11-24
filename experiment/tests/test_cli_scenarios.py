@@ -852,6 +852,55 @@ def summary_and_manifest_record_aborted(output: Path, aborted: int, tot: int) ->
     assert manifest["totals"]["usage"]["total_tokens"] == tot
 
 
+@given(
+    parsers.parse('a stubbed Ollama endpoint with digest "{digest}" counting calls'),
+    target_fixture="cache_probe",
+)
+def stubbed_ollama_counting_calls(monkeypatch: pytest.MonkeyPatch, digest: str) -> dict:
+    import experiment.backends as backends
+    import experiment.drivers as drivers
+
+    state = {"calls": 0, "digest": digest}
+    code = "import json\nprint(json.dumps({'relation': 'touches', 'de9im': 'FF2F11212'}))\n"
+
+    def fake_chat(*_args, **_kwargs) -> dict:
+        state["calls"] += 1
+        return {
+            "choices": [{"message": {"role": "assistant", "content": f"```python\n{code}```"}}],
+            "usage": {"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70},
+        }
+
+    monkeypatch.setattr(drivers, "_chat_completions", fake_chat)
+    monkeypatch.setattr(backends, "resolve_model_digest", lambda _session, _profile: digest)
+    return state
+
+
+@when(
+    "I run a cached prototype cell twice and a third time with --no-cache",
+    target_fixture="cache_runs",
+)
+def run_cached_cell_three_times(cli: CliRunner, output: Path, tmp_path: Path) -> list[dict]:
+    cache_dir = tmp_path / "shared-llm-cache"
+    runs_out: list[dict] = []
+    for idx, extra in enumerate(("", "", " --no-cache"), start=1):
+        out_dir = output.parent / f"cache-run-{idx}"
+        res = run_cli(
+            cli,
+            f"proto run --driver ollama --task analysis-de9im-001 --arm B "
+            f"--cache-dir {cache_dir}{extra} --output-dir {out_dir}",
+        )
+        assert res["exit_code"] == 0, res["output"]
+        runs_out.append(json.loads((out_dir / "summary.json").read_text(encoding="utf-8")))
+    return runs_out
+
+
+@then("the endpoint was called 2 times with cache_hit false, true, false in summaries")
+def verify_cache_hit_sequence(cache_probe: dict, cache_runs: list[dict]) -> None:
+    assert cache_probe["calls"] == 2
+    hits = [run["cells"][0]["cache_hit"] for run in cache_runs]
+    assert hits == [False, True, False]
+
+
 # --- bind the feature files --------------------------------------------------
 
 for _feature in (

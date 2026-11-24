@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from experiment.backends import BackendProfile
+    from experiment.domain.cache_key import CacheStats
     from experiment.domain.task import Task
     from experiment.domain.usage import UsageAccumulator
 
@@ -57,6 +58,9 @@ class RunSpec:
     host: str
     profile: BackendProfile | None = None
     max_cell_tokens: int | None = None
+    backend_id: str = "local"
+    use_cache: bool = True
+    cache_dir: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -74,6 +78,11 @@ class CellRequest:
     profile: BackendProfile | None = None
     max_cell_tokens: int | None = None
     usage: UsageAccumulator | None = None
+    backend_id: str = "local"
+    model_digest: str | None = None
+    use_cache: bool = True
+    cache_dir: Path | None = None
+    cache_stats: CacheStats | None = None
 
 
 def fixture_path(task_path: Path, task: Task) -> Path:

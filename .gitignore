@@ -1,5 +1,6 @@
 # pixi environments & caches
 .pixi/
+.cache/
 .rumdl_cache/
 .tasknest/
 docs/_build/

@@ -60,6 +60,18 @@ class BackendProfile(BaseModel):
         return base + "/chat/completions"
 
     @property
+    def models_url(self) -> str:
+        base = str(self.base_url).rstrip("/")
+        if not base.endswith("/v1"):
+            base += "/v1"
+        return base + "/models"
+
+    @property
+    def api_root(self) -> str:
+        base = str(self.base_url).rstrip("/")
+        return base[:-3] if base.endswith("/v1") else base
+
+    @property
     def timeout(self) -> tuple[float, float]:
         return (self.connect_timeout_s, self.read_timeout_s)
 
@@ -154,3 +166,36 @@ def build_session(profile: BackendProfile) -> requests.Session:
     session.mount("http://", adapter)
     session.mount("https://", adapter)
     return session
+
+
+def _extract_digest_from_tags(payload: object, model: str) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    models = payload.get("models")
+    if not isinstance(models, list):
+        return None
+    candidates = {model, f"{model}:latest"} if ":" not in model else {model}
+    for entry in models:
+        if not isinstance(entry, dict):
+            continue
+        names = {entry.get("name"), entry.get("model")}
+        if names & candidates:
+            digest = entry.get("digest")
+            if isinstance(digest, str) and digest.strip():
+                return digest.strip()
+    return None
+
+
+def resolve_model_digest(session: requests.Session, profile: BackendProfile) -> str | None:
+    """Query Ollama ``/api/tags`` for the pinned model digest; return None if unavailable."""
+    try:
+        resp = session.get(f"{profile.api_root}/api/tags", timeout=(profile.connect_timeout_s, 10))
+    except requests.exceptions.RequestException:
+        return None
+    if resp.status_code != 200:
+        return None
+    try:
+        payload = resp.json()
+    except ValueError:
+        return None
+    return _extract_digest_from_tags(payload, profile.model)

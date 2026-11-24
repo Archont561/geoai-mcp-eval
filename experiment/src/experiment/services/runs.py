@@ -16,6 +16,7 @@ from typing import Any
 
 from experiment import backends, drivers, scripted
 from experiment.adapters.task_repository import discover_task_files, load_task
+from experiment.domain.cache_key import CacheStats
 from experiment.domain.task import Task
 from experiment.domain.usage import (
     TokenCapExceededError,
@@ -55,7 +56,7 @@ def _parse_tasks(raw: str) -> tuple[str, ...] | None:
     return tuple(part.strip() for part in raw.split(",") if part.strip())
 
 
-def parse_run_spec(
+def parse_run_spec(  # noqa: CC102
     driver: str,
     model: str | None,
     host: str | None,
@@ -64,6 +65,8 @@ def parse_run_spec(
     backend: str,
     *,
     max_cell_tokens: int | None = None,
+    use_cache: bool = True,
+    cache_dir: Path | None = None,
 ) -> RunSpec:
     """Resolve the backend and validate a requested run before creating output."""
     if driver not in DRIVERS:
@@ -84,6 +87,9 @@ def parse_run_spec(
         task_ids=_parse_tasks(task),
         profile=profile,
         max_cell_tokens=max_cell_tokens,
+        backend_id=backend,
+        use_cache=use_cache,
+        cache_dir=cache_dir,
     )
 
 
@@ -104,7 +110,8 @@ def run_cell(req: CellRequest) -> dict[str, Any]:
     started = time.time()
     status, error, abort_reason = "ok", None, None
     accumulator = req.usage or UsageAccumulator(max_cell_tokens=req.max_cell_tokens)
-    active_req = replace(req, usage=accumulator)
+    cache_stats = req.cache_stats or CacheStats()
+    active_req = replace(req, usage=accumulator, cache_stats=cache_stats)
     driver_fn = _DRIVER_DISPATCH.get((active_req.driver, active_req.arm))
     if driver_fn is None:
         status, error = "error", f"unknown driver/arm {active_req.driver}/{active_req.arm}"
@@ -135,6 +142,10 @@ def run_cell(req: CellRequest) -> dict[str, Any]:
         "arm": active_req.arm,
         "driver": active_req.driver,
         "model": model_label(active_req.driver, active_req.model),
+        "model_digest": active_req.model_digest,
+        "cache_hit": cache_stats.all_hit,
+        "cache_hits": cache_stats.hits,
+        "cache_misses": cache_stats.misses,
         "status": status,
         "error": error,
         "abort_reason": abort_reason,
@@ -149,8 +160,24 @@ def run_cell(req: CellRequest) -> dict[str, Any]:
     return {**meta, "checks": score["checks"]}
 
 
-def _run_one_cell(
-    task_path: Path, task: Task, arm: str, spec: RunSpec, output_root: Path
+def _resolve_run_digest(spec: RunSpec) -> str | None:
+    if spec.driver != "ollama" or not spec.use_cache:
+        return None
+    profile = spec.profile or backends.fallback_profile(spec.host, spec.model)
+    session = backends.build_session(profile)
+    try:
+        return backends.resolve_model_digest(session, profile)
+    finally:
+        session.close()
+
+
+def _run_one_cell(  # noqa: CC102
+    task_path: Path,
+    task: Task,
+    arm: str,
+    spec: RunSpec,
+    output_root: Path,
+    model_digest: str | None,
 ) -> dict[str, Any]:
     cell = cell_dir(output_root, task.id, arm)
     append_transcript(
@@ -161,6 +188,8 @@ def _run_one_cell(
             "arm": arm,
             "driver": spec.driver,
             "model": model_label(spec.driver, spec.model),
+            "model_digest": model_digest,
+            "use_cache": spec.use_cache,
             "max_cell_tokens": spec.max_cell_tokens,
             "prototype": True,
             "required_traps": list(task.required_traps),
@@ -177,16 +206,21 @@ def _run_one_cell(
         run_id=output_root.name,
         profile=spec.profile,
         max_cell_tokens=spec.max_cell_tokens,
+        backend_id=spec.backend_id,
+        model_digest=model_digest,
+        use_cache=spec.use_cache,
+        cache_dir=spec.cache_dir,
     )
     return run_cell(req)
 
 
-def _write_manifest(
+def _write_manifest(  # noqa: CC102
     output_root: Path,
     spec: RunSpec,
     cells: list[dict[str, Any]],
     run_usage: dict[str, Any],
     generated_at: str,
+    model_digest: str | None,
 ) -> dict[str, Any]:
     manifest = {
         "manifest_version": 1,
@@ -194,7 +228,10 @@ def _write_manifest(
         "prototype": True,
         "generated_at": generated_at,
         "driver": spec.driver,
+        "backend_id": spec.backend_id,
         "model": model_label(spec.driver, spec.model),
+        "model_digest": model_digest,
+        "use_cache": spec.use_cache,
         "host": spec.host,
         "arms": list(spec.arms),
         "task_ids": sorted({cell["task"] for cell in cells}),
@@ -204,6 +241,8 @@ def _write_manifest(
             "passed": sum(1 for c in cells if c["oracle_passed"]),
             "aborted": sum(1 for c in cells if c["status"] == "aborted"),
             "errored": sum(1 for c in cells if c["status"] == "error"),
+            "cache_hits": sum(int(c.get("cache_hits") or 0) for c in cells),
+            "cache_misses": sum(int(c.get("cache_misses") or 0) for c in cells),
             "usage": run_usage,
         },
     }
@@ -213,14 +252,22 @@ def _write_manifest(
     return manifest
 
 
-def _write_summary(output_root: Path, spec: RunSpec, cells: list[dict[str, Any]]) -> dict[str, Any]:
+def _write_summary(
+    output_root: Path,
+    spec: RunSpec,
+    cells: list[dict[str, Any]],
+    model_digest: str | None,
+) -> dict[str, Any]:
     generated_at = datetime.now(UTC).isoformat()
     run_usage = aggregate_run_usage([cell.get("usage") or {} for cell in cells])
     summary = {
         "run_id": output_root.name,
         "prototype": True,
         "driver": spec.driver,
+        "backend_id": spec.backend_id,
         "model": model_label(spec.driver, spec.model),
+        "model_digest": model_digest,
+        "use_cache": spec.use_cache,
         "generated_at": generated_at,
         "max_cell_tokens": spec.max_cell_tokens,
         "usage": run_usage,
@@ -231,15 +278,19 @@ def _write_summary(output_root: Path, spec: RunSpec, cells: list[dict[str, Any]]
     (output_root / "summary.json").write_text(
         json.dumps(summary, indent=JSON_INDENT, sort_keys=True), encoding=UTF8
     )
-    _write_manifest(output_root, spec, cells, run_usage, generated_at)
+    _write_manifest(output_root, spec, cells, run_usage, generated_at, model_digest)
     return summary
 
 
 def run_experiment(task_root: Path, spec: RunSpec, output_root: Path) -> dict[str, Any]:
+    model_digest = _resolve_run_digest(spec)
     cells: list[dict[str, Any]] = []
     for task_path in discover_tasks(task_root):
         task = load_task(task_path)
         if spec.task_ids and task.id not in spec.task_ids:
             continue
-        cells.extend(_run_one_cell(task_path, task, arm, spec, output_root) for arm in spec.arms)
-    return _write_summary(output_root, spec, cells)
+        cells.extend(
+            _run_one_cell(task_path, task, arm, spec, output_root, model_digest)
+            for arm in spec.arms
+        )
+    return _write_summary(output_root, spec, cells, model_digest)

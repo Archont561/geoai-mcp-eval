@@ -1,7 +1,7 @@
 ---
 id: GEO-009
 title: Diskcache results cache + CI actions/cache
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-22T00:00:00Z'
 labels: []
@@ -19,10 +19,10 @@ Cache LLM completions on disk keyed by sha256(backend_id | model digest | messag
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Cache keys include the model digest (not tag); error responses are never cached.
-- [ ] #2 `--no-cache` forces fresh completions; `cache_hit` is recorded per cell.
-- [ ] #3 CI workflow restores `.cache/llm` via actions/cache with a key prefix restore.
-- [ ] #4 ADR records the cache policy; analysis path contains no cache reads (enforced by test or review).
+- [x] #1 Cache keys include the model digest (not tag); error responses are never cached.
+- [x] #2 `--no-cache` forces fresh completions; `cache_hit` is recorded per cell.
+- [x] #3 CI workflow restores `.cache/llm` via actions/cache with a key prefix restore.
+- [x] #4 ADR records the cache policy; analysis path contains no cache reads (enforced by test or review).
 <!-- AC:END -->
 
 ## Implementation Plan

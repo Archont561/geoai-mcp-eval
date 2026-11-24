@@ -17,6 +17,8 @@ from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 
 from experiment import backends, mcp_client
+from experiment.adapters.llm_cache import CompletionCache
+from experiment.domain.cache_key import build_cache_key
 from experiment.domain.usage import (
     ABORT_REASON_TOKEN_CAP,
     TokenCapExceededError,
@@ -163,6 +165,39 @@ def _emit_usage_events(req: CellRequest, snapshot: UsageSnapshot) -> None:
         raise TokenCapExceededError(tokens_used=tokens_used, max_cell_tokens=cap)
 
 
+def _cached_chat_completions(
+    req: CellRequest,
+    session: requests.Session,
+    profile: backends.BackendProfile,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None = None,
+) -> tuple[dict[str, Any], bool]:
+    """Call the LLM endpoint, using the digest-keyed disk cache when eligible."""
+    cache: CompletionCache | None = None
+    key: str | None = None
+    if req.use_cache and req.model_digest:
+        key = build_cache_key(
+            backend_id=req.backend_id,
+            model_digest=req.model_digest,
+            messages=messages,
+            tools=tools,
+            temperature=profile.temperature,
+            max_tokens=profile.max_tokens,
+        )
+        cache = CompletionCache(req.cache_dir)
+        cached = cache.get(key)
+        if cached is not None:
+            if req.cache_stats is not None:
+                req.cache_stats.record(hit=True)
+            return cached, True
+    reply = _chat_completions(session, profile, messages, tools)
+    if cache is not None and key is not None:
+        cache.put(key, reply)
+    if req.cache_stats is not None:
+        req.cache_stats.record(hit=False)
+    return reply, False
+
+
 def _tool_reply(
     req: CellRequest,
     messages: list[dict[str, Any]],
@@ -170,7 +205,7 @@ def _tool_reply(
     session: requests.Session,
     profile: backends.BackendProfile,
 ) -> dict[str, Any]:
-    reply = _chat_completions(session, profile, messages, tool_specs)
+    reply, cache_hit = _cached_chat_completions(req, session, profile, messages, tool_specs)
     snapshot = _record_completion_usage(req, reply)
     message = reply["choices"][0]["message"]
     messages.append(message)
@@ -178,6 +213,7 @@ def _tool_reply(
         _K_ROLE: "assistant",
         _K_CONTENT: message.get(_K_CONTENT),
         "tool_calls": message.get("tool_calls") or [],
+        "cache_hit": cache_hit,
         "usage": snapshot.to_transcript_usage(),
     }
     if snapshot.warning:
@@ -281,12 +317,13 @@ def _ollama_arm_b(
     head = json.dumps(fixture)[:_TOOL_RESULT_CAP]
     user = f"{req.task.prompt}\n\nFixture head (input.geojson, {size} bytes):\n{head}"
     messages = _initial_messages(req, system, user)
-    reply = _chat_completions(session, profile, messages, None)
+    reply, cache_hit = _cached_chat_completions(req, session, profile, messages, None)
     snapshot = _record_completion_usage(req, reply)
     content = reply["choices"][0]["message"].get(_K_CONTENT) or ""
     entry: dict[str, Any] = {
         _K_ROLE: "assistant",
         _K_CONTENT: content,
+        "cache_hit": cache_hit,
         "usage": snapshot.to_transcript_usage(),
     }
     if snapshot.warning:
