@@ -15,7 +15,7 @@ from shapely.geometry import shape
 from shapely.ops import unary_union
 
 from experiment import gis_ops
-from experiment.harness import extract_iso
+from experiment.adapters.harness_io import extract_iso
 from experiment.oracle import fisher_jenks_breaks
 from experiment.oracle._base import safe_path
 

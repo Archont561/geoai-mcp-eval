@@ -9,13 +9,12 @@ import pytest
 import requests
 import yaml
 
-import experiment.backends as backends
-import experiment.drivers as drivers
-from experiment import harness, prototype
+from experiment.adapters import backends, harness_io, task_repository
 from experiment.adapters.llm_cache import CompletionCache
 from experiment.domain import cache_key
+from experiment.services import runs
 
-TASK_ROOT = harness.TASK_ROOT
+TASK_ROOT = harness_io.TASK_ROOT
 
 
 def _task_path(task_id: str) -> Path:
@@ -80,7 +79,7 @@ def test_cell_cache_hit_miss_digest_change_and_no_cache(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     task_path = _task_path("analysis-de9im-001")
-    task = prototype.load_task(task_path)
+    task = task_repository.load_task(task_path)
     cache_dir = tmp_path / "llm-cache"
     code = "import json\nprint(json.dumps({'relation': 'touches', 'de9im': 'FF2F11212'}))\n"
     calls = {"n": 0}
@@ -92,13 +91,13 @@ def test_cell_cache_hit_miss_digest_change_and_no_cache(
             "usage": {"prompt_tokens": 40, "completion_tokens": 10, "total_tokens": 50},
         }
 
-    monkeypatch.setattr(drivers, "_chat_completions", fake_chat)
+    monkeypatch.setattr(backends, "chat_completions", fake_chat)
     profile = backends.fallback_profile("http://127.0.0.1:11434/v1", "qwen2.5:3b")
 
     def run_once(name: str, *, digest: str | None, use_cache: bool) -> dict:
         cell = tmp_path / name
         cell.mkdir()
-        req = prototype.CellRequest(
+        req = harness_io.CellRequest(
             task_path=task_path,
             task=task,
             arm="B",
@@ -113,7 +112,7 @@ def test_cell_cache_hit_miss_digest_change_and_no_cache(
             use_cache=use_cache,
             cache_dir=cache_dir,
         )
-        return prototype.run_cell(req)
+        return runs.run_cell(req)
 
     # 1. Cold miss -> calls endpoint once, populates cache
     first = run_once("c1", digest="sha256:digest-v1", use_cache=True)
@@ -149,16 +148,16 @@ def test_cell_cache_hit_miss_digest_change_and_no_cache(
 
 def test_http_errors_are_never_cached(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     task_path = _task_path("analysis-de9im-001")
-    task = prototype.load_task(task_path)
+    task = task_repository.load_task(task_path)
     cache_dir = tmp_path / "llm-cache"
 
     def fail_chat(*_args, **_kwargs) -> dict:
         raise backends.BackendError("http-500", "server error")
 
-    monkeypatch.setattr(drivers, "_chat_completions", fail_chat)
+    monkeypatch.setattr(backends, "chat_completions", fail_chat)
     cell = tmp_path / "err"
     cell.mkdir()
-    req = prototype.CellRequest(
+    req = harness_io.CellRequest(
         task_path=task_path,
         task=task,
         arm="B",
@@ -172,7 +171,7 @@ def test_http_errors_are_never_cached(monkeypatch: pytest.MonkeyPatch, tmp_path:
         use_cache=True,
         cache_dir=cache_dir,
     )
-    res = prototype.run_cell(req)
+    res = runs.run_cell(req)
     assert res["status"] == "error"
     assert res["cache_hit"] is False
     assert CompletionCache(cache_dir).count() == 0

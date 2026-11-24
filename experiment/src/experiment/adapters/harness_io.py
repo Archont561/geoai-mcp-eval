@@ -1,8 +1,4 @@
-"""Shared plumbing for the prototype cells: paths, transcript, sandbox.
-
-Everything both the run service (services/runs.py) and the drivers need,
-kept dependency-free so it can be imported from either side without cycles.
-"""
+"""Shared cell I/O plumbing: paths, fixture staging, transcripts, deliverables, sandbox."""
 
 from __future__ import annotations
 
@@ -16,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from experiment.adapters import paths, run_store, subprocess_runner
 
 if TYPE_CHECKING:
-    from experiment.backends import BackendProfile
+    from experiment.domain.backend import BackendProfile
     from experiment.domain.cache_key import CacheStats
     from experiment.domain.task import Task
     from experiment.domain.usage import UsageAccumulator
@@ -45,11 +41,7 @@ def model_label(driver: str, model: str) -> str:
 
 @dataclass(frozen=True)
 class RunSpec:
-    """What to run: arms, task filter, driver, model, host.
-
-    profile is the validated backend profile for the run (from backends.toml);
-    None means "driver should synthesize one from host/model" (tests, ad-hoc runs).
-    """
+    """What to run: arms, task filter, driver, model, host."""
 
     arms: tuple[str, ...]
     task_ids: tuple[str, ...] | None
@@ -65,7 +57,7 @@ class RunSpec:
 
 @dataclass(frozen=True)
 class CellRequest:
-    """Everything one (task, arm) cell needs; threaded through drivers."""
+    """Everything one (task, arm) cell needs; threaded through runners."""
 
     task_path: Path
     task: Task
@@ -86,11 +78,7 @@ class CellRequest:
 
 
 def fixture_path(task_path: Path, task: Task) -> Path:
-    """The input fixture, resolved against the task file's directory.
-
-    The model holds a *relative* path; joining it to the filesystem is the
-    adapter's job, which keeps the domain value free of the filesystem.
-    """
+    """The input fixture, resolved against the task file's directory."""
     path = (task_path.parent / task.fixture_input).resolve()
     if not path.is_file():
         raise ValueError(f"fixture not found: {path}")
@@ -135,11 +123,7 @@ def write_deliverable(cell: Path, task: Task, payload: Any) -> Path:
 
 
 def scrubbed_env(cell: Path, *, qt_platform: str | None = None) -> dict[str, str]:
-    """Minimal environment for sandboxed subprocesses.
-
-    qt_platform="offscreen" additionally sets QT_QPA_PLATFORM for hosts that
-    import Qt (the PyQGIS sandbox); plain subprocesses leave it unset.
-    """
+    """Minimal environment for sandboxed subprocesses."""
     env = {
         "PATH": os.pathsep.join(
             [str(Path(sys.executable).parent), "/usr/local/bin", "/usr/bin", "/bin"]

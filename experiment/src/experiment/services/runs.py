@@ -1,8 +1,8 @@
 """Prepare and execute experiment runs and their individual cells.
 
-Drivers live in :mod:`experiment.drivers`; shared plumbing lives in
-:mod:`experiment.harness`. These runs verify the pipeline, not study results:
-outputs stay under --output-dir and retain their ``prototype`` label.
+Runners live in :mod:`experiment.services.runners`; cell I/O plumbing lives in
+:mod:`experiment.adapters.harness_io`. These runs verify the pipeline, not study
+results: outputs stay under --output-dir and retain their ``prototype`` label.
 """
 
 from __future__ import annotations
@@ -13,8 +13,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from experiment import backends, drivers, scripted
-from experiment.adapters import run_store
+from experiment.adapters import backends, run_store
+from experiment.adapters.harness_io import (
+    _K_CONTENT,
+    _K_ROLE,
+    DRIVERS,
+    TASK_ROOT,
+    CellRequest,
+    RunSpec,
+    append_transcript,
+    cell_dir,
+    model_label,
+    resolve_output_dir,
+)
 from experiment.adapters.task_repository import discover_task_files, load_task
 from experiment.domain.cache_key import CacheStats
 from experiment.domain.run import TrialKey, arm_to_paradigm
@@ -24,18 +35,22 @@ from experiment.domain.usage import (
     UsageAccumulator,
     aggregate_run_usage,
 )
-from experiment.harness import (
-    _K_CONTENT,
-    _K_ROLE,
-    DRIVERS,
-    CellRequest,
-    RunSpec,
-    append_transcript,
-    cell_dir,
-    model_label,
-)
 from experiment.services.measurement import TrialMeasurementOptions, measure_trial
+from experiment.services.runners import ollama as drivers
+from experiment.services.runners import scripted
 from experiment.services.scoring import score_cell
+
+__all__ = [
+    "TASK_ROOT",
+    "RunSpec",
+    "RunSpecError",
+    "discover_tasks",
+    "model_label",
+    "parse_run_spec",
+    "resolve_output_dir",
+    "run_cell",
+    "run_experiment",
+]
 
 
 class RunSpecError(ValueError):

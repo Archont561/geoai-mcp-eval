@@ -12,9 +12,9 @@ from rich.table import Table
 from rich.text import Text
 
 from experiment import gis_ops
-from experiment.harness import TASK_ROOT, RunSpec, model_label, resolve_output_dir
 from experiment.services import mcp_selftest as mcp_selftest_service
 from experiment.services import runs, scoring
+from experiment.services.runs import TASK_ROOT, RunSpec, model_label, resolve_output_dir
 
 app = typer.Typer(
     help="Prototype agent runs + scoring (pipeline verification, not a study result)."

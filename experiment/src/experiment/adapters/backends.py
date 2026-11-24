@@ -1,86 +1,45 @@
-"""Chat-completion backends: TOML profiles validated with pydantic.
-
-A profile is one OpenAI-compatible endpoint (local Ollama, remote Ollama over
-an SSH tunnel, a hosted open model — all speak the same /v1/chat/completions).
-Secrets never appear in the TOML: a profile names the environment variable that
-holds the API key, and the key is read only when a session is built. Invalid
-configuration fails fast with a BackendError before any network call or cell
-run; the CLI maps that to exit code 2.
-"""
+"""Backend profile I/O (TOML loading, env auth, HTTP retry sessions & chat POSTs)."""
 
 from __future__ import annotations
 
 import os
 import tomllib
 from pathlib import Path
+from typing import Any
 
 import requests
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, ValidationError
+from pydantic import ValidationError
 
 from experiment.adapters import ollama as ollama_adapter
 from experiment.adapters.paths import backends_path
+from experiment.domain.backend import (
+    DEFAULT_MODEL,
+    LOCAL_BACKEND,
+    BackendError,
+    BackendProfile,
+    BackendsFile,
+    normalize_host,
+)
 
 DEFAULT_BACKENDS_PATH = backends_path()
 DEFAULT_BASE_URL = ollama_adapter.DEFAULT_BASE_URL
-DEFAULT_MODEL = "qwen2.5-coder:0.5b"
-LOCAL_BACKEND = "local"
 
-
-class BackendError(Exception):
-    """Backend problem with a stable class token.
-
-    str(BackendError) is ``"<error_class>: <detail>"`` — the harness records it
-    verbatim as the cell error; the CLI turns config errors into exit code 2.
-    """
-
-    def __init__(self, error_class: str, detail: str) -> None:
-        self.error_class = error_class
-        self.detail = detail
-        super().__init__(f"{error_class}: {detail}")
-
-
-class BackendProfile(BaseModel):
-    """One validated backend table from backends.toml."""
-
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-
-    base_url: AnyHttpUrl
-    model: str = Field(min_length=1)
-    api_key_env: str | None = None
-    max_tokens: int = Field(default=2048, ge=1)
-    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
-    connect_timeout_s: float = Field(default=5.0, gt=0)
-    read_timeout_s: float = Field(default=300.0, gt=0)
-    retries: int = Field(default=3, ge=0)
-
-    @property
-    def chat_url(self) -> str:
-        base = str(self.base_url).rstrip("/")
-        if not base.endswith("/v1"):
-            base += "/v1"
-        return base + "/chat/completions"
-
-    @property
-    def models_url(self) -> str:
-        base = str(self.base_url).rstrip("/")
-        if not base.endswith("/v1"):
-            base += "/v1"
-        return base + "/models"
-
-    @property
-    def api_root(self) -> str:
-        base = str(self.base_url).rstrip("/")
-        return base[:-3] if base.endswith("/v1") else base
-
-    @property
-    def timeout(self) -> tuple[float, float]:
-        return (self.connect_timeout_s, self.read_timeout_s)
-
-
-class BackendsFile(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    backends: dict[str, BackendProfile]
+__all__ = [
+    "BackendError",
+    "BackendProfile",
+    "BackendsFile",
+    "DEFAULT_BACKENDS_PATH",
+    "DEFAULT_BASE_URL",
+    "DEFAULT_MODEL",
+    "LOCAL_BACKEND",
+    "build_session",
+    "chat_completions",
+    "fallback_profile",
+    "load_profiles",
+    "require_api_key",
+    "resolve_model_digest",
+    "resolve_profile",
+]
 
 
 def load_profiles(path: Path | None = None) -> dict[str, BackendProfile]:
@@ -95,10 +54,6 @@ def load_profiles(path: Path | None = None) -> dict[str, BackendProfile]:
         return BackendsFile.model_validate(raw).backends
     except ValidationError as exc:
         raise BackendError("config", f"{path}: {exc}") from exc
-
-
-def _normalize_host(host: str) -> str:
-    return host.strip().rstrip("/")
 
 
 def _select_profile(name: str, profiles: dict[str, BackendProfile], path: Path) -> BackendProfile:
@@ -128,7 +83,7 @@ def resolve_profile(
     chosen = _select_profile(name, profiles, path)
     env_host = os.environ.get("OLLAMA_HOST") if name == LOCAL_BACKEND else None
     data = chosen.model_dump(mode="json")
-    data["base_url"] = _normalize_host(host or env_host or str(chosen.base_url))
+    data["base_url"] = normalize_host(host or env_host or str(chosen.base_url))
     data["model"] = model or chosen.model
     try:
         return BackendProfile.model_validate(data)
@@ -145,7 +100,7 @@ def require_api_key(profile: BackendProfile) -> None:
 
 def fallback_profile(host: str, model: str) -> BackendProfile:
     """Profile for ad-hoc runs that pass host/model directly (tests, no TOML)."""
-    return BackendProfile(base_url=_normalize_host(host), model=model)
+    return BackendProfile(base_url=normalize_host(host), model=model)
 
 
 def build_session(profile: BackendProfile) -> requests.Session:
@@ -167,3 +122,52 @@ def resolve_model_digest(session: requests.Session, profile: BackendProfile) -> 
         profile.model,
         connect_timeout_s=profile.connect_timeout_s,
     )
+
+
+def _post_chat(
+    session: requests.Session,
+    profile: BackendProfile,
+    body: dict[str, Any],
+) -> requests.Response:
+    try:
+        return session.post(profile.chat_url, json=body, timeout=profile.timeout)
+    except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError) as exc:
+        raise BackendError("connection", f"cannot reach {profile.base_url}: {exc}") from exc
+    except requests.exceptions.ReadTimeout as exc:
+        msg = f"no response within {profile.read_timeout_s}s from {profile.base_url}"
+        raise BackendError("timeout", msg) from exc
+    except requests.exceptions.RequestException as exc:
+        raise BackendError("transport", f"{exc.__class__.__name__}: {exc}") from exc
+
+
+def _parse_chat_response(resp: requests.Response, profile: BackendProfile) -> dict[str, Any]:
+    if resp.status_code == 429:
+        retry_after = resp.headers.get("Retry-After", "unspecified")
+        detail = f"HTTP 429 after {profile.retries} retries (Retry-After: {retry_after})"
+        raise BackendError("rate-limit", detail)
+    if resp.status_code >= 400:
+        raise BackendError(f"http-{resp.status_code}", resp.text[:300])
+    try:
+        return resp.json()
+    except ValueError as exc:
+        raise BackendError("invalid-response", f"response is not JSON: {resp.text[:300]}") from exc
+
+
+def chat_completions(
+    session: requests.Session,
+    profile: BackendProfile,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """POST one OpenAI-compatible ``/v1/chat/completions`` request and return parsed JSON."""
+    body: dict[str, Any] = {
+        "model": profile.model,
+        "messages": messages,
+        "stream": False,
+        "temperature": profile.temperature,
+        "max_tokens": profile.max_tokens,
+    }
+    if tools:
+        body["tools"] = tools
+    resp = _post_chat(session, profile, body)
+    return _parse_chat_response(resp, profile)

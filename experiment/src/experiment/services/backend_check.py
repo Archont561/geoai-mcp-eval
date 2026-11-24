@@ -16,9 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from experiment import backends
+from experiment.adapters import backends, subprocess_runner
 from experiment.adapters import ollama as ollama_adapter
-from experiment.adapters import subprocess_runner
 from experiment.adapters.github_workflow import GitHubWorkflowAdapter
 
 EXIT_READY = 0

@@ -6,11 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from experiment import backends
+from experiment.adapters import backends, paths, run_store
 from experiment.adapters import ollama as ollama_adapter
-from experiment.adapters import paths, run_store
+from experiment.adapters.harness_io import CellRequest, append_transcript
 from experiment.adapters.task_repository import find_task_file, load_task
-from experiment.harness import CellRequest, append_transcript
 from experiment.services import runs as runs_service
 
 OLLAMA_API = ollama_adapter.DEFAULT_BASE_URL

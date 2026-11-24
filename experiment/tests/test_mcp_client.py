@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from experiment import mcp_client
+from experiment.adapters.mcp import client as mcp_client
 
 
 def test_call_tool_unknown_tool_returns_message() -> None:

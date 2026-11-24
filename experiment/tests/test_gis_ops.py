@@ -151,7 +151,8 @@ def test_single_geometry_requires_features() -> None:
 def test_mcp_server_exposes_exactly_the_ops_registry() -> None:
     import asyncio
 
-    from experiment import mcp_client, mcp_server
+    from experiment.adapters.mcp import client as mcp_client
+    from experiment.adapters.mcp import server as mcp_server
 
     tools = asyncio.run(mcp_server.server.list_tools())
     advertised = asyncio.run(mcp_client.list_tools())

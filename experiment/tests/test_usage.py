@@ -8,12 +8,12 @@ from pathlib import Path
 import pytest
 import yaml
 
-import experiment.drivers as drivers
-from experiment import harness, prototype
+from experiment.adapters import backends, harness_io, task_repository
 from experiment.domain import usage as usage_domain
 from experiment.services import runs
+from experiment.services.runners import ollama as drivers
 
-TASK_ROOT = harness.TASK_ROOT
+TASK_ROOT = harness_io.TASK_ROOT
 
 
 def _task_path(task_id: str) -> Path:
@@ -93,8 +93,8 @@ def test_ollama_arm_a_sums_multiturn_usage_and_aborts_on_token_cap(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     task_path = _task_path("analysis-de9im-001")
-    task = prototype.load_task(task_path)
-    fixture = json.loads(harness.fixture_path(task_path, task).read_text(encoding="utf-8"))
+    task = task_repository.load_task(task_path)
+    fixture = json.loads(harness_io.fixture_path(task_path, task).read_text(encoding="utf-8"))
     args = json.dumps({"geojson": fixture, "property": "ISO_A3", "equals": "POL"})
 
     # 1. Under cap: sums across 2 completions
@@ -133,10 +133,10 @@ def test_ollama_arm_a_sums_multiturn_usage_and_aborts_on_token_cap(
             "usage": {"prompt_tokens": 90, "completion_tokens": 30, "total_tokens": 120},
         }
 
-    monkeypatch.setattr(drivers, "_chat_completions", responder_ok)
+    monkeypatch.setattr(backends, "chat_completions", responder_ok)
     cell_ok = tmp_path / "ok"
     cell_ok.mkdir()
-    req_ok = prototype.CellRequest(
+    req_ok = harness_io.CellRequest(
         task_path=task_path,
         task=task,
         arm="A",
@@ -147,7 +147,7 @@ def test_ollama_arm_a_sums_multiturn_usage_and_aborts_on_token_cap(
         run_id="r1",
         max_cell_tokens=250,
     )
-    res_ok = prototype.run_cell(req_ok)
+    res_ok = runs.run_cell(req_ok)
     assert res_ok["status"] == "ok"
     assert res_ok["usage"]["input_tokens"] == 150
     assert res_ok["usage"]["output_tokens"] == 50
@@ -164,7 +164,7 @@ def test_ollama_arm_a_sums_multiturn_usage_and_aborts_on_token_cap(
     calls["n"] = 0
     cell_cap = tmp_path / "cap"
     cell_cap.mkdir()
-    req_cap = prototype.CellRequest(
+    req_cap = harness_io.CellRequest(
         task_path=task_path,
         task=task,
         arm="A",
@@ -175,7 +175,7 @@ def test_ollama_arm_a_sums_multiturn_usage_and_aborts_on_token_cap(
         run_id="r2",
         max_cell_tokens=50,
     )
-    res_cap = prototype.run_cell(req_cap)
+    res_cap = runs.run_cell(req_cap)
     assert res_cap["status"] == "aborted"
     assert res_cap["abort_reason"] == "token_cap_exceeded"
     assert tool_invoked["called"] is False

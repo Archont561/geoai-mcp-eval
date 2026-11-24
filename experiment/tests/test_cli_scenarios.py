@@ -724,7 +724,7 @@ def rescore_reports_no_passes(rescored: dict) -> None:
 
 
 def _stub_arm_b_chat(monkeypatch: pytest.MonkeyPatch, usage: dict | None) -> None:
-    import experiment.drivers as drivers
+    from experiment.adapters import backends
 
     code = "import json\nprint(json.dumps({'relation': 'touches', 'de9im': 'FF2F11212'}))\n"
     payload: dict = {
@@ -736,7 +736,7 @@ def _stub_arm_b_chat(monkeypatch: pytest.MonkeyPatch, usage: dict | None) -> Non
     def fake_chat(*_args, **_kwargs) -> dict:
         return payload
 
-    monkeypatch.setattr(drivers, "_chat_completions", fake_chat)
+    monkeypatch.setattr(backends, "chat_completions", fake_chat)
 
 
 @given(parsers.parse("a stubbed Ollama endpoint reporting {inp:d} input and {out:d} output tokens"))
@@ -857,8 +857,7 @@ def summary_and_manifest_record_aborted(output: Path, aborted: int, tot: int) ->
     target_fixture="cache_probe",
 )
 def stubbed_ollama_counting_calls(monkeypatch: pytest.MonkeyPatch, digest: str) -> dict:
-    import experiment.backends as backends
-    import experiment.drivers as drivers
+    from experiment.adapters import backends
 
     state = {"calls": 0, "digest": digest}
     code = "import json\nprint(json.dumps({'relation': 'touches', 'de9im': 'FF2F11212'}))\n"
@@ -870,7 +869,7 @@ def stubbed_ollama_counting_calls(monkeypatch: pytest.MonkeyPatch, digest: str) 
             "usage": {"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70},
         }
 
-    monkeypatch.setattr(drivers, "_chat_completions", fake_chat)
+    monkeypatch.setattr(backends, "chat_completions", fake_chat)
     monkeypatch.setattr(backends, "resolve_model_digest", lambda _session, _profile: digest)
     return state
 

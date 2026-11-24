@@ -8,12 +8,12 @@ from pathlib import Path
 import pytest
 import yaml
 
-import experiment.drivers as drivers
-from experiment import harness, prototype
+from experiment.adapters import backends, harness_io, task_repository
 from experiment.domain.task import Task
 from experiment.services import runs
+from experiment.services.runners import ollama as drivers
 
-TASK_ROOT = harness.TASK_ROOT
+TASK_ROOT = harness_io.TASK_ROOT
 
 
 def _task_document(**overrides: object) -> Task:
@@ -67,32 +67,34 @@ def test_fixture_path_errors(tmp_path: Path) -> None:
     task_path = tmp_path / "t.yaml"
     task = _task_document(fixtures={"input": "missing.geojson"})
     with pytest.raises(ValueError, match="fixture"):
-        harness.fixture_path(task_path, task)
+        harness_io.fixture_path(task_path, task)
 
 
 def test_resolve_output_dir_explicit_and_default(tmp_path: Path) -> None:
-    assert harness.resolve_output_dir(tmp_path / "out") == tmp_path / "out"
-    generated = harness.resolve_output_dir(None)
+    assert harness_io.resolve_output_dir(tmp_path / "out") == tmp_path / "out"
+    generated = harness_io.resolve_output_dir(None)
     assert generated.name.startswith("prototype-")
     generated.rmdir()
 
 
 def test_deliverable_name() -> None:
-    for task_path in prototype.discover_tasks(TASK_ROOT):
-        task = prototype.load_task(task_path)
+    for task_path in runs.discover_tasks(TASK_ROOT):
+        task = task_repository.load_task(task_path)
         expected = "result.geojson" if task.id == "prep-axis-order-001" else "result.json"
-        assert harness.deliverable_name(task) == expected
+        assert harness_io.deliverable_name(task) == expected
 
 
 def test_run_python_sandboxed() -> None:
-    completed = harness.run_python_sandboxed("print('hello')", Path("."))
+    completed = harness_io.run_python_sandboxed("print('hello')", Path("."))
     assert completed.returncode == 0
     assert completed.stdout.strip() == "hello"
 
 
 def _fixture(task_id: str) -> dict:
-    task = prototype.load_task(_task_path(task_id))
-    return json.loads((harness.fixture_path(_task_path(task_id), task)).read_text(encoding="utf-8"))
+    task = task_repository.load_task(_task_path(task_id))
+    return json.loads(
+        (harness_io.fixture_path(_task_path(task_id), task)).read_text(encoding="utf-8")
+    )
 
 
 FINAL_JSON = '```json\n{"relation": "touches", "de9im": "FF2F11212"}\n```'
@@ -100,10 +102,10 @@ FINAL_JSON = '```json\n{"relation": "touches", "de9im": "FF2F11212"}\n```'
 
 def _cell_request(
     task_id: str, arm: str, driver: str, cell: Path, run_id: str = "test"
-) -> prototype.CellRequest:
+) -> harness_io.CellRequest:
     task_path = _task_path(task_id)
-    task = prototype.load_task(task_path)
-    return prototype.CellRequest(
+    task = task_repository.load_task(task_path)
+    return harness_io.CellRequest(
         task_path=task_path,
         task=task,
         arm=arm,
@@ -149,7 +151,7 @@ def _install_fake_chat(monkeypatch: pytest.MonkeyPatch, responder) -> None:
     def fake_chat(*_args, **_kwargs):
         return responder()
 
-    monkeypatch.setattr(drivers, "_chat_completions", fake_chat)
+    monkeypatch.setattr(backends, "chat_completions", fake_chat)
 
 
 def test_ollama_arm_a_tool_loop(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -166,7 +168,7 @@ def test_ollama_arm_a_tool_loop(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     _install_fake_chat(monkeypatch, responder)
     cell = _make_cell(tmp_path)
     req = _cell_request("analysis-de9im-001", "A", "ollama", cell)
-    result = prototype.run_cell(req)
+    result = runs.run_cell(req)
     assert result["status"] == "ok"
     assert result["oracle_passed"] is True
     transcript = (cell / "transcript.jsonl").read_text(encoding="utf-8")
@@ -187,7 +189,7 @@ def test_ollama_arm_a_tool_error_is_captured(
     _install_fake_chat(monkeypatch, responder)
     cell = _make_cell(tmp_path)
     req = _cell_request("analysis-de9im-001", "A", "ollama", cell)
-    result = prototype.run_cell(req)
+    result = runs.run_cell(req)
     assert result["status"] == "ok"  # tool error captured, model still finalized
     assert "no_such_tool" in (cell / "transcript.jsonl").read_text(encoding="utf-8")
 
@@ -197,7 +199,7 @@ def test_ollama_arm_b_executes_code(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     _install_fake_chat(monkeypatch, lambda: _content_response(f"```python\n{code}```"))
     cell = _make_cell(tmp_path)
     req = _cell_request("analysis-de9im-001", "B", "ollama", cell)
-    result = prototype.run_cell(req)
+    result = runs.run_cell(req)
     assert result["oracle_passed"] is True
 
 
@@ -207,7 +209,7 @@ def test_ollama_arm_b_bad_code_block_fails_softly(
     _install_fake_chat(monkeypatch, lambda: _content_response("no code here, sorry"))
     cell = _make_cell(tmp_path)
     req = _cell_request("analysis-de9im-001", "B", "ollama", cell)
-    result = prototype.run_cell(req)
+    result = runs.run_cell(req)
     assert result["oracle_passed"] is False
 
 
@@ -218,7 +220,7 @@ def test_cell_error_marks_status(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     monkeypatch.setitem(runs._DRIVER_DISPATCH, ("scripted", "A"), boom)
     cell = _make_cell(tmp_path)
     req = _cell_request("analysis-de9im-001", "A", "scripted", cell)
-    result = prototype.run_cell(req)
+    result = runs.run_cell(req)
     assert result["status"] == "error"
     assert result["oracle_passed"] is False
 
@@ -235,7 +237,7 @@ def test_ollama_arm_b_ignores_json_fence(monkeypatch: pytest.MonkeyPatch, tmp_pa
     _install_fake_chat(monkeypatch, lambda: _content_response(answer))
     cell = _make_cell(tmp_path)
     req = _cell_request("analysis-de9im-001", "B", "ollama", cell)
-    result = prototype.run_cell(req)
+    result = runs.run_cell(req)
     assert result["oracle_passed"] is False
     assert not (cell / "result.json").exists()
     transcript = (cell / "transcript.jsonl").read_text(encoding="utf-8")
@@ -248,7 +250,7 @@ def test_ollama_arm_b_accepts_py_fence(monkeypatch: pytest.MonkeyPatch, tmp_path
     _install_fake_chat(monkeypatch, lambda: _content_response(f"```py\n{code}```"))
     cell = _make_cell(tmp_path)
     req = _cell_request("analysis-de9im-001", "B", "ollama", cell)
-    assert prototype.run_cell(req)["oracle_passed"] is True
+    assert runs.run_cell(req)["oracle_passed"] is True
 
 
 def test_ollama_arm_b_accepts_untagged_fence(
@@ -258,4 +260,4 @@ def test_ollama_arm_b_accepts_untagged_fence(
     _install_fake_chat(monkeypatch, lambda: _content_response(f"```\n{code}```"))
     cell = _make_cell(tmp_path)
     req = _cell_request("analysis-de9im-001", "B", "ollama", cell)
-    assert prototype.run_cell(req)["oracle_passed"] is True
+    assert runs.run_cell(req)["oracle_passed"] is True

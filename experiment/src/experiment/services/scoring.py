@@ -7,8 +7,8 @@ from typing import Any
 
 from experiment import oracle
 from experiment.adapters import run_store
+from experiment.adapters.harness_io import ARM_PREFIX, TASK_ROOT
 from experiment.adapters.task_repository import discover_task_files, load_task
-from experiment.harness import ARM_PREFIX, TASK_ROOT
 
 
 class SummaryNotFoundError(Exception):
