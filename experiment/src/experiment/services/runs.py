@@ -28,7 +28,7 @@ from experiment.adapters.harness_io import (
 )
 from experiment.adapters.task_repository import discover_task_files, load_task
 from experiment.domain.cache_key import CacheStats
-from experiment.domain.run import TrialKey, arm_to_paradigm
+from experiment.domain.run import EnforcementLevel, TrialKey, arm_to_paradigm, enforce_code_to_level
 from experiment.domain.task import Task
 from experiment.domain.usage import (
     TokenCapExceededError,
@@ -98,6 +98,33 @@ def _resolve_backend_profile(
     return profile
 
 
+_ENFORCEMENT_LEVELS: tuple[EnforcementLevel, ...] = (
+    "none",
+    "declarative",
+    "syntactic",
+    "semantic_repair",
+    "transactional",
+)
+
+
+def _parse_enforce(raw: str) -> EnforcementLevel:
+    cleaned = raw.strip()
+    lower = cleaned.lower()
+    if lower in _ENFORCEMENT_LEVELS:
+        return lower  # type: ignore[return-value]
+    try:
+        return enforce_code_to_level(cleaned)
+    except ValueError as exc:
+        raise RunSpecError(str(exc)) from exc
+
+
+def _validate_run_inputs(driver: str, max_cell_tokens: int | None) -> None:
+    if driver not in DRIVERS:
+        raise RunSpecError(f"--driver must be one of {', '.join(DRIVERS)}")
+    if max_cell_tokens is not None and max_cell_tokens < 1:
+        raise RunSpecError("--max-cell-tokens must be a positive integer")
+
+
 def parse_run_spec(  # noqa: CC102
     driver: str,
     model: str | None,
@@ -109,12 +136,10 @@ def parse_run_spec(  # noqa: CC102
     max_cell_tokens: int | None = None,
     use_cache: bool = True,
     cache_dir: Path | None = None,
+    enforce: str = "semantic_repair",
 ) -> RunSpec:
     """Resolve the backend and validate a requested run before creating output."""
-    if driver not in DRIVERS:
-        raise RunSpecError(f"--driver must be one of {', '.join(DRIVERS)}")
-    if max_cell_tokens is not None and max_cell_tokens < 1:
-        raise RunSpecError("--max-cell-tokens must be a positive integer")
+    _validate_run_inputs(driver, max_cell_tokens)
     profile = _resolve_backend_profile(driver, backend, host, model)
     return RunSpec(
         driver=driver,
@@ -127,6 +152,7 @@ def parse_run_spec(  # noqa: CC102
         backend_id=backend,
         use_cache=use_cache,
         cache_dir=cache_dir,
+        enforce=_parse_enforce(enforce),
     )
 
 
@@ -189,7 +215,9 @@ def _build_cell_meta(
 
 def _trial_key_for_cell(req: CellRequest) -> TrialKey:
     paradigm = arm_to_paradigm(req.arm)
-    enforcement = "semantic_repair" if paradigm == "typed_mcp" else "none"
+    enforcement: EnforcementLevel = (
+        _parse_enforce(req.enforce) if paradigm == "typed_mcp" else "none"
+    )
     return TrialKey(
         task_id=req.task.id,
         paradigm=paradigm,
@@ -269,6 +297,7 @@ def _run_one_cell(task_path: Path, task: Task, arm: str, ctx: _RunContext) -> di
         model_digest=ctx.model_digest,
         use_cache=ctx.spec.use_cache,
         cache_dir=ctx.spec.cache_dir,
+        enforce=ctx.spec.enforce,
     )
     return run_cell(req)
 

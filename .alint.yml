@@ -165,7 +165,7 @@ rules:
   - id: ci-validates-pilot-task-suite
     kind: file_content_matches
     paths: .github/workflows/ci.yml
-    pattern: "(?m)^        run: pixi run experiment pilot validate$"
+    pattern: "(?m)^        run: pixi run experiment tasks validate$"
     level: error
     message: "CI must validate the pilot task suite through the experiment CLI."
 

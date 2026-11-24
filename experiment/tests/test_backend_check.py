@@ -305,7 +305,7 @@ def test_cli_backend_check_prints_ready_and_propagates_exit_code(
             base_url="http://127.0.0.1:11435/v1",
         ),
     )
-    ok = cli_runner.invoke(app, ["workflow", "backend-check", "--ssh-host", "gpu-box"])
+    ok = cli_runner.invoke(app, ["env", "backend-check", "--ssh-host", "gpu-box"])
     assert ok.exit_code == 0, ok.output
     assert "READY" in ok.output and "sha256:pinned123" in ok.output
 
@@ -313,7 +313,7 @@ def test_cli_backend_check_prints_ready_and_propagates_exit_code(
         raise BackendCheckError("tunnel-dead", EXIT_TUNNEL_DEAD, "socket closed", "restart ssh")
 
     monkeypatch.setattr(backend_check, "run_backend_check", boom)
-    err = cli_runner.invoke(app, ["workflow", "backend-check", "--ssh-host", "gpu-box"])
+    err = cli_runner.invoke(app, ["env", "backend-check", "--ssh-host", "gpu-box"])
     assert err.exit_code == EXIT_TUNNEL_DEAD
 
 

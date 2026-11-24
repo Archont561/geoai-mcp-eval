@@ -140,7 +140,7 @@ def test_the_shipped_contracts_pass_and_reject_violations(tmp_path: Path) -> Non
     for package, source, contract, violation in (
         (
             "services",
-            "from experiment.cli import qgis\n",
+            "from experiment.cli import env\n",
             layers,
             "experiment.services is not allowed to import experiment.cli",
         ),

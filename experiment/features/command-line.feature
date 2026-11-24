@@ -6,24 +6,21 @@ Feature: The experiment command line
 
   Scenario: The top level lists the command groups it mounted
     When I ask the command line for help
-    Then the help names the "analyze" command group
-    And the help names the "pilot" command group
-    And the help names the "proto" command group
+    Then the help names the "tasks" command group
+    And the help names the "run" command group
+    And the help names the "score" command group
+    And the help names the "archive" command group
+    And the help names the "env" command group
 
-  Scenario: A greeting is printed for a name
-    When I run the command "hello hello --name world"
+  Scenario: The smoke command verifies the CLI and task suite wiring
+    When I run the command "run smoke"
     Then the command exits successfully
-    And the output contains "Hello, world!"
-
-  Scenario: A greeting falls back to a default name
-    When I run the command "hello hello"
-    Then the command exits successfully
-    And the output contains "Hello, world!"
+    And the output contains "smoke ok"
 
   Scenario: An unknown command is refused
     When I run the command "no-such-command"
     Then the command fails
 
   Scenario: A command group with no sub-command explains itself
-    When I run the command "analyze"
+    When I run the command "tasks"
     Then the command fails

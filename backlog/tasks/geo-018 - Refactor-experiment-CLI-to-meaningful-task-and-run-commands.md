@@ -1,7 +1,7 @@
 ---
 id: GEO-018
 title: Refactor experiment CLI to meaningful task and run commands
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-24T00:00:00Z'
 labels:
@@ -37,11 +37,11 @@ Update `experiment/pyproject.toml` Tasknest manifest tasks, `.alint.yml`, `.gith
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `experiment tasks ls`, `experiment tasks show <task_id>`, and `experiment tasks validate` work cleanly against `experiment/tasks/`.
-- [ ] #2 `experiment run` exposes paradigm-specific subcommands (`mcp`, `codegen`, `all`, `smoke`) writing unified `ExperimentRun` / `RunArchive` outputs (local and CI share one layout).
-- [ ] #3 `experiment score`, `experiment archive`, and `experiment env` cover scoring, determinism gate, zip packing/summary/inspection, and environment/sandbox probes; legacy `proto`, `pilot`, `workflow`, `hello`, and `analyze` CLI groups are removed.
-- [ ] #4 `experiment/pyproject.toml` Tasknest tasks, `.alint.yml` (`ci-validates-pilot-task-suite` updated), `.github/workflows/ci.yml`, and all `experiment/features/*.feature` BDD specs are updated and green.
-- [ ] #5 `pixi run tools run check` passes (`alint`, `lint`, `clean_code`, `architecture`, `test`, `md`).
+- [x] #1 `experiment tasks ls`, `experiment tasks show <task_id>`, and `experiment tasks validate` work cleanly against `experiment/tasks/`.
+- [x] #2 `experiment run` exposes paradigm-specific subcommands (`mcp`, `codegen`, `all`, `smoke`) writing unified `ExperimentRun` / `RunArchive` outputs (local and CI share one layout).
+- [x] #3 `experiment score`, `experiment archive`, and `experiment env` cover scoring, determinism gate, zip packing/summary/inspection, and environment/sandbox probes; legacy `proto`, `pilot`, `workflow`, `hello`, and `analyze` CLI groups are removed.
+- [x] #4 `experiment/pyproject.toml` Tasknest tasks, `.alint.yml` (`ci-validates-pilot-task-suite` updated), `.github/workflows/ci.yml`, and all `experiment/features/*.feature` BDD specs are updated and green.
+- [x] #5 `pixi run tools run check` passes (`alint`, `lint`, `clean_code`, `architecture`, `test`, `md`).
 <!-- AC:END -->
 
 ## Implementation Plan

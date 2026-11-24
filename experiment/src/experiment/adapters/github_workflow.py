@@ -10,8 +10,19 @@ from __future__ import annotations
 import os
 import secrets
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
+
+import requests
+
+
+@dataclass(frozen=True)
+class _GitHubApiContext:
+    api_base: str
+    repo: str
+    headers: dict[str, str]
 
 
 def _stringify_value(value: object) -> str:
@@ -97,3 +108,81 @@ class GitHubWorkflowAdapter:
         with path.open("a", encoding="utf-8") as handle:
             handle.write(text)
         return True
+
+    def _api_headers(self, token: str) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+    def _list_run_artifacts(
+        self,
+        session: Any,
+        ctx: _GitHubApiContext,
+        run_id: str,
+    ) -> list[dict[str, Any]]:
+        artifacts: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            url = f"{ctx.api_base}/repos/{ctx.repo}/actions/runs/{run_id}/artifacts"
+            resp = session.get(
+                url, headers=ctx.headers, params={"per_page": 100, "page": page}, timeout=30
+            )
+            if resp.status_code >= 400:
+                raise RuntimeError(f"failed to list artifacts (HTTP {resp.status_code})")
+            batch = resp.json().get("artifacts") or []
+            if not batch:
+                break
+            artifacts.extend(batch)
+            if len(batch) < 100:
+                break
+            page += 1
+        return artifacts
+
+    def _delete_other_artifacts(
+        self,
+        client: Any,
+        ctx: _GitHubApiContext,
+        artifacts: list[dict[str, Any]],
+        keep_name: str,
+    ) -> list[str]:
+        deleted: list[str] = []
+        for item in artifacts:
+            name = str(item.get("name", ""))
+            artifact_id = item.get("id")
+            if not name or name == keep_name or artifact_id is None:
+                continue
+            del_url = f"{ctx.api_base}/repos/{ctx.repo}/actions/artifacts/{artifact_id}"
+            resp = client.delete(del_url, headers=ctx.headers, timeout=30)
+            if resp.status_code >= 400:
+                raise RuntimeError(f"failed to delete artifact {name!r} (HTTP {resp.status_code})")
+            deleted.append(name)
+        return deleted
+
+    def prune_run_artifacts(
+        self,
+        keep_name: str,
+        *,
+        run_id: str = "",
+        session: Any | None = None,
+    ) -> list[str]:
+        """Delete intermediate GitHub Actions artifacts for this run except ``keep_name``."""
+        repo = self._env.get("GITHUB_REPOSITORY", "").strip()
+        target_run = (run_id or self._env.get("GITHUB_RUN_ID", "")).strip()
+        token = self._env.get("GITHUB_TOKEN", "").strip()
+        if not (repo and target_run and token):
+            return []
+        ctx = _GitHubApiContext(
+            api_base=self._env.get("GITHUB_API_URL", "https://api.github.com").rstrip("/"),
+            repo=repo,
+            headers=self._api_headers(token),
+        )
+        client = session if session is not None else requests.Session()
+        own_client = session is None
+        try:
+            artifacts = self._list_run_artifacts(client, ctx, target_run)
+            return self._delete_other_artifacts(client, ctx, artifacts, keep_name)
+        finally:
+            if own_client:
+                client.close()

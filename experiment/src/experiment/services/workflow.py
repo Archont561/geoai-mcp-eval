@@ -52,7 +52,7 @@ def run_preflight(run_id: str = "") -> tuple[str, dict[str, str], Path]:
     run_dir = run_store.ensure_dir(paths.results_root(repo_root) / rid)
 
     rc = subprocess_runner.run_passthrough(
-        [sys.executable, "-m", "experiment", "pilot", "validate"],
+        [sys.executable, "-m", "experiment", "tasks", "validate"],
         cwd=repo_root,
         env=experiment_env(repo_root),
     )
@@ -149,7 +149,7 @@ def _run_pilot_cell(
 
 def _run_smoke_probe(repo_root: Path, cell_dir: Path, base: dict[str, object]) -> None:
     rc = subprocess_runner.run_passthrough(
-        [sys.executable, "-m", "experiment", "hello", "hello"],
+        [sys.executable, "-m", "experiment", "run", "smoke"],
         cwd=repo_root,
         env=experiment_env(repo_root),
     )
@@ -271,7 +271,7 @@ def _evaluate_cell(
         sys.executable,
         "-m",
         "experiment",
-        "pilot",
+        "score",
         "determinism",
         task,
         "--artifacts-dir",

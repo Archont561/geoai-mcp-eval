@@ -53,6 +53,7 @@ class RunSpec:
     backend_id: str = "local"
     use_cache: bool = True
     cache_dir: Path | None = None
+    enforce: str = "semantic_repair"
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,7 @@ class CellRequest:
     use_cache: bool = True
     cache_dir: Path | None = None
     cache_stats: CacheStats | None = None
+    enforce: str = "semantic_repair"
 
 
 def fixture_path(task_path: Path, task: Task) -> Path:

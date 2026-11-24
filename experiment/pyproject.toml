@@ -28,31 +28,36 @@ testpaths = ["tests"]
 addopts = "-v"
 
 [tool.tasknest.tasks.preflight]
-cmd = ["python", "run_cli.py", "workflow", "preflight"]
+cmd = ["python", "run_cli.py", "env", "preflight"]
 description = "Validate the pilot task suite and pin the run environment."
 marks = ["ci", "workflow"]
 
 [tool.tasknest.tasks.model]
-cmd = ["python", "run_cli.py", "workflow", "model"]
+cmd = ["python", "run_cli.py", "env", "model"]
 description = "Start Ollama, pull the pinned model, and record its digest."
 marks = ["ci", "workflow", "setup"]
 
 [tool.tasknest.tasks.run]
-cmd = ["python", "run_cli.py", "workflow", "run"]
+cmd = ["python", "run_cli.py", "run", "cell"]
 description = "Run one experiment cell (arm, task, repetition)."
 marks = ["ci", "workflow"]
 
 [tool.tasknest.tasks.harvest]
-cmd = ["python", "run_cli.py", "workflow", "harvest"]
-description = "Merge cell outputs, re-run the oracle gate, and assert completeness."
+cmd = ["python", "run_cli.py", "archive", "pack"]
+description = "Merge cell outputs, run the oracle gate, assert completeness, and pack RunArchive zip."
 marks = ["ci", "workflow"]
 
 [tool.tasknest.tasks.summary]
-cmd = ["python", "run_cli.py", "workflow", "summary"]
+cmd = ["python", "run_cli.py", "archive", "summary"]
 description = "Write the experiment step summary (artifacts, pins, completeness)."
 marks = ["ci", "workflow"]
 
+[tool.tasknest.tasks.prune-ci]
+cmd = ["python", "run_cli.py", "archive", "prune-ci"]
+description = "Delete intermediate CI handoff artifacts after the final RunArchive bundle upload succeeds."
+marks = ["ci", "workflow"]
+
 [tool.tasknest.tasks.backend-check]
-cmd = ["python", "run_cli.py", "workflow", "backend-check"]
+cmd = ["python", "run_cli.py", "env", "backend-check"]
 description = "Verify remote-ollama SSH tunnel, poll /v1/models digest, and run one tiny completion."
 marks = ["workflow"]
