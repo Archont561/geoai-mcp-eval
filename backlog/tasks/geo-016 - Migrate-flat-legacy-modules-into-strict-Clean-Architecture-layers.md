@@ -1,7 +1,7 @@
 ---
 id: GEO-016
 title: Migrate flat legacy modules into strict Clean Architecture layers
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-24T00:00:00Z'
 labels:
@@ -30,10 +30,10 @@ Eliminate the flat legacy modules sitting at the root of `experiment/src/experim
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 No flat legacy orchestration/I/O modules (`backends.py`, `drivers.py`, `harness.py`, `prototype.py`, `scripted.py`, `mcp_client.py`, `mcp_server.py`, `task_suite.py`) remain outside `domain/`, `adapters/`, `services/`, `cli/`, `oracle/`, or `analysis/`.
-- [ ] #2 `[tool.importlinter]` contracts in `pyproject.toml` cover all package layers exhaustively and pass (`pixi run tools run architecture`).
-- [ ] #3 Arm A GIS tool catalogue (`gis_ops`) remains strictly forbidden from importing `oracle`.
-- [ ] #4 `pixi run tools run check` passes with 0 `clean_code` violations and `>=90%` test coverage.
+- [x] #1 No flat legacy orchestration/I/O modules (`backends.py`, `drivers.py`, `harness.py`, `prototype.py`, `scripted.py`, `mcp_client.py`, `mcp_server.py`, `task_suite.py`) remain outside `domain/`, `adapters/`, `services/`, `cli/`, `oracle/`, or `analysis/`.
+- [x] #2 `[tool.importlinter]` contracts in `pyproject.toml` cover all package layers exhaustively and pass (`pixi run tools run architecture`).
+- [x] #3 Arm A GIS tool catalogue (`gis_ops`) remains strictly forbidden from importing `oracle`.
+- [x] #4 `pixi run tools run check` passes with 0 `clean_code` violations and `>=90%` test coverage.
 <!-- AC:END -->
 
 ## Implementation Plan

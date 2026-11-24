@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-from experiment.task_suite import _resolve_inside, validate_suite
+from experiment.adapters.task_suite import _resolve_inside, validate_suite
 
 UTF8 = "utf-8"
 TYPE_KEY = "type"
@@ -41,7 +41,7 @@ def test_jsonschema_validation_and_path_containment(tmp_path: Path) -> None:
 
 
 def test_standard_jsonschema_keywords_are_supported() -> None:
-    from experiment.task_suite import _schema_validation_issues
+    from experiment.adapters.task_suite import _schema_validation_issues
 
     issues = _schema_validation_issues(
         {"name": "", "count": -1, "tags": ["x", "x"], "extra": 1},

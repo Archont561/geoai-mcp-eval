@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from experiment import mcp_client
 from experiment.adapters import run_store
-from experiment.harness import TASK_ROOT
+from experiment.adapters.harness_io import TASK_ROOT
+from experiment.adapters.mcp import client as mcp_client
 
 
 async def selftest_rows() -> list[tuple[str, str, str]]:

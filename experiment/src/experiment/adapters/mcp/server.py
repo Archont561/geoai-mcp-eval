@@ -2,7 +2,7 @@
 
 Run over stdio:
 
-    python -m experiment.mcp_server
+    python -m experiment.adapters.mcp.server
 
 The server is deliberately stateless: every tool takes a GeoJSON mapping (or a
 list of values) and returns a JSON mapping; there is no catalogue hash registry

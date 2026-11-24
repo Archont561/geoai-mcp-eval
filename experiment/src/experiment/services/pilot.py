@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from experiment import oracle, task_suite
-from experiment.adapters import paths, task_repository
+from experiment import oracle
+from experiment.adapters import paths, task_repository, task_suite
 
 TaskNotFoundError = task_repository.TaskNotFoundError
 

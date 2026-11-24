@@ -1,8 +1,8 @@
-"""Driver implementations for the prototype cells (scripted and Ollama).
+"""Live LLM runner over an OpenAI-compatible ``/v1/chat/completions`` endpoint.
 
-Never a study result: scripted replays a deterministic canned plan to prove the
-pipeline; Ollama talks to a local OpenAI-compatible endpoint. Outputs are
-always labelled ``prototype``.
+Arm A (Typed MCP) runs a tool-calling loop over the stdio MCP adapter;
+Arm B (Codegen) requests a Python script and executes it in a scrubbed sandbox.
+All HTTP transport and MCP stdio plumbing stays in ``experiment.adapters``.
 """
 
 from __future__ import annotations
@@ -13,20 +13,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-import requests
-from mcp import ClientSession
-from mcp.client.stdio import stdio_client
-
-from experiment import backends, mcp_client
-from experiment.adapters.llm_cache import CompletionCache
-from experiment.domain.cache_key import CacheKeySpec, build_cache_key
-from experiment.domain.usage import (
-    ABORT_REASON_TOKEN_CAP,
-    TokenCapExceededError,
-    UsageSnapshot,
-    extract_response_usage,
-)
-from experiment.harness import (
+from experiment.adapters import backends
+from experiment.adapters.harness_io import (
     _K_CONTENT,
     _K_ID,
     _K_ROLE,
@@ -39,95 +27,29 @@ from experiment.harness import (
     stage_fixture_input,
     write_deliverable,
 )
+from experiment.adapters.llm_cache import CompletionCache
+from experiment.adapters.mcp import client as mcp_client
+from experiment.domain.backend import BackendProfile
+from experiment.domain.cache_key import CacheKeySpec, build_cache_key
+from experiment.domain.usage import (
+    ABORT_REASON_TOKEN_CAP,
+    TokenCapExceededError,
+    UsageSnapshot,
+    extract_response_usage,
+)
 
-_MAX_TOOL_STEPS = 12
-_TOOL_RESULT_CAP = 6000
-_TRANSCRIPT_USER_CAP = 4000
+_MAX_TOOL_STEPS = 8
+_TOOL_RESULT_CAP = 12000
+_TRANSCRIPT_USER_CAP = 2000
 
 
 @dataclass(frozen=True)
 class _DriverSession:
-    """Bundled cell request, validated backend profile, and live HTTP session."""
+    """Open HTTP session + resolved backend profile for one cell."""
 
     req: CellRequest
-    session: requests.Session
-    profile: backends.BackendProfile
-
-
-def _post_chat(
-    session: requests.Session,
-    profile: backends.BackendProfile,
-    body: dict[str, Any],
-) -> requests.Response:
-    try:
-        return session.post(profile.chat_url, json=body, timeout=profile.timeout)
-    except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError) as exc:
-        raise backends.BackendError(
-            "connection", f"cannot reach {profile.base_url}: {exc}"
-        ) from exc
-    except requests.exceptions.ReadTimeout as exc:
-        msg = f"no response within {profile.read_timeout_s}s from {profile.base_url}"
-        raise backends.BackendError("timeout", msg) from exc
-    except requests.exceptions.RequestException as exc:
-        raise backends.BackendError("transport", f"{exc.__class__.__name__}: {exc}") from exc
-
-
-def _parse_chat_response(
-    resp: requests.Response, profile: backends.BackendProfile
-) -> dict[str, Any]:
-    if resp.status_code == 429:
-        retry_after = resp.headers.get("Retry-After", "unspecified")
-        detail = f"HTTP 429 after {profile.retries} retries (Retry-After: {retry_after})"
-        raise backends.BackendError("rate-limit", detail)
-    if resp.status_code >= 400:
-        raise backends.BackendError(f"http-{resp.status_code}", resp.text[:300])
-    try:
-        return resp.json()
-    except ValueError as exc:
-        raise backends.BackendError(
-            "invalid-response", f"response is not JSON: {resp.text[:300]}"
-        ) from exc
-
-
-def _chat_completions(
-    session: requests.Session,
-    profile: backends.BackendProfile,
-    messages: list[dict[str, Any]],
-    tools: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    body: dict[str, Any] = {
-        "model": profile.model,
-        "messages": messages,
-        "stream": False,
-        "temperature": profile.temperature,
-        "max_tokens": profile.max_tokens,
-    }
-    if tools:
-        body["tools"] = tools
-    resp = _post_chat(session, profile, body)
-    return _parse_chat_response(resp, profile)
-
-
-def _openai_tool_from_mcp(tool: Any) -> dict[str, Any]:
-    schema = getattr(tool, "inputSchema", None) or {"type": "object", "properties": {}}
-    return {
-        "type": "function",
-        "function": {
-            "name": tool.name,
-            "description": (tool.description or "").strip(),
-            "parameters": schema,
-        },
-    }
-
-
-async def _mcp_tool_specs() -> tuple[list[dict[str, Any]], list[Any]]:
-    async with (
-        stdio_client(mcp_client.server_params()) as (read, write),
-        ClientSession(read, write) as session,
-    ):
-        await session.initialize()
-        result = await session.list_tools()
-        return [_openai_tool_from_mcp(t) for t in result.tools], list(result.tools)
+    session: Any
+    profile: BackendProfile
 
 
 def _extract_json_block(text: str) -> Any | None:
@@ -220,7 +142,7 @@ def _cached_chat_completions(
             if ctx.req.cache_stats is not None:
                 ctx.req.cache_stats.record(hit=True)
             return cached, True
-    reply = _chat_completions(ctx.session, ctx.profile, messages, tools)
+    reply = backends.chat_completions(ctx.session, ctx.profile, messages, tools)
     if cache is not None and key is not None:
         cache.put(key, reply)
     if ctx.req.cache_stats is not None:
@@ -296,7 +218,7 @@ def ollama_arm_a(req: CellRequest) -> None:
 def _ollama_arm_a(ctx: _DriverSession) -> None:
     req = ctx.req
     fixture = fixture_fc(req.task_path, req.task)
-    tool_specs, _ = asyncio.run(_mcp_tool_specs())
+    tool_specs, _ = asyncio.run(mcp_client.list_tool_specs())
     system = (
         "You solve one GIS task with the provided tools only. Never invent data; the "
         "fixture is the only allowed input. When finished, reply with ONLY the final "
@@ -333,8 +255,6 @@ def ollama_arm_b(req: CellRequest) -> None:
 
 
 def _execute_arm_b_reply(req: CellRequest, content: str) -> None:
-    # Only ```/```py/```python fences are code; a bare language tag (e.g. ```json)
-    # must not leak into the captured source and get executed as Python.
     blocks = re.findall(r"```(?:python|py)?[ \t]*\r?\n(.*?)```", content, re.DOTALL | re.IGNORECASE)
     if not blocks:
         append_transcript(req.cell, {_K_ROLE: "harness", _K_CONTENT: "no python block found"})

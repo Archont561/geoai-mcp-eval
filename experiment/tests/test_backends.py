@@ -9,7 +9,7 @@ import pytest
 import requests
 from pydantic import ValidationError
 
-from experiment import backends, drivers
+from experiment.adapters import backends
 
 
 def _write_toml(path: Path, body: str) -> Path:
@@ -169,7 +169,7 @@ def test_chat_completions_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
     session = _post_stub(monkeypatch, stub)
     profile = backends.BackendProfile(base_url="http://h/v1", model="m", max_tokens=77)
-    payload = drivers._chat_completions(session, profile, [{"role": "user", "content": "hi"}], None)
+    payload = backends.chat_completions(session, profile, [{"role": "user", "content": "hi"}], None)
     assert payload["choices"][0]["message"]["content"] == "ok"
     assert captured["url"] == "http://h/v1/chat/completions"
     assert captured["body"]["max_tokens"] == 77
@@ -185,7 +185,7 @@ def test_chat_completions_connection_error(monkeypatch: pytest.MonkeyPatch) -> N
     session = _post_stub(monkeypatch, stub)
     profile = backends.BackendProfile(base_url="http://h/v1", model="m")
     with pytest.raises(backends.BackendError) as excinfo:
-        drivers._chat_completions(session, profile, [])
+        backends.chat_completions(session, profile, [])
     assert excinfo.value.error_class == "connection"
 
 
@@ -196,7 +196,7 @@ def test_chat_completions_read_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     session = _post_stub(monkeypatch, stub)
     profile = backends.BackendProfile(base_url="http://h/v1", model="m")
     with pytest.raises(backends.BackendError) as excinfo:
-        drivers._chat_completions(session, profile, [])
+        backends.chat_completions(session, profile, [])
     assert excinfo.value.error_class == "timeout"
 
 
@@ -209,7 +209,7 @@ def test_chat_completions_rate_limit_includes_retry_after(
     session = _post_stub(monkeypatch, stub)
     profile = backends.BackendProfile(base_url="http://h/v1", model="m")
     with pytest.raises(backends.BackendError) as excinfo:
-        drivers._chat_completions(session, profile, [])
+        backends.chat_completions(session, profile, [])
     assert excinfo.value.error_class == "rate-limit"
     assert "17" in str(excinfo.value)
 
@@ -221,7 +221,7 @@ def test_chat_completions_http_error_class(monkeypatch: pytest.MonkeyPatch) -> N
     session = _post_stub(monkeypatch, stub)
     profile = backends.BackendProfile(base_url="http://h/v1", model="m")
     with pytest.raises(backends.BackendError) as excinfo:
-        drivers._chat_completions(session, profile, [])
+        backends.chat_completions(session, profile, [])
     assert excinfo.value.error_class == "http-503"
 
 
@@ -232,5 +232,5 @@ def test_chat_completions_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:
     session = _post_stub(monkeypatch, stub)
     profile = backends.BackendProfile(base_url="http://h/v1", model="m")
     with pytest.raises(backends.BackendError) as excinfo:
-        drivers._chat_completions(session, profile, [])
+        backends.chat_completions(session, profile, [])
     assert excinfo.value.error_class == "invalid-response"

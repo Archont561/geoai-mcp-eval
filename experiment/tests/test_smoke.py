@@ -1,24 +1,23 @@
-"""Smoke tests for the package version and the legacy runner imports."""
+"""Smoke tests for the package version and layered Clean Architecture entry points."""
 
 from __future__ import annotations
 
 import experiment
-from experiment import harness, prototype
-from experiment.adapters import task_repository
-from experiment.services import runs, scoring
+from experiment.adapters import backends, harness_io, task_repository, task_suite
+from experiment.adapters.mcp import client as mcp_client
+from experiment.domain import backend as backend_domain
+from experiment.services import runners, runs, scoring
 
 
 def test_package_imports() -> None:
     assert experiment.__version__ == "0.1.0"
-    public_names = {
-        "CellRequest": harness.CellRequest,
-        "RunSpec": harness.RunSpec,
-        "discover_tasks": runs.discover_tasks,
-        "load_task": task_repository.load_task,
-        "score_cell": scoring.score_cell,
-        "run_cell": runs.run_cell,
-        "run_experiment": runs.run_experiment,
-    }
-    assert set(prototype.__all__) == set(public_names)
-    for name, implementation in public_names.items():
-        assert getattr(prototype, name) is implementation
+    assert backends.BackendProfile is backend_domain.BackendProfile
+    assert callable(task_repository.load_task)
+    assert callable(task_suite.validate_suite)
+    assert callable(mcp_client.list_tools)
+    assert callable(runs.run_cell)
+    assert callable(runs.run_experiment)
+    assert callable(scoring.score_cell)
+    assert callable(runners.ollama_arm_a)
+    assert callable(runners.scripted_arm_a)
+    assert harness_io.CellRequest is not None

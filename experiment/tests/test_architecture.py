@@ -181,6 +181,12 @@ def test_the_shipped_contracts_pass_and_reject_violations(tmp_path: Path) -> Non
             "experiment.services is not allowed to import requests",
         ),
         (
+            "services",
+            "import mcp\n",
+            svc_io,
+            "experiment.services is not allowed to import mcp",
+        ),
+        (
             "cli",
             "import subprocess\n",
             cli_io,
@@ -194,3 +200,20 @@ def test_the_shipped_contracts_pass_and_reject_violations(tmp_path: Path) -> Non
         ),
     ):
         _assert_shipped_contract_bites(tmp_path, package, source, contract, violation)
+
+
+def test_no_migrated_legacy_flat_modules_remain() -> None:
+    """Flat legacy modules retired in GEO-016 must stay inside Clean Architecture layers."""
+    pkg_root = REPO_ROOT / "experiment" / "src" / "experiment"
+    retired = (
+        "backends.py",
+        "drivers.py",
+        "harness.py",
+        "prototype.py",
+        "scripted.py",
+        "mcp_client.py",
+        "mcp_server.py",
+        "task_suite.py",
+    )
+    remaining = [name for name in retired if (pkg_root / name).exists()]
+    assert remaining == []

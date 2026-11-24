@@ -1,6 +1,6 @@
-"""Scripted (deterministic, canned) driver: proves the pipeline, never a result.
+"""Scripted (deterministic, canned) runner: proves the pipeline, never a result.
 
-Arm A replays a fixed plan of MCP tool calls; arm B executes canned code in a
+Arm A replays a fixed plan of MCP tool calls; Arm B executes canned code in a
 scrubbed subprocess. The canned code is deliberately self-contained — it cannot
 import the repository — and must stay that way.
 """
@@ -13,9 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from experiment import mcp_client
 from experiment.adapters import run_store
-from experiment.harness import (
+from experiment.adapters.harness_io import (
     _K_CONTENT,
     _K_ROLE,
     RESULT_GEOJSON,
@@ -28,6 +27,7 @@ from experiment.harness import (
     stage_fixture_input,
     write_deliverable,
 )
+from experiment.adapters.mcp import client as mcp_client
 
 
 class _CallLog:
@@ -146,7 +146,7 @@ def scripted_arm_a(req: CellRequest) -> None:
 
 # The canned code below re-implements jenks on purpose: it must run inside a
 # scrubbed subprocess with no access to the repository. The canonical, tested
-# implementation is experiment/oracle/_jenks.py (fisher_jenks_breaks) — keep the
+# implementation is experiment/domain/jenks.py (fisher_jenks_breaks) — keep the
 # two consistent in behavior, not in text.
 _ARM_B_CODE: dict[str, str] = {
     "analysis-de9im-001": """

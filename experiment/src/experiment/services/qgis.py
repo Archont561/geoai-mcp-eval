@@ -9,8 +9,8 @@ import sys
 from pathlib import Path
 
 from experiment.adapters import run_store, subprocess_runner
+from experiment.adapters.harness_io import scrubbed_env
 from experiment.adapters.subprocess_runner import CommandResult as SandboxRunResult
-from experiment.harness import scrubbed_env
 
 
 class ScriptNotFoundError(Exception):
