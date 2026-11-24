@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       stage:
-        description: "preflight = validate+pin only; smoke = plumbing probe (no agent); pilot = real harness (blocked until it lands)"
+        description: "preflight = validate+pin only; smoke = plumbing probe (no agent); pilot = real agent harness"
         type: choice
         options: [preflight, smoke, pilot]
         default: preflight
@@ -162,6 +162,7 @@ jobs:
           EXPERIMENT_REPETITION: ${{ matrix.rep }}
           EXPERIMENT_STAGE: ${{ inputs.stage }}
           EXPERIMENT_ENFORCE: ${{ inputs.enforce }}
+          EXPERIMENT_USE_LLM_CACHE: ${{ inputs.use-llm-cache }}
         run: pixi run tools run experiment run
       - name: Upload cell artefacts
         if: always()

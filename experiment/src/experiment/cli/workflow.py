@@ -34,6 +34,12 @@ STAGE_OPT = typer.Option(
 ENFORCE_OPT = typer.Option(
     "N3", "--enforce", envvar="EXPERIMENT_ENFORCE", help="MCP enforcement depth (N1..N4)"
 )
+USE_CACHE_OPT = typer.Option(
+    False,
+    "--use-cache/--no-cache",
+    envvar="EXPERIMENT_USE_LLM_CACHE",
+    help="Use local SQLite LLM completion cache",
+)
 HARVEST_DIR_OPT = typer.Option(
     Path("harvest"),
     "--harvest-dir",
@@ -138,6 +144,7 @@ def run(  # noqa: CC102
     enforce: Literal["N1", "N2", "N3", "N4"] = ENFORCE_OPT,
     model: str = MODEL_OPT,
     run_id: str = RUN_ID_OPT,
+    use_cache: bool = USE_CACHE_OPT,
 ) -> None:
     """Run one experiment cell (arm, task, repetition)."""
     spec = workflow_service.WorkflowCellSpec(
@@ -148,6 +155,7 @@ def run(  # noqa: CC102
         enforce=enforce,
         model=model,
         run_id=run_id,
+        use_cache=use_cache,
     )
     try:
         cell_dir = workflow_service.run_workflow_cell(spec)

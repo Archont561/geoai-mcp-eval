@@ -11,12 +11,14 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, NamedTuple
+from typing import NamedTuple
 
 from experiment.adapters import ollama as ollama_adapter
 from experiment.adapters import paths, run_store, subprocess_runner
 from experiment.adapters.github_workflow import GitHubWorkflowAdapter
 from experiment.adapters.task_repository import discover_task_ids
+from experiment.services import workflow_pilot
+from experiment.services.workflow_pilot import WorkflowCellSpec
 
 OLLAMA_API = ollama_adapter.DEFAULT_BASE_URL
 
@@ -112,19 +114,6 @@ def run_model(model: str = "qwen2.5:3b", run_id: str = "") -> tuple[str, str, Pa
     return digest, snippet, run_dir
 
 
-@dataclass(frozen=True)
-class WorkflowCellSpec:
-    """Parameters for one workflow cell execution."""
-
-    arm: Literal["A", "B"]
-    task_id: str
-    repetition: int = 1
-    stage: Literal["smoke", "pilot"] = "smoke"
-    enforce: Literal["N1", "N2", "N3", "N4"] = "N3"
-    model: str = "qwen2.5:3b"
-    run_id: str = ""
-
-
 def _write_cell_manifest(cell_dir: Path, record: dict[str, object]) -> None:
     run_store.write_json(cell_dir / "manifest.json", record, trailing_newline=True)
 
@@ -147,19 +136,15 @@ def _ensure_cell_ollama(
     return owner
 
 
-def _refuse_pilot_stage(cell_dir: Path, spec: WorkflowCellSpec, base: dict[str, object]) -> None:
-    run_store.write_text(
-        cell_dir / "status.txt",
-        "BLOCKED: `experiment run` harness is not implemented (pre-freeze).\n",
-    )
-    _write_cell_manifest(cell_dir, {**base, "status": "harness-missing", "artifacts": []})
-    raise SystemExit(
-        "stage=pilot refused: the agent harness is not implemented yet "
-        f"(expected command: `python -m experiment run --arm {spec.arm} "
-        f"--task {spec.task_id} --model {spec.model} --enforce {spec.enforce} "
-        f"--repetition {spec.repetition}`). Use stage=smoke until it lands; "
-        "see docs/study/implementation.md."
-    )
+def _run_pilot_cell(
+    repo_root: Path,
+    cell_dir: Path,
+    spec: WorkflowCellSpec,
+    base: dict[str, object],
+    ollama_bin: str,
+) -> None:
+    manifest = workflow_pilot.execute_pilot_cell(repo_root, cell_dir, spec, base, ollama_bin)
+    _write_cell_manifest(cell_dir, manifest)
 
 
 def _run_smoke_probe(repo_root: Path, cell_dir: Path, base: dict[str, object]) -> None:
@@ -196,19 +181,22 @@ def _cell_base_metadata(spec: WorkflowCellSpec, rid: str) -> dict[str, object]:
 
 
 def run_workflow_cell(spec: WorkflowCellSpec) -> Path:
-    """Run one (arm, task, repetition) cell smoke probe, or refuse unimplemented pilot stage."""
+    """Run one (arm, task, repetition) cell for either smoke or pilot stage."""
     repo_root = find_repo_root()
     rid = resolve_run_id(spec.run_id)
     cell_dir = run_store.ensure_dir(
         paths.results_root(repo_root) / rid / spec.task_id / spec.arm / f"rep-{spec.repetition}"
     )
     base = _cell_base_metadata(spec, rid)
-    if spec.stage == "pilot":
-        _refuse_pilot_stage(cell_dir, spec, base)
+    ollama_bin = subprocess_runner.which("ollama")
     owner: ollama_adapter.OllamaProcess | None = None
     try:
-        owner = _ensure_cell_ollama(subprocess_runner.which("ollama"), cell_dir)
-        _run_smoke_probe(repo_root, cell_dir, base)
+        owner = _ensure_cell_ollama(ollama_bin, cell_dir)
+        if spec.stage == "pilot":
+            assert ollama_bin is not None
+            _run_pilot_cell(repo_root, cell_dir, spec, base, ollama_bin)
+        else:
+            _run_smoke_probe(repo_root, cell_dir, base)
         return cell_dir
     except Exception as exc:
         _write_cell_manifest(
