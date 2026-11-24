@@ -15,17 +15,23 @@ Both files live in the session's own directory; the record is written at end_ses
 
 from __future__ import annotations
 
-import hashlib
-import importlib
 import json
 import os
-import platform
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from experiment_plugin import __version__, _io
+from experiment_plugin import __version__, _io, _tasks, _versions
+from experiment_plugin._tasks import (
+    BehaviorTracker,
+    baseline_dir_for,
+    find_task_yaml,
+    resolve_task_dir,
+    sha256_file,
+    task_fixture,
+    utc_now,
+)
 from experiment_plugin.metrics import (
     METRICS_STATUS_NOT_STARTED,
     ManualActionGroup,
@@ -59,80 +65,9 @@ TEMPLATE_KEYS = (
 )
 
 
-def utc_now() -> datetime:
-    return datetime.now(UTC)
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(65536), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def resolve_task_dir(base_dir: str | Path) -> Path:
-    path = Path(base_dir).expanduser()
-    return path.resolve()
-
-
-def _search_task_dir(start: Path) -> Path | None:
-    for parent in (start, *start.parents):
-        candidate = parent / "experiment" / "tasks"
-        if candidate.is_dir():
-            return candidate.resolve()
-    return None
-
-
 def discover_task_dir(*, cwd: Path | None = None, anchor: Path | None = None) -> Path:
     """Locate experiment/tasks from cwd ancestors, then package ancestors."""
-    current = (cwd or Path.cwd()).resolve()
-    found = _search_task_dir(current)
-    if found is not None:
-        return found
-    package_anchor = (anchor or Path(__file__)).resolve()
-    search_start = package_anchor if package_anchor.is_dir() else package_anchor.parent
-    found = _search_task_dir(search_start)
-    if found is not None:
-        return found
-    return (current / "experiment" / "tasks").resolve()
-
-
-def _load_yaml_mapping(path: Path) -> dict[str, Any]:
-    import yaml  # local import: pyyaml ships with the pixi env
-
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    return data if isinstance(data, dict) else {}
-
-
-def find_task_yaml(base_dir: Path, task_id: str) -> Path:
-    if not base_dir.is_dir():
-        raise FileNotFoundError(
-            f"task directory does not exist: {base_dir} (set EXPERIMENT_TASK_DIR or pass base_dir)"
-        )
-    parse_errors: list[str] = []
-    for candidate in sorted(base_dir.glob("*.yaml")):
-        try:
-            data = _load_yaml_mapping(candidate)
-        except Exception as exc:  # unreadable YAML: report, don't hide it
-            parse_errors.append(f"{candidate.name}: {exc}")
-            continue
-        if data.get("id") == task_id:
-            return candidate
-    detail = f" (parse errors: {'; '.join(parse_errors)})" if parse_errors else ""
-    raise FileNotFoundError(f"no task YAML with id={task_id!r} under {base_dir}{detail}")
-
-
-def task_fixture(task_yaml: Path) -> Path:
-    import yaml
-
-    data = yaml.safe_load(task_yaml.read_text(encoding="utf-8"))
-    return (task_yaml.parent / data["fixtures"]["input"]).resolve()
-
-
-def baseline_dir_for(task_yaml: Path, task_id: str) -> Path:
-    # experiment/tasks/baselines/<id> — matches .gitignore and HUMAN-REFERENCE.md
-    return (task_yaml.parent / "baselines" / task_id).resolve()
+    return _tasks.discover_task_dir(cwd=cwd, anchor=anchor or Path(__file__))
 
 
 def template_skeleton() -> dict[str, Any]:
@@ -164,121 +99,14 @@ def template_skeleton() -> dict[str, Any]:
     }
 
 
-def _clean_version(value: object) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def _safe_call(obj: object, method_name: str, *args: object) -> object:
-    method = getattr(obj, method_name, None)
-    if not callable(method):
-        return None
-    try:
-        return method(*args)
-    except Exception:
-        return None
-
-
-def _qgis_version(qgis_core: object) -> str | None:
-    qgis_cls = getattr(qgis_core, "Qgis", None)
-    return _clean_version(
-        _safe_call(qgis_cls, "version")
-        or getattr(qgis_cls, "QGIS_VERSION", None)
-        or getattr(qgis_core, "QGIS_VERSION", None)
-    )
-
-
-def _geos_version(qgis_core: object) -> str | None:
-    qgis_cls = getattr(qgis_core, "Qgis", None)
-    return _clean_version(
-        _safe_call(qgis_cls, "geosVersion") or getattr(qgis_core, "GEOS_VERSION", None)
-    )
-
-
-def _gdal_version(qgis_core: object) -> str | None:
-    direct = _clean_version(getattr(qgis_core, "GDAL_VERSION", None))
-    if direct is not None:
-        return direct
-    try:
-        from osgeo import gdal  # type: ignore[import-not-found]
-    except ImportError:
-        return None
-    return _clean_version(
-        _safe_call(gdal, "VersionInfo", "RELEASE_NAME") or getattr(gdal, "__version__", None)
-    )
-
-
-def _proj_version(qgis_core: object) -> str | None:
-    direct = _clean_version(getattr(qgis_core, "PROJ_VERSION", None))
-    if direct is not None:
-        return direct
-    try:
-        from osgeo import osr  # type: ignore[import-not-found]
-
-        major = _safe_call(osr, "GetPROJVersionMajor")
-        minor = _safe_call(osr, "GetPROJVersionMinor")
-        micro = _safe_call(osr, "GetPROJVersionMicro")
-        if isinstance(major, int) and major > 0 and isinstance(minor, int):
-            suffix = f".{micro}" if isinstance(micro, int) else ""
-            return f"{major}.{minor}{suffix}"
-    except ImportError:
-        pass
-    proj_utils = getattr(qgis_core, "QgsProjUtils", None)
-    major = _safe_call(proj_utils, "projVersionMajor")
-    minor = _safe_call(proj_utils, "projVersionMinor")
-    if isinstance(major, int) and major > 0 and isinstance(minor, int):
-        return f"{major}.{minor}"
-    return None
-
-
 def host_software_versions() -> dict[str, str | None]:
     """Best-effort versions; each is None when the host did not say."""
-    versions: dict[str, str | None] = {
-        "qgis": _clean_version(os.environ.get("QGIS_VERSION")),
-        "gdal": _clean_version(os.environ.get("GDAL_VERSION")),
-        "geos": _clean_version(os.environ.get("GEOS_VERSION")),
-        "proj": _clean_version(os.environ.get("PROJ_VERSION")),
-    }
-    try:  # PyQGIS hosts usually can answer properly
-        qgis_core = importlib.import_module("qgis.core")
-    except ImportError:
-        return versions
-    versions["qgis"] = versions["qgis"] or _qgis_version(qgis_core)
-    versions["gdal"] = versions["gdal"] or _gdal_version(qgis_core)
-    versions["geos"] = versions["geos"] or _geos_version(qgis_core)
-    versions["proj"] = versions["proj"] or _proj_version(qgis_core)
-    return versions
+    return _versions.host_software_versions()
 
 
 def host_identity() -> dict[str, str]:
     """Non-identifying environment facts (no hostname, no user name)."""
-    return {
-        "system": platform.system(),
-        "release": platform.release(),
-        "machine": platform.machine(),
-        "python": platform.python_version(),
-    }
-
-
-@dataclass
-class BehaviorTracker:
-    """Append-only behavior event log written as JSONL."""
-
-    events_path: Path
-    started_at: datetime = field(default_factory=utc_now)
-    event_count: int = 0
-
-    def record(self, event: str, **fields: Any) -> dict[str, Any]:
-        record = {
-            "ts": utc_now().isoformat(),
-            "event": event,
-            **{k: v for k, v in fields.items() if v is not None},
-        }
-        _io.append_jsonl(self.events_path, record)
-        self.event_count += 1
-        return record
+    return _versions.host_identity()
 
 
 @dataclass
@@ -398,6 +226,25 @@ class HumanBaselineSession:
             outputs.append({"path": rel, "sha256": sha256_file(path), "bytes": path.stat().st_size})
         return outputs
 
+    def _session_section(
+        self,
+        ended: datetime,
+        steps: int | None,
+        tools: list[str] | None,
+        metrics_status: str,
+    ) -> dict[str, Any]:
+        return {
+            "started_at_utc": self.started_at.isoformat(),
+            "ended_at_utc": ended.isoformat(),
+            "elapsed_minutes": round((ended - self.started_at).total_seconds() / 60, 2),
+            "steps": steps,
+            "tools": tools,
+            "metrics_status": metrics_status,
+            "software_versions": host_software_versions(),
+            "network_disabled": self.network_disabled,
+            "deviations_or_interruptions": [],
+        }
+
     def _build_record(
         self,
         ended: datetime,
@@ -416,23 +263,10 @@ class HumanBaselineSession:
                 "participant_code": self.participant_code,
             }
         )
-        elapsed = round((ended - self.started_at).total_seconds() / 60, 2)
         steps, tools, metrics_status, study_metrics = self.metrics.build_summary(
             manual_review_complete=manual_review_complete
         )
-        record["session"].update(
-            {
-                "started_at_utc": self.started_at.isoformat(),
-                "ended_at_utc": ended.isoformat(),
-                "elapsed_minutes": elapsed,
-                "steps": steps,
-                "tools": tools,
-                "metrics_status": metrics_status,
-                "software_versions": host_software_versions(),
-                "network_disabled": self.network_disabled,
-                "deviations_or_interruptions": [],
-            }
-        )
+        record["session"].update(self._session_section(ended, steps, tools, metrics_status))
         record["study_metrics"] = study_metrics
         record["observations"] = self.metrics.build_observations()
         record["outputs"] = outputs
@@ -470,8 +304,9 @@ def render_log(session: HumanBaselineSession) -> str:
         f"started: {session.started_at.isoformat()}   status: {session.status}",
         "",
     ]
+    events_path = session.tracker.events_path
     try:
-        raw_lines = session.tracker.events_path.read_text(encoding="utf-8").splitlines()
+        raw_lines = events_path.read_text(encoding="utf-8").splitlines()
     except OSError as exc:
         lines.append(f"(event log unavailable: {exc})")
         return "\n".join(lines) + "\n"
@@ -488,35 +323,28 @@ def render_log(session: HumanBaselineSession) -> str:
     return "\n".join(lines) + "\n"
 
 
-def abandon_session(session: HumanBaselineSession, reason: str = "user requested") -> Path:
-    """Abandon a session without writing human-reference-record.json.
+def _abandoned_payload(
+    session: HumanBaselineSession, abandoned_at: datetime, reason: str
+) -> dict[str, Any]:
+    return {
+        "task_id": session.task_id,
+        "abandoned_at_utc": abandoned_at.isoformat(),
+        "reason": reason,
+        "started_at_utc": session.started_at.isoformat(),
+        "event_count": session.tracker.event_count,
+        "observation_sources": list(session.metrics.observation_sources),
+        "processing_executions": len(session.metrics.processing_executions),
+        "manual_action_groups": len(session.metrics.manual_action_groups),
+        "record_written": False,
+    }
 
-    The event log stays on disk and gains a ``session_abandoned`` marker; a
-    small ``session-abandoned.json`` is written next to it so the directory is
-    recognisably an abandoned take, not an unfinished recording. The record is
-    NOT written — whatever was measured is not promoted to reference evidence.
-    Returns the marker path.
-    """
+
+def abandon_session(session: HumanBaselineSession, reason: str = "user requested") -> Path:
+    """Abandon a session without writing human-reference-record.json."""
     session.tracker.record("session_abandoned", reason=reason)
-    abandoned_at = utc_now()
     marker = session.output_dir / "session-abandoned.json"
-    marker.write_text(
-        _io.format_json(
-            {
-                "task_id": session.task_id,
-                "abandoned_at_utc": abandoned_at.isoformat(),
-                "reason": reason,
-                "started_at_utc": session.started_at.isoformat(),
-                "event_count": session.tracker.event_count,
-                "observation_sources": list(session.metrics.observation_sources),
-                "processing_executions": len(session.metrics.processing_executions),
-                "manual_action_groups": len(session.metrics.manual_action_groups),
-                "record_written": False,
-            },
-            trailing_newline=True,
-        ),
-        encoding="utf-8",
-    )
+    payload = _abandoned_payload(session, utc_now(), reason)
+    marker.write_text(_io.format_json(payload, trailing_newline=True), encoding="utf-8")
     session.status = "abandoned"
     return marker
 
