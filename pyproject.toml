@@ -82,6 +82,7 @@ markers = [
   "plugin: scenarios driving the whole QGIS plugin",
   "action-surface: the plugin's public action surface",
   "human-baseline: session recording and the reference record",
+  "post-session-review: non-destructive post-session review of recorded takes",
   "session-panel: the timer and logs panel",
   "host-observation: QGIS project and canvas hooks",
   "pilot: the pilot task suite and the determinism gate",
