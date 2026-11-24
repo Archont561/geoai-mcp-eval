@@ -141,3 +141,30 @@ Feature: Human-baseline session recording
     And I end the session with manual review completed
     Then the record leaves study steps and tools pending review
     And the record reports missing processing history while retaining the manual action group
+
+  Scenario: Ending a session records QGIS 4 host software versions
+    Given a QGIS 4 host reporting versions for QGIS, GDAL, GEOS, and PROJ
+    And a session is active
+    When I end the session
+    Then the record captures the QGIS, GDAL, GEOS, and PROJ versions
+
+  Scenario: Ending a session without QGIS leaves unconfigured software versions unknown
+    Given no QGIS host on this machine
+    And a session is active
+    When I end the session
+    Then the record leaves host software versions as null
+
+  Scenario: Starting a session from a nested working directory finds the task suite
+    Given no EXPERIMENT_TASK_DIR is configured and cwd is nested inside a task checkout
+    When I start a session using the default task directory for task "demo-task-001"
+    Then the started session belongs to that checkout's baselines folder
+
+  Scenario: Starting a session when the configured task directory is missing explains how to fix it
+    When I start a session for task "demo-task-001" with a missing task directory
+    Then the plugin explains that the task directory does not exist and mentions EXPERIMENT_TASK_DIR
+
+  Scenario: Ending a session hashes nested multi-file outputs recursively
+    Given a session is active
+    When the participant saves top-level and nested output files into the session directory
+    And I end the session
+    Then the record hashes both top-level and nested output files with relative POSIX paths

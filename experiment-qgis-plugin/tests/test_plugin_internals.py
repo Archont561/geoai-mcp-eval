@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -181,9 +182,13 @@ def test_task_dir_uses_env_var_when_unset(task_suite, monkeypatch) -> None:
     assert plugin._task_dir("") == "/from/env"
 
 
-def test_task_dir_defaults_to_experiment_tasks(monkeypatch) -> None:
+def test_task_dir_defaults_to_discovered_experiment_tasks(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.delenv("EXPERIMENT_TASK_DIR", raising=False)
-    assert plugin._task_dir("") == "experiment/tasks"
+    monkeypatch.chdir(tmp_path)
+    resolved = Path(plugin._task_dir(""))
+    assert resolved == session.discover_task_dir()
+    assert resolved.parts[-2:] == ("experiment", "tasks")
+    assert resolved.is_dir()
 
 
 def test_active_session_error_none_when_idle() -> None:

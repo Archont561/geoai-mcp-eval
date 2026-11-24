@@ -137,3 +137,151 @@ def test_reviewed_metrics_merge_and_deduplicate_processing_and_manual_tools(
     assert record["session"]["steps"] == 3
     assert record["session"]["tools"] == ["native:buffer", "qgis:save-features-as"]
     assert record["session"]["metrics_status"] == "reviewed"
+
+
+def test_host_software_versions_detects_qgis4_and_fallbacks(monkeypatch) -> None:
+    import sys
+    import types
+
+    for key in ("QGIS_VERSION", "GDAL_VERSION", "GEOS_VERSION", "PROJ_VERSION"):
+        monkeypatch.delenv(key, raising=False)
+
+    # 1. Outside QGIS, blank env vars stay None and osgeo is not queried.
+    monkeypatch.setenv("QGIS_VERSION", "   ")
+    monkeypatch.setitem(sys.modules, "qgis.core", None)
+    assert session.host_software_versions() == {
+        "qgis": None,
+        "gdal": None,
+        "geos": None,
+        "proj": None,
+    }
+
+    # 2. QGIS 4 Qgis.version() / Qgis.geosVersion() + QgsProjUtils fallback when osgeo absent.
+    core = types.ModuleType("qgis.core")
+
+    class FakeQgis:
+        QGIS_VERSION = "4.2.3-Fallback"
+
+        @staticmethod
+        def version() -> str:
+            return "4.2.3-Live"
+
+        @staticmethod
+        def geosVersion() -> str:
+            return "3.14.1-CAPI-1.20.5"
+
+    class FakeProjUtils:
+        @staticmethod
+        def projVersionMajor() -> int:
+            return 9
+
+        @staticmethod
+        def projVersionMinor() -> int:
+            return 9
+
+    core.Qgis = FakeQgis
+    core.QgsProjUtils = FakeProjUtils
+    monkeypatch.setitem(sys.modules, "qgis.core", core)
+    monkeypatch.setitem(sys.modules, "osgeo", None)
+    monkeypatch.setitem(sys.modules, "osgeo.gdal", None)
+    monkeypatch.setitem(sys.modules, "osgeo.osr", None)
+    assert session.host_software_versions() == {
+        "qgis": "4.2.3-Live",
+        "gdal": None,
+        "geos": "3.14.1-CAPI-1.20.5",
+        "proj": "9.9",
+    }
+
+    # 3. Legacy module-level constants and explicit env overrides still win.
+    legacy = types.ModuleType("qgis.core")
+    legacy.QGIS_VERSION = "3.40.1"
+    legacy.GDAL_VERSION = "3.9.2"
+    legacy.GEOS_VERSION = "3.12.1"
+    legacy.PROJ_VERSION = "9.4.0"
+    monkeypatch.setitem(sys.modules, "qgis.core", legacy)
+    monkeypatch.setenv("GDAL_VERSION", "3.10.0-override")
+    assert session.host_software_versions() == {
+        "qgis": "3.40.1",
+        "gdal": "3.10.0-override",
+        "geos": "3.12.1",
+        "proj": "9.4.0",
+    }
+
+
+def test_discover_task_dir_prefers_cwd_ancestors_then_package_ancestors(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cwd_repo = tmp_path / "cwd-repo"
+    (cwd_repo / "experiment" / "tasks").mkdir(parents=True)
+    nested = cwd_repo / "experiment-qgis-plugin"
+    nested.mkdir()
+
+    pkg_repo = tmp_path / "pkg-repo"
+    (pkg_repo / "experiment" / "tasks").mkdir(parents=True)
+    fake_module = pkg_repo / "experiment-qgis-plugin" / "experiment_plugin" / "session.py"
+    fake_module.parent.mkdir(parents=True)
+    fake_module.write_text("", encoding=UTF8)
+
+    # From nested subdir inside cwd_repo -> finds cwd_repo/experiment/tasks.
+    assert (
+        session.discover_task_dir(cwd=nested, anchor=fake_module)
+        == (cwd_repo / "experiment" / "tasks").resolve()
+    )
+
+    # From unrelated cwd -> falls back to package checkout ancestor.
+    unrelated = tmp_path / "outside"
+    unrelated.mkdir()
+    assert (
+        session.discover_task_dir(cwd=unrelated, anchor=fake_module)
+        == (pkg_repo / "experiment" / "tasks").resolve()
+    )
+
+    # When neither cwd nor package has experiment/tasks -> returns cwd/experiment/tasks.
+    isolated_module = tmp_path / "zip-install" / "experiment_plugin" / "session.py"
+    isolated_module.parent.mkdir(parents=True)
+    isolated_module.write_text("", encoding=UTF8)
+    assert (
+        session.discover_task_dir(cwd=unrelated, anchor=isolated_module)
+        == (unrelated / "experiment" / "tasks").resolve()
+    )
+
+
+def test_find_task_yaml_reports_missing_task_directory(tmp_path: Path) -> None:
+    import pytest
+
+    missing = tmp_path / "no-such-dir"
+    with pytest.raises(FileNotFoundError) as excinfo:
+        session.find_task_yaml(missing, "prep-axis-order-001")
+    message = str(excinfo.value)
+    assert "task directory does not exist" in message
+    assert "EXPERIMENT_TASK_DIR" in message
+
+
+def test_finish_hashes_nested_outputs_and_skips_recorder_files_and_symlinks(
+    tmp_path: Path,
+) -> None:
+    suite = copy_suite(tmp_path)
+    recorder = session.start_session("prep-axis-order-001", suite)
+    (recorder.output_dir / "top.geojson").write_text("{}", encoding=UTF8)
+    nested = recorder.output_dir / "bundle" / "deep"
+    nested.mkdir(parents=True)
+    (recorder.output_dir / "bundle" / "poland.shp").write_bytes(b"shp-bytes")
+    (recorder.output_dir / "bundle" / "poland.dbf").write_bytes(b"dbf-bytes")
+    (nested / "meta.prj").write_text("EPSG:2180", encoding=UTF8)
+
+    outside = tmp_path / "outside-secret.txt"
+    outside.write_text("do-not-hash", encoding=UTF8)
+    (recorder.output_dir / "linked.txt").symlink_to(outside)
+
+    record = json.loads(recorder.finish().read_text(encoding=UTF8))
+    paths = [entry["path"] for entry in record["outputs"]]
+    assert paths == [
+        "bundle/deep/meta.prj",
+        "bundle/poland.dbf",
+        "bundle/poland.shp",
+        "top.geojson",
+    ]
+    for entry in record["outputs"]:
+        target = recorder.output_dir / entry["path"]
+        assert entry["sha256"] == session.sha256_file(target)
+        assert entry["bytes"] == target.stat().st_size
