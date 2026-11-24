@@ -140,9 +140,57 @@ def test_workflow_commands_emit_github_outputs_via_adapter(
             base_url="http://127.0.0.1:11435/v1",
         ),
     )
-    res = CliRunner().invoke(app, ["workflow", "backend-check", "--ssh-host", "gpu-box"])
+    res = CliRunner().invoke(app, ["env", "backend-check", "--ssh-host", "gpu-box"])
     assert res.exit_code == 0, res.output
     text = gh_out.read_text(encoding="utf-8")
     assert "status=READY\n" in text
     assert "digest=sha256:pin999\n" in text
     assert json.loads((harvest / "summary.json").read_text(encoding="utf-8"))["run_id"] == "rid-gh"
+
+
+def test_prune_run_artifacts_deletes_intermediates_and_noops_locally() -> None:
+    local_adapter = GitHubWorkflowAdapter(env={})
+    assert local_adapter.prune_run_artifacts("experiment-run-1.zip") == []
+
+    class _FakeResp:
+        def __init__(self, status_code: int, payload: dict | None = None) -> None:
+            self.status_code = status_code
+            self._payload = payload or {}
+
+        def json(self) -> dict:
+            return self._payload
+
+    class _FakeSession:
+        def __init__(self) -> None:
+            self.deleted_urls: list[str] = []
+
+        def get(self, _url: str, **_kwargs: object) -> _FakeResp:
+            return _FakeResp(
+                200,
+                {
+                    "artifacts": [
+                        {"id": 1, "name": "experiment-preflight-pins"},
+                        {"id": 2, "name": "experiment-run-42"},
+                        {"id": 3, "name": "experiment-A-analysis-de9im-001-rep1"},
+                    ]
+                },
+            )
+
+        def delete(self, url: str, **_kwargs: object) -> _FakeResp:
+            self.deleted_urls.append(url)
+            return _FakeResp(204)
+
+    session = _FakeSession()
+    ci_adapter = GitHubWorkflowAdapter(
+        env={
+            "GITHUB_REPOSITORY": "Archont561/geoai-mcp-eval",
+            "GITHUB_RUN_ID": "42",
+            "GITHUB_TOKEN": "tok",
+        }
+    )
+    deleted = ci_adapter.prune_run_artifacts("experiment-run-42", session=session)
+    assert deleted == ["experiment-preflight-pins", "experiment-A-analysis-de9im-001-rep1"]
+    assert session.deleted_urls == [
+        "https://api.github.com/repos/Archont561/geoai-mcp-eval/actions/artifacts/1",
+        "https://api.github.com/repos/Archont561/geoai-mcp-eval/actions/artifacts/3",
+    ]

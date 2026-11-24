@@ -35,6 +35,7 @@ def test_tasknest_autodiscovers_experiment_tasks_from_manifest() -> None:
         "experiment.run",
         "experiment.harvest",
         "experiment.summary",
+        "experiment.prune-ci",
         "experiment.backend-check",
     }
     discovered = {
@@ -64,7 +65,7 @@ def test_workflow_preflight_writes_env_pins(
 
     monkeypatch.setattr(subprocess_runner, "run_passthrough", fake_passthrough)
     monkeypatch.setattr(subprocess_runner, "soft_version", fake_version)
-    res = runner.invoke(app, ["workflow", "preflight", "--run-id", "rid-1"])
+    res = runner.invoke(app, ["env", "preflight", "--run-id", "rid-1"])
     assert res.exit_code == 0, res.output
     pins = (tmp_path / "results" / "rid-1" / "env-pins.txt").read_text(encoding="utf-8")
     assert "repo_sha=v1.0.0" in pins
@@ -86,7 +87,7 @@ def test_workflow_model_records_digest_and_smoke(
         "smoke_generate",
         lambda _model, **_kw: {"response": "OK"},
     )
-    res = runner.invoke(app, ["workflow", "model", "--model", "qwen2.5:3b", "--run-id", "rid-m"])
+    res = runner.invoke(app, ["env", "model", "--model", "qwen2.5:3b", "--run-id", "rid-m"])
     assert res.exit_code == 0, res.output
     run_dir = tmp_path / "results" / "rid-m"
     assert (run_dir / "model-digest.txt").read_text(encoding="utf-8").strip() == (
@@ -125,8 +126,8 @@ def test_workflow_run_executes_pilot_and_smoke(
     pilot_res = runner.invoke(
         app,
         [
-            "workflow",
             "run",
+            "cell",
             "--arm",
             "A",
             "--task-id",
@@ -156,8 +157,8 @@ def test_workflow_run_executes_pilot_and_smoke(
     smoke_res = runner.invoke(
         app,
         [
-            "workflow",
             "run",
+            "cell",
             "--arm",
             "B",
             "--task-id",
@@ -208,8 +209,8 @@ def test_workflow_harvest_and_summary(tmp_path: Path, monkeypatch: pytest.Monkey
     fail_res = runner.invoke(
         app,
         [
-            "workflow",
-            "harvest",
+            "archive",
+            "pack",
             "--harvest-dir",
             str(harvest),
             "--repetitions",
@@ -221,14 +222,17 @@ def test_workflow_harvest_and_summary(tmp_path: Path, monkeypatch: pytest.Monkey
     )
     assert fail_res.exit_code != 0
 
-    # With --no-fail-on-missing succeeds and writes summary.json
+    # With --no-fail-on-missing succeeds, writes summary.json and RunArchive zip
+    out_zip = tmp_path / "experiment-run-rid-h.zip"
     ok_res = runner.invoke(
         app,
         [
-            "workflow",
-            "harvest",
+            "archive",
+            "pack",
             "--harvest-dir",
             str(harvest),
+            "--output",
+            str(out_zip),
             "--repetitions",
             "1",
             "--no-fail-on-missing",
@@ -238,6 +242,7 @@ def test_workflow_harvest_and_summary(tmp_path: Path, monkeypatch: pytest.Monkey
         ],
     )
     assert ok_res.exit_code == 0, ok_res.output
+    assert out_zip.is_file()
     summary = json.loads((harvest / "summary.json").read_text(encoding="utf-8"))
     assert summary["complete"] is False
     assert "analysis-de9im-001/A/rep-1" in summary["logged_cells"]
@@ -246,7 +251,7 @@ def test_workflow_harvest_and_summary(tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(step_summary))
     sum_res = runner.invoke(
         app,
-        ["workflow", "summary", "--harvest-dir", str(harvest), "--run-id", "rid-h"],
+        ["archive", "summary", "--harvest-dir", str(harvest), "--run-id", "rid-h"],
     )
     assert sum_res.exit_code == 0, sum_res.output
     md = (harvest / "summary.md").read_text(encoding="utf-8")
@@ -254,6 +259,16 @@ def test_workflow_harvest_and_summary(tmp_path: Path, monkeypatch: pytest.Monkey
     assert "deadbeef" in md
     assert "INCOMPLETE" in md
     assert step_summary.read_text(encoding="utf-8") == md
+
+    # archive summary also renders from a packed RunArchive zip
+    zip_sum = runner.invoke(app, ["archive", "summary", "--harvest-dir", str(out_zip)])
+    assert zip_sum.exit_code == 0, zip_sum.output
+    assert "rid-h" in zip_sum.output
+
+    # archive prune-ci safely no-ops locally
+    prune_res = runner.invoke(app, ["archive", "prune-ci", "--keep", "experiment-run-rid-h"])
+    assert prune_res.exit_code == 0, prune_res.output
+    assert json.loads(prune_res.stdout) == {"kept": "experiment-run-rid-h", "deleted": []}
 
 
 def test_tasknest_manifest_executes_experiment_summary_end_to_end(
@@ -272,3 +287,44 @@ def test_tasknest_manifest_executes_experiment_summary_end_to_end(
     assert res.exit_code == 0, res.stdout + res.stderr
     assert (harvest / "summary.md").is_file()
     assert "manifest-e2e" in (harvest / "summary.md").read_text(encoding="utf-8")
+
+
+def test_run_mcp_enforce_pack_zip_and_score_archive(tmp_path: Path) -> None:
+    out_dir = tmp_path / "mcp-n2"
+    res = runner.invoke(
+        app,
+        [
+            "run",
+            "mcp",
+            "--task",
+            "analysis-de9im-001",
+            "--enforce",
+            "N2",
+            "--pack-zip",
+            "--output-dir",
+            str(out_dir),
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    zip_path = out_dir.parent / f"experiment-run-{out_dir.name}.zip"
+    assert zip_path.is_file()
+
+    insp = runner.invoke(app, ["archive", "inspect", str(zip_path)])
+    assert insp.exit_code == 0, insp.output
+    assert "syntactic" in insp.output
+
+    from experiment.adapters.run_archive import RunArchive
+
+    with RunArchive.open(zip_path) as arc:
+        assert "analysis-de9im-001/typed_mcp/syntactic/rep-1" in arc.run.trials
+
+    eval_res = runner.invoke(app, ["score", "eval", str(zip_path)])
+    assert eval_res.exit_code == 0, eval_res.output
+    assert "analysis-de9im-001" in eval_res.output
+
+    show_res = runner.invoke(app, ["score", "show", str(zip_path)])
+    assert show_res.exit_code == 0, show_res.output
+    assert "analysis-de9im-001" in show_res.output
+
+    bad = runner.invoke(app, ["run", "mcp", "--task", "analysis-de9im-001", "--enforce", "N9"])
+    assert bad.exit_code != 0

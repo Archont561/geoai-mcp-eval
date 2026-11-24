@@ -183,7 +183,7 @@ def artefacts_satisfying_each_task(tmp_path: Path) -> Path:
 def check_determinism(cli: CliRunner, artifacts: Path, suite: dict, task_id: str) -> dict:
     result = run_cli(
         cli,
-        f"pilot determinism {task_id} --artifacts-dir {artifacts / task_id} --root {suite['path']}",
+        f"score determinism {task_id} --artifacts-dir {artifacts / task_id} --root {suite['path']}",
     )
     try:
         payload = json.loads(result["stdout"])
@@ -250,7 +250,7 @@ def a_suite_without_fixture(suite: dict) -> dict:
     target_fixture="result",
 )
 def run_whole_suite_both_arms(cli: CliRunner, output: Path) -> dict:
-    return run_cli(cli, f"proto run --driver scripted --arm both --output-dir {output}")
+    return run_cli(cli, f"run all --driver scripted --output-dir {output}")
 
 
 @when(
@@ -260,7 +260,7 @@ def run_whole_suite_both_arms(cli: CliRunner, output: Path) -> dict:
 def run_task_subset_both_arms(cli: CliRunner, output: Path, task_ids: str) -> dict:
     return run_cli(
         cli,
-        f"proto run --driver scripted --arm both --task {task_ids} --output-dir {output}",
+        f"run all --driver scripted --task {task_ids} --output-dir {output}",
     )
 
 
@@ -275,7 +275,7 @@ def check_determinism_on_cell(
 ) -> dict:
     cell = output / task_id / f"arm-{arm}"
     result = run_cli(
-        cli, f"pilot determinism {task_id} --artifacts-dir {cell} --root {suite['path']}"
+        cli, f"score determinism {task_id} --artifacts-dir {cell} --root {suite['path']}"
     )
     try:
         payload = json.loads(result["stdout"])
@@ -284,11 +284,22 @@ def check_determinism_on_cell(
     return {**result, "report": payload}
 
 
-@when("I flatten that run against the shipped suite", target_fixture="result")
-def flatten_that_run(cli: CliRunner, output: Path, suite: dict) -> dict:
-    result = run_cli(cli, f"analyze flatten {output} --tasks {suite['path']}")
-    result["rows"] = _table_rows(result["output"])
-    return result
+@when("I pack and inspect that run archive", target_fixture="result")
+def pack_and_inspect_run_archive(cli: CliRunner, output: Path) -> dict:
+    zip_path = output.parent / "packed-run.zip"
+    packed = run_cli(
+        cli,
+        f"archive pack --harvest-dir {output} --output {zip_path} --no-harvest --run-id bdd-pack",
+    )
+    assert packed["exit_code"] == 0, packed["output"] + packed["stderr"] + packed["raised"]
+    return run_cli(cli, f"archive inspect {zip_path}")
+
+
+@then("the archive inspection reports six passed trials")
+def archive_inspection_reports_six(result: dict) -> None:
+    assert result["exit_code"] == 0, result["output"]
+    assert "trials=6" in result["output"]
+    assert "TSR=100.00%" in result["output"]
 
 
 @then("the run reports that all six cells passed the oracle")
@@ -436,17 +447,17 @@ def sandbox_script_slow(tmp_path: Path) -> Path:
 
 @when("I ask the sandbox whether PyQGIS is available", target_fixture="result")
 def ask_sandbox_availability(cli: CliRunner) -> dict:
-    return run_cli(cli, "qgis check")
+    return run_cli(cli, "env qgis check")
 
 
 @when("I run that script in the sandbox", target_fixture="result")
 def run_that_script(cli: CliRunner, script: Path, tmp_path: Path) -> dict:
-    return run_cli(cli, f"qgis run {script} --artifacts-dir {tmp_path / 'art'}")
+    return run_cli(cli, f"env qgis run {script} --artifacts-dir {tmp_path / 'art'}")
 
 
 @when("I run that script in the sandbox with a one second timeout", target_fixture="result")
 def run_that_script_with_timeout(cli: CliRunner, script: Path, tmp_path: Path) -> dict:
-    return run_cli(cli, f"qgis run {script} --artifacts-dir {tmp_path / 'art'} --timeout 1")
+    return run_cli(cli, f"env qgis run {script} --artifacts-dir {tmp_path / 'art'} --timeout 1")
 
 
 @then("the sandbox reports a definite verdict")
@@ -636,15 +647,16 @@ def no_output_directory_created(output: Path) -> None:
     target_fixture="result",
 )
 def run_scripted_prototype(cli: CliRunner, output: Path, task_id: str, arm: str) -> dict:
+    sub = "mcp" if arm.upper() == "A" else "codegen"
     return run_cli(
         cli,
-        f"proto run --driver scripted --arm {arm} --task {task_id} --output-dir {output}",
+        f"run {sub} --driver scripted --task {task_id} --output-dir {output}",
     )
 
 
 @when("I rescore that run", target_fixture="rescored")
 def rescore_that_run(cli: CliRunner, output: Path) -> dict:
-    return run_cli(cli, f"proto score {output}")
+    return run_cli(cli, f"score eval {output}")
 
 
 @then("the run reports that one of one cells passed the oracle")
@@ -702,7 +714,7 @@ def rescore_reports_one_of_one(rescored: dict) -> None:
 
 @then("showing the run prints its oracle scores")
 def showing_prints_scores(cli: CliRunner, output: Path) -> None:
-    shown = run_cli(cli, f"proto show {output}")
+    shown = run_cli(cli, f"score show {output}")
     assert shown["exit_code"] == 0, shown["output"]
     assert "Oracle scores" in shown["output"]
 
@@ -713,7 +725,7 @@ def corrupt_and_rescore(cli: CliRunner, output: Path) -> dict:
     result = json.loads(path.read_text(encoding="utf-8"))
     result.update({"relation": "disjoint", "de9im": "FF*FF****"})
     path.write_text(json.dumps(result), encoding="utf-8")
-    return run_cli(cli, f"proto score {output}")
+    return run_cli(cli, f"score eval {output}")
 
 
 @then("the rescore reports that no cells passed the oracle")
@@ -885,7 +897,7 @@ def run_cached_cell_three_times(cli: CliRunner, output: Path, tmp_path: Path) ->
         out_dir = output.parent / f"cache-run-{idx}"
         res = run_cli(
             cli,
-            f"proto run --driver ollama --task analysis-de9im-001 --arm B "
+            f"run codegen --driver ollama --task analysis-de9im-001 "
             f"--cache-dir {cache_dir}{extra} --output-dir {out_dir}",
         )
         assert res["exit_code"] == 0, res["output"]
@@ -905,7 +917,6 @@ def verify_cache_hit_sequence(cache_probe: dict, cache_runs: list[dict]) -> None
 for _feature in (
     "command-line.feature",
     "pilot-suite.feature",
-    "analysis.feature",
     "prototype-runs.feature",
     "workflow.feature",
     "qgis-sandbox.feature",

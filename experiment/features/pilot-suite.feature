@@ -4,14 +4,22 @@ Feature: Preparing and checking the pilot task suite
   to validate, and after a run the oracle has to give the same verdict on the
   same artefacts every time.
 
+  Scenario: The shipped suite lists and inspects tasks
+    When I run the command "tasks ls --root {suite}"
+    Then the command exits successfully
+    And the output contains "analysis-de9im-001"
+    When I run the command "tasks show analysis-de9im-001 --root {suite}"
+    Then the command exits successfully
+    And the output contains "topology-de9im"
+
   Scenario: The shipped suite validates
-    When I run the command "pilot validate --root {suite}"
+    When I run the command "tasks validate --root {suite}"
     Then the command exits successfully
     And the output reports that 3 tasks are valid and the pilot traps are covered
 
   Scenario: A suite missing its schema is rejected with a reason
     Given a task suite copied without its schema
-    When I run the command "pilot validate --root {suite}"
+    When I run the command "tasks validate --root {suite}"
     Then the command fails
     And the output explains that the schema cannot be read
 

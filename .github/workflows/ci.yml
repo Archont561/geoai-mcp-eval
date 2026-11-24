@@ -70,7 +70,7 @@ jobs:
         run: pixi run tools run architecture
 
       - name: Validate pilot task suite
-        run: pixi run experiment pilot validate
+        run: pixi run experiment tasks validate
 
       - name: Run pytest with 90% coverage floor
         run: pixi run tools run test

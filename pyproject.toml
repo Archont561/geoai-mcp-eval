@@ -96,7 +96,7 @@ allow_indirect_imports = true
 [[tool.importlinter.contracts]]
 name = "Analysis never imports or reads the LLM completion cache"
 type = "forbidden"
-source_modules = ["experiment.analyze", "experiment.cli.analyze"]
+source_modules = ["experiment.analyze"]
 forbidden_modules = ["experiment.adapters.llm_cache", "experiment.domain.cache_key"]
 
 [tool.pytest.ini_options]
