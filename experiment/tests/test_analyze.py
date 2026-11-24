@@ -1,15 +1,17 @@
 """Unit tests for analysis data preparation.
 
 The predicate matrix itself is specified in ``features/analysis.feature`` and
-driven through the CLI. What remains here is the predicate mapping's shape,
-which is not exposed directly by the command.
+driven through the CLI. What remains here are the predicate mapping's shape and
+the helper's exception type, neither of which is exposed directly by the command.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
+from cli_harness import check, write_cell
 
 from experiment import analyze
 
@@ -87,6 +89,12 @@ def _write_tasks(root: Path) -> Path:
     for name, doc in TASKS.items():
         (tasks / name).write_text(yaml.safe_dump(doc), encoding="utf-8")
     return tasks
+
+
+def test_unknown_assertion_raises_value_error(results: dict) -> None:
+    write_cell(results, "analysis-de9im-001", "B", [check("mystery-assertion", True)])
+    with pytest.raises(ValueError, match="mystery-assertion"):
+        analyze.flatten_rows(results["dir"], results["tasks"])
 
 
 def test_load_predicates_roundtrip(tmp_path: Path) -> None:
