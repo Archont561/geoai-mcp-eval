@@ -1,7 +1,7 @@
 ---
 id: GEO-014
 title: Unified English ontology domain models and TrialMeasurement DTO
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-24T00:00:00Z'
 labels:
@@ -32,11 +32,11 @@ Model hierarchy:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `experiment/src/experiment/domain/run/` defines `ExperimentRun`, `TrialRecord`, `TrialMeasurement`, `Treatment`, `EnvironmentPin`, `ModelPin`, and `InstrumentAudit` using Pydantic v2 (`extra="forbid"`, English names only).
-- [ ] #2 `ExperimentRun.merge(parts)` deterministically combines partial runs from parallel jobs, rejects conflicting duplicate trials, and never imputes missing trials.
-- [ ] #3 `ExperimentRun.model_json_schema()` exports cleanly as a self-describing JSON Schema.
-- [ ] #4 `experiment.domain` remains 100% pure (zero I/O, `pathlib`, `zipfile`, or framework imports); all `import-linter` contracts and `clean_code` checks pass.
-- [ ] #5 Unit and property tests verify strict validation, nullable token semantics (never coerced to 0), and merge invariants.
+- [x] #1 `experiment/src/experiment/domain/run/` defines `ExperimentRun`, `TrialRecord`, `TrialMeasurement`, `Treatment`, `EnvironmentPin`, `ModelPin`, and `InstrumentAudit` using Pydantic v2 (`extra="forbid"`, English names only).
+- [x] #2 `ExperimentRun.merge(parts)` deterministically combines partial runs from parallel jobs, rejects conflicting duplicate trials, and never imputes missing trials.
+- [x] #3 `ExperimentRun.model_json_schema()` exports cleanly as a self-describing JSON Schema.
+- [x] #4 `experiment.domain` remains 100% pure (zero I/O, `pathlib`, `zipfile`, or framework imports); all `import-linter` contracts and `clean_code` checks pass.
+- [x] #5 Unit and property tests verify strict validation, nullable token semantics (never coerced to 0), and merge invariants.
 <!-- AC:END -->
 
 ## Implementation Plan

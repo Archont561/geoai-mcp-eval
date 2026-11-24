@@ -1,7 +1,7 @@
 ---
 id: GEO-015
 title: Single-zip RunArchive adapter with lazy submodel hydration
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-24T00:00:00Z'
 labels:
@@ -31,11 +31,11 @@ Eagerly reading `run.json` from the zip central directory keeps summary, scoring
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `RunArchive.write(path, run, ...)` writes a deterministic, self-contained `.zip` containing `run.json`, `summary.md`, `schema/experiment-run-v1.json`, and all trial evidence members with verified `ArtifactRef` SHA-256 hashes.
-- [ ] #2 `RunArchive.open(path)` eagerly validates `run.json` without decompressing trial transcripts, deliverables, or logs.
-- [ ] #3 Lazy submodel accessors hydrate and Pydantic-validate transcripts, deliverables, and oracle dumps on demand and fail loudly on SHA-256 mismatch or missing member.
-- [ ] #4 Fragment packing supports merging per-cell directories/fragment zips into one canonical `experiment-run-<run_id>.zip` via `ExperimentRun.merge(...)`.
-- [ ] #5 Unit tests verify round-trip fidelity, lazy non-loading before access, tamper detection on corrupted zip members, and Clean Code / `import-linter` compliance.
+- [x] #1 `RunArchive.write(path, run, ...)` writes a deterministic, self-contained `.zip` containing `run.json`, `summary.md`, `schema/experiment-run-v1.json`, and all trial evidence members with verified `ArtifactRef` SHA-256 hashes.
+- [x] #2 `RunArchive.open(path)` eagerly validates `run.json` without decompressing trial transcripts, deliverables, or logs.
+- [x] #3 Lazy submodel accessors hydrate and Pydantic-validate transcripts, deliverables, and oracle dumps on demand and fail loudly on SHA-256 mismatch or missing member.
+- [x] #4 Fragment packing supports merging per-cell directories/fragment zips into one canonical `experiment-run-<run_id>.zip` via `ExperimentRun.merge(...)`.
+- [x] #5 Unit tests verify round-trip fidelity, lazy non-loading before access, tamper detection on corrupted zip members, and Clean Code / `import-linter` compliance.
 <!-- AC:END -->
 
 ## Implementation Plan
