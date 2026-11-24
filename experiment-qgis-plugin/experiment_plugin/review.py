@@ -18,16 +18,14 @@ import argparse
 import ast
 import copy
 import json
-import os
 import sys
-import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from experiment_plugin import metrics, session
+from experiment_plugin import _io, metrics, session
 
 REVIEWED_RECORD_FILENAME = "human-reference-record.reviewed.json"
 TRAJECTORY_FILENAME = "human_trajectory.jsonl"
@@ -275,20 +273,6 @@ def _build_trajectory(
     return trajectory
 
 
-def _write_atomic(target: Path, content: str, *, prefix: str) -> Path:
-    target.parent.mkdir(parents=True, exist_ok=True)
-    fd, raw_tmp = tempfile.mkstemp(dir=target.parent, prefix=prefix, suffix=".tmp")
-    tmp_path = Path(raw_tmp)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(content)
-        os.replace(tmp_path, target)
-    except Exception:
-        tmp_path.unlink(missing_ok=True)
-        raise
-    return target
-
-
 def review_session(
     session_dir: str | Path,
     *,
@@ -370,15 +354,14 @@ def review_session(
 
     trajectory = _build_trajectory(executions, manual_groups)
     target_dir = Path(output_dir).expanduser().resolve() if output_dir else source_dir
-    reviewed_path = _write_atomic(
+    reviewed_path = _io.write_atomic_text(
         target_dir / REVIEWED_RECORD_FILENAME,
-        json.dumps(reviewed_record, indent=2, sort_keys=True) + "\n",
+        _io.format_json(reviewed_record, trailing_newline=True),
         prefix=".human-reference-record-reviewed-",
     )
-    trajectory_text = "".join(json.dumps(entry, sort_keys=True) + "\n" for entry in trajectory)
-    trajectory_path = _write_atomic(
+    trajectory_path = _io.write_atomic_text(
         target_dir / TRAJECTORY_FILENAME,
-        trajectory_text,
+        _io.format_jsonl(trajectory),
         prefix=".human-trajectory-",
     )
     return ReviewResult(

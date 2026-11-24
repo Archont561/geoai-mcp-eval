@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from subprocess import CompletedProcess
 
 import typer
 from rich.console import Console
@@ -91,7 +90,7 @@ def _running_panel(script: Path, artifacts_dir: Path, timeout_s: int) -> Panel:
     )
 
 
-def _print_completed(completed: CompletedProcess[str]) -> None:
+def _print_completed(completed: qgis_service.SandboxRunResult) -> None:
     console.print(
         Panel(Text(completed.stdout[-8000:] or "(no stdout)"), title="stdout", border_style="green")
     )

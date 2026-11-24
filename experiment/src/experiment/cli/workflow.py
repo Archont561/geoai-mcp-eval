@@ -15,7 +15,6 @@ from typing import Literal
 
 import typer
 
-from experiment.adapters.github_workflow import GitHubWorkflowAdapter
 from experiment.services import backend_check as backend_check_service
 from experiment.services import workflow as workflow_service
 from experiment.services import workflow_summary
@@ -217,15 +216,7 @@ def backend_check(  # noqa: CC102
     except backend_check_service.BackendCheckError as exc:
         print(str(exc), file=sys.stderr)
         raise typer.Exit(code=exc.exit_code) from exc
-    GitHubWorkflowAdapter().write_outputs(
-        {
-            "status": result.status,
-            "backend": result.backend,
-            "model": result.model,
-            "digest": result.digest,
-            "base_url": result.base_url,
-        }
-    )
+    backend_check_service.emit_github_outputs(result)
     typer.echo(
         f"{result.status} backend={result.backend} model={result.model} "
         f"digest={result.digest} base_url={result.base_url}"

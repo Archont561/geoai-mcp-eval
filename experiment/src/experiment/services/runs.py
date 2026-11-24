@@ -7,7 +7,6 @@ outputs stay under --output-dir and retain their ``prototype`` label.
 
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -15,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from experiment import backends, drivers, scripted
+from experiment.adapters import run_store
 from experiment.adapters.task_repository import discover_task_files, load_task
 from experiment.domain.cache_key import CacheStats
 from experiment.domain.task import Task
@@ -27,8 +27,6 @@ from experiment.harness import (
     _K_CONTENT,
     _K_ROLE,
     DRIVERS,
-    JSON_INDENT,
-    UTF8,
     CellRequest,
     RunSpec,
     append_transcript,
@@ -154,9 +152,7 @@ def run_cell(req: CellRequest) -> dict[str, Any]:
         "usage": usage_summary,
         "prototype": True,
     }
-    (active_req.cell / "score.json").write_text(
-        json.dumps({**score, "meta": meta}, indent=JSON_INDENT, sort_keys=True), encoding=UTF8
-    )
+    run_store.write_json(active_req.cell / "score.json", {**score, "meta": meta})
     return {**meta, "checks": score["checks"]}
 
 
@@ -246,9 +242,7 @@ def _write_manifest(  # noqa: CC102
             "usage": run_usage,
         },
     }
-    (output_root / "manifest.json").write_text(
-        json.dumps(manifest, indent=JSON_INDENT, sort_keys=True), encoding=UTF8
-    )
+    run_store.write_json(output_root / "manifest.json", manifest)
     return manifest
 
 
@@ -275,9 +269,7 @@ def _write_summary(
         "passed": sum(1 for c in cells if c["oracle_passed"]),
         "total": len(cells),
     }
-    (output_root / "summary.json").write_text(
-        json.dumps(summary, indent=JSON_INDENT, sort_keys=True), encoding=UTF8
-    )
+    run_store.write_json(output_root / "summary.json", summary)
     _write_manifest(output_root, spec, cells, run_usage, generated_at, model_digest)
     return summary
 

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import json
-
 from experiment import mcp_client
+from experiment.adapters import run_store
 from experiment.harness import TASK_ROOT
 
 
@@ -12,7 +11,7 @@ async def selftest_rows() -> list[tuple[str, str, str]]:
     """List tools, filter the two countries, and check their boundary relation."""
     tools = await mcp_client.list_tools()
     fixture = TASK_ROOT / "fixtures" / "analysis" / "poland-czechia.geojson"
-    payload = json.loads(fixture.read_text(encoding="utf-8"))
+    payload = run_store.read_json(fixture)
     pol = await mcp_client.call_tool(
         "filter_features", {"geojson": payload, "property": "ISO_A3", "equals": "POL"}
     )

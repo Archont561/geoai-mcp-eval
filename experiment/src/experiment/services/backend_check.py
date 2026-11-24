@@ -10,16 +10,16 @@ Retry policy: never silently retries auth/4xx responses; retries only transient
 
 from __future__ import annotations
 
-import subprocess
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import requests
-
 from experiment import backends
+from experiment.adapters import ollama as ollama_adapter
+from experiment.adapters import subprocess_runner
+from experiment.adapters.github_workflow import GitHubWorkflowAdapter
 
 EXIT_READY = 0
 EXIT_SSH_UNREACHABLE = 10
@@ -29,8 +29,6 @@ EXIT_AUTH_CLIENT = 13
 EXIT_TOKEN_LIMIT = 14
 EXIT_COMPLETION_REJECTED = 15
 
-_RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
-_RETRY_BACKOFF_S = 1.0
 _TOKEN_LIMIT_MARKERS = (
     "token limit",
     "context length",
@@ -78,14 +76,58 @@ class BackendCheckResult:
     base_url: str
 
 
-def _default_run_cmd(cmd: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+def _default_run_cmd(cmd: list[str], *, timeout: float) -> subprocess_runner.CommandResult:
+    return subprocess_runner.run_command(cmd, timeout=timeout)
 
 
-def _verify_ssh_and_tunnel(
-    cfg: BackendCheckConfig,
-    run_cmd: Callable[..., Any],
+def _probe_ssh_host(ssh_host: str, run_cmd: Callable[..., Any]) -> None:
+    probe_cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", ssh_host, "true"]
+    try:
+        ssh_res = run_cmd(probe_cmd, timeout=10.0)
+    except (OSError, subprocess_runner.CommandTimeoutError, TimeoutError) as exc:
+        raise BackendCheckError(
+            "ssh-unreachable",
+            EXIT_SSH_UNREACHABLE,
+            f"cannot reach SSH host {ssh_host}: {exc}",
+            "verify network/VPN connectivity, SSH config, and key authentication",
+        ) from exc
+    if ssh_res.returncode != 0:
+        stderr = (getattr(ssh_res, "stderr", "") or "").strip() or f"exit {ssh_res.returncode}"
+        raise BackendCheckError(
+            "ssh-unreachable",
+            EXIT_SSH_UNREACHABLE,
+            f"SSH host {ssh_host} unreachable ({stderr})",
+            "check hostname, SSH keys, and firewall rules",
+        )
+
+
+def _probe_control_tunnel(
+    ssh_host: str, control_path: Path | None, run_cmd: Callable[..., Any]
 ) -> None:
+    ctrl_cmd = ["ssh", "-O", "check"]
+    if control_path is not None:
+        ctrl_cmd.extend(["-S", str(control_path)])
+    ctrl_cmd.append(ssh_host)
+    try:
+        ctrl_res = run_cmd(ctrl_cmd, timeout=10.0)
+    except (OSError, subprocess_runner.CommandTimeoutError, TimeoutError) as exc:
+        raise BackendCheckError(
+            "tunnel-dead",
+            EXIT_TUNNEL_DEAD,
+            f"SSH ControlMaster check failed for {ssh_host}: {exc}",
+            "restart the ControlMaster tunnel before running the experiment",
+        ) from exc
+    if ctrl_res.returncode != 0:
+        stderr = (getattr(ctrl_res, "stderr", "") or "").strip() or f"exit {ctrl_res.returncode}"
+        raise BackendCheckError(
+            "tunnel-dead",
+            EXIT_TUNNEL_DEAD,
+            f"SSH ControlMaster tunnel is not running ({stderr})",
+            f"re-establish the ControlMaster tunnel to {ssh_host}",
+        )
+
+
+def _verify_ssh_and_tunnel(cfg: BackendCheckConfig, run_cmd: Callable[..., Any]) -> None:
     if not cfg.ssh_host:
         raise BackendCheckError(
             "ssh-unreachable",
@@ -100,45 +142,8 @@ def _verify_ssh_and_tunnel(
             f"ControlMaster socket does not exist: {cfg.control_path}",
             f"open the SSH tunnel with `ssh -M -S {cfg.control_path} -fNT -L ... {cfg.ssh_host}`",
         )
-    probe_cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", cfg.ssh_host, "true"]
-    try:
-        ssh_res = run_cmd(probe_cmd, timeout=10.0)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise BackendCheckError(
-            "ssh-unreachable",
-            EXIT_SSH_UNREACHABLE,
-            f"cannot reach SSH host {cfg.ssh_host}: {exc}",
-            "verify network/VPN connectivity, SSH config, and key authentication",
-        ) from exc
-    if ssh_res.returncode != 0:
-        stderr = (getattr(ssh_res, "stderr", "") or "").strip() or f"exit {ssh_res.returncode}"
-        raise BackendCheckError(
-            "ssh-unreachable",
-            EXIT_SSH_UNREACHABLE,
-            f"SSH host {cfg.ssh_host} unreachable ({stderr})",
-            "check hostname, SSH keys, and firewall rules",
-        )
-    ctrl_cmd = ["ssh", "-O", "check"]
-    if cfg.control_path is not None:
-        ctrl_cmd.extend(["-S", str(cfg.control_path)])
-    ctrl_cmd.append(cfg.ssh_host)
-    try:
-        ctrl_res = run_cmd(ctrl_cmd, timeout=10.0)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise BackendCheckError(
-            "tunnel-dead",
-            EXIT_TUNNEL_DEAD,
-            f"SSH ControlMaster check failed for {cfg.ssh_host}: {exc}",
-            "restart the ControlMaster tunnel before running the experiment",
-        ) from exc
-    if ctrl_res.returncode != 0:
-        stderr = (getattr(ctrl_res, "stderr", "") or "").strip() or f"exit {ctrl_res.returncode}"
-        raise BackendCheckError(
-            "tunnel-dead",
-            EXIT_TUNNEL_DEAD,
-            f"SSH ControlMaster tunnel is not running ({stderr})",
-            f"re-establish the ControlMaster tunnel to {cfg.ssh_host}",
-        )
+    _probe_ssh_host(cfg.ssh_host, run_cmd)
+    _probe_control_tunnel(cfg.ssh_host, cfg.control_path, run_cmd)
 
 
 def _is_token_limit(status_code: int, text: str) -> bool:
@@ -154,27 +159,21 @@ def _request_with_policy(
     profile: backends.BackendProfile,
     *,
     sleep: Callable[[float], None],
-    **kwargs: Any,
+    json_body: dict[str, Any] | None = None,
 ) -> Any:
     """Issue one HTTP request; retry ONLY on 429/5xx per profile.retries."""
-    attempts = profile.retries + 1
-    last_resp: Any = None
-    for attempt in range(attempts):
-        try:
-            resp = method(url, timeout=profile.timeout, **kwargs)
-        except requests.exceptions.RequestException as exc:
-            raise BackendCheckError(
-                "tunnel-dead",
-                EXIT_TUNNEL_DEAD,
-                f"HTTP transport error reaching {url}: {exc}",
-                "verify port forwarding and that Ollama is listening on the remote host",
-            ) from exc
-        if resp.status_code not in _RETRYABLE_STATUSES:
-            return resp
-        last_resp = resp
-        if attempt + 1 < attempts:
-            sleep(_RETRY_BACKOFF_S * (2**attempt))
-    return last_resp
+    policy = ollama_adapter.RetryPolicy(timeout=profile.timeout, retries=profile.retries)
+    try:
+        return ollama_adapter.request_with_retry(
+            method, url, policy, sleep=sleep, json_body=json_body
+        )
+    except ollama_adapter.HttpTransportError as exc:
+        raise BackendCheckError(
+            "tunnel-dead",
+            EXIT_TUNNEL_DEAD,
+            str(exc),
+            "verify port forwarding and that Ollama is listening on the remote host",
+        ) from exc
 
 
 def _extract_model_ids(payload: Any) -> set[str]:
@@ -224,7 +223,7 @@ def _check_models_status(resp: Any, url: str) -> set[str]:
 
 
 def _poll_model_and_digest(
-    session: requests.Session,
+    session: Any,
     profile: backends.BackendProfile,
     cfg: BackendCheckConfig,
     *,
@@ -256,21 +255,7 @@ def _poll_model_and_digest(
         sleep(cfg.poll_interval_s)
 
 
-def _run_tiny_completion(
-    session: requests.Session,
-    profile: backends.BackendProfile,
-    cfg: BackendCheckConfig,
-    *,
-    sleep: Callable[[float], None],
-) -> None:
-    body = {
-        "model": profile.model,
-        "messages": [{"role": "user", "content": "Reply with OK."}],
-        "stream": False,
-        "temperature": 0.0,
-        "max_tokens": cfg.max_tokens,
-    }
-    resp = _request_with_policy(session.post, profile.chat_url, profile, sleep=sleep, json=body)
+def _validate_completion_response(resp: Any, profile: backends.BackendProfile) -> None:
     if resp.status_code in (401, 403):
         raise BackendCheckError(
             "auth-error",
@@ -299,6 +284,26 @@ def _run_tiny_completion(
             f"HTTP {resp.status_code} completion rejected: {resp.text[:200]}",
             "check model load state and remote Ollama logs",
         )
+
+
+def _run_tiny_completion(
+    session: Any,
+    profile: backends.BackendProfile,
+    cfg: BackendCheckConfig,
+    *,
+    sleep: Callable[[float], None],
+) -> None:
+    body = {
+        "model": profile.model,
+        "messages": [{"role": "user", "content": "Reply with OK."}],
+        "stream": False,
+        "temperature": 0.0,
+        "max_tokens": cfg.max_tokens,
+    }
+    resp = _request_with_policy(
+        session.post, profile.chat_url, profile, sleep=sleep, json_body=body
+    )
+    _validate_completion_response(resp, profile)
     try:
         payload = resp.json()
     except ValueError as exc:
@@ -318,11 +323,27 @@ def _run_tiny_completion(
         )
 
 
+def emit_github_outputs(
+    result: BackendCheckResult, gh: GitHubWorkflowAdapter | None = None
+) -> None:
+    """Publish backend-check result fields to ``$GITHUB_OUTPUT`` when running in CI."""
+    adapter = gh or GitHubWorkflowAdapter()
+    adapter.write_outputs(
+        {
+            "status": result.status,
+            "backend": result.backend,
+            "model": result.model,
+            "digest": result.digest,
+            "base_url": result.base_url,
+        }
+    )
+
+
 def run_backend_check(
     cfg: BackendCheckConfig,
     *,
     run_cmd: Callable[..., Any] = _default_run_cmd,
-    session: requests.Session | None = None,
+    session: Any | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> BackendCheckResult:
     """Run the full remote-Ollama preflight check and return READY + digest pin."""
@@ -337,7 +358,7 @@ def run_backend_check(
         ) from exc
     _verify_ssh_and_tunnel(cfg, run_cmd)
     owns_session = session is None
-    active_session = session if session is not None else requests.Session()
+    active_session = session if session is not None else ollama_adapter.create_session()
     try:
         digest = _poll_model_and_digest(active_session, profile, cfg, sleep=sleep)
         _run_tiny_completion(active_session, profile, cfg, sleep=sleep)

@@ -28,67 +28,31 @@ testpaths = ["tests"]
 addopts = "-v"
 
 [tool.tasknest.tasks.preflight]
-cmd = [
-    "python",
-    "-c",
-    "import runpy, sys; sys.path.insert(0, 'src'); runpy.run_module('experiment', run_name='__main__')",
-    "workflow",
-    "preflight",
-]
+cmd = ["python", "run_cli.py", "workflow", "preflight"]
 description = "Validate the pilot task suite and pin the run environment."
 marks = ["ci", "workflow"]
 
 [tool.tasknest.tasks.model]
-cmd = [
-    "python",
-    "-c",
-    "import runpy, sys; sys.path.insert(0, 'src'); runpy.run_module('experiment', run_name='__main__')",
-    "workflow",
-    "model",
-]
+cmd = ["python", "run_cli.py", "workflow", "model"]
 description = "Start Ollama, pull the pinned model, and record its digest."
 marks = ["ci", "workflow", "setup"]
 
 [tool.tasknest.tasks.run]
-cmd = [
-    "python",
-    "-c",
-    "import runpy, sys; sys.path.insert(0, 'src'); runpy.run_module('experiment', run_name='__main__')",
-    "workflow",
-    "run",
-]
+cmd = ["python", "run_cli.py", "workflow", "run"]
 description = "Run one experiment cell (arm, task, repetition)."
 marks = ["ci", "workflow"]
 
 [tool.tasknest.tasks.harvest]
-cmd = [
-    "python",
-    "-c",
-    "import runpy, sys; sys.path.insert(0, 'src'); runpy.run_module('experiment', run_name='__main__')",
-    "workflow",
-    "harvest",
-]
+cmd = ["python", "run_cli.py", "workflow", "harvest"]
 description = "Merge cell outputs, re-run the oracle gate, and assert completeness."
 marks = ["ci", "workflow"]
 
 [tool.tasknest.tasks.summary]
-cmd = [
-    "python",
-    "-c",
-    "import runpy, sys; sys.path.insert(0, 'src'); runpy.run_module('experiment', run_name='__main__')",
-    "workflow",
-    "summary",
-]
+cmd = ["python", "run_cli.py", "workflow", "summary"]
 description = "Write the experiment step summary (artifacts, pins, completeness)."
 marks = ["ci", "workflow"]
 
 [tool.tasknest.tasks.backend-check]
-cmd = [
-    "python",
-    "-c",
-    "import runpy, sys; sys.path.insert(0, 'src'); runpy.run_module('experiment', run_name='__main__')",
-    "workflow",
-    "backend-check",
-]
+cmd = ["python", "run_cli.py", "workflow", "backend-check"]
 description = "Verify remote-ollama SSH tunnel, poll /v1/models digest, and run one tiny completion."
 marks = ["workflow"]

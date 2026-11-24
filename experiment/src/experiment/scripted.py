@@ -14,20 +14,19 @@ from pathlib import Path
 from typing import Any
 
 from experiment import mcp_client
+from experiment.adapters import run_store
 from experiment.harness import (
     _K_CONTENT,
     _K_ROLE,
-    JSON_INDENT,
     RESULT_GEOJSON,
     RESULT_JSON,
-    UTF8,
     CellRequest,
     append_transcript,
-    deliverable_name,
     extract_iso,
     fixture_fc,
     fixture_path,
     run_python_sandboxed,
+    write_deliverable,
 )
 
 
@@ -68,7 +67,7 @@ def _filter_pol(fixture: dict[str, Any], log: _CallLog) -> dict[str, Any]:
 
 
 def _write_json(cell: Path, name: str, payload: dict[str, Any]) -> None:
-    (cell / name).write_text(json.dumps(payload, indent=JSON_INDENT), encoding=UTF8)
+    run_store.write_json(cell / name, payload, sort_keys=False)
 
 
 @dataclass(frozen=True)
@@ -243,9 +242,8 @@ def scripted_arm_b(req: CellRequest) -> None:
         raise RuntimeError(
             f"sandboxed code failed (exit {completed.returncode}): {completed.stderr.strip()[:400]}"
         )
-    deliverable = deliverable_name(task)
     try:
         payload = json.loads(completed.stdout.strip().splitlines()[-1])
     except (json.JSONDecodeError, IndexError) as exc:
         raise RuntimeError(f"scripted code did not print a JSON deliverable: {exc}") from exc
-    (cell / deliverable).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    write_deliverable(cell, task, payload)

@@ -2,40 +2,19 @@
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from experiment.adapters import run_store
 from experiment.adapters.github_workflow import GitHubWorkflowAdapter
 from experiment.services.workflow import find_repo_root
 
 
-def _find_one(root: Path, name: str) -> Path | None:
-    matches = sorted(root.rglob(name))
-    return matches[0] if matches else None
-
-
-def _pins(root: Path) -> dict[str, str]:
-    path = _find_one(root, "env-pins.txt")
-    if path is None:
-        return {}
-    pins: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        key, sep, value = line.partition("=")
-        if sep:
-            pins[key.strip()] = value.strip()
-    return pins
-
-
 def _summary_payload(harvest: Path) -> dict[str, object]:
-    path = _find_one(harvest, "summary.json")
+    path = run_store.find_first(harvest, "summary.json")
     if path is None:
         return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return {}
-    return data if isinstance(data, dict) else {}
+    return run_store.read_json_mapping(path) or {}
 
 
 def _oracle_rows(payload: dict[str, object]) -> list[tuple[str, str]]:
@@ -114,22 +93,21 @@ def _what_happened_lines(
 
 
 def _smoke_line(model_smoke: Path) -> str:
-    try:
-        payload = json.loads(model_smoke.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
+    payload = run_store.read_json_mapping(model_smoke)
+    if payload is None:
         return "- Smoke completion: unreadable"
-    response = payload.get("response", "") if isinstance(payload, dict) else ""
+    response = payload.get("response", "")
     return f"- Smoke completion: `{str(response).strip()[:80]}`"
 
 
 def _model_lines(harvest: Path) -> list[str]:
-    digest = _find_one(harvest, "model-digest.txt")
-    model_smoke = _find_one(harvest, "model-smoke.json")
+    digest = run_store.find_first(harvest, "model-digest.txt")
+    model_smoke = run_store.find_first(harvest, "model-smoke.json")
     if not digest and not model_smoke:
         return []
     lines = ["", "## Model", ""]
     if digest:
-        lines.append(f"- Pin: `{digest.read_text(encoding='utf-8').strip()}`")
+        lines.append(f"- Pin: `{run_store.read_text(digest).strip()}`")
     if model_smoke:
         lines.append(_smoke_line(model_smoke))
     return lines
@@ -146,7 +124,7 @@ def render_summary(
     harvest = harvest_dir if harvest_dir.is_absolute() else (repo_root / harvest_dir)
     rid = adapter.resolve_run_id(run_id, fallback_local=False)
     payload = _summary_payload(harvest)
-    lines = _header_lines(rid, _pins(harvest))
+    lines = _header_lines(rid, run_store.read_env_pins(harvest))
     lines += _artifact_lines(adapter.run_url(), rid)
     lines += _what_happened_lines(payload, _oracle_rows(payload))
     lines += _model_lines(harvest)
@@ -162,6 +140,5 @@ def render_summary(
     ]
     markdown = "\n".join(lines)
     adapter.write_step_summary(markdown)
-    harvest.mkdir(parents=True, exist_ok=True)
-    (harvest / "summary.md").write_text(markdown, encoding="utf-8")
+    run_store.write_text(harvest / "summary.md", markdown)
     return markdown
