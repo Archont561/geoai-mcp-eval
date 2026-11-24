@@ -39,12 +39,13 @@ Feature: The experiment workflow from suite check to predicate matrix
     When I run the command "pilot validate --root {suite}"
     Then the command fails
     And the output names the task family that is missing
+    And the output names the uncovered pilot trap "jenks-classification"
 
   Scenario: A suite that stops covering a pilot trap is refused
     Given a task suite whose axis-order trap is no longer declared
     When I run the command "pilot validate --root {suite}"
     Then the command fails
-    And the output names the pilot trap that is uncovered
+    And the output names the uncovered pilot trap "crs-axis-order"
 
   Scenario: A suite whose fixture has gone missing is refused
     Given a task suite copied without its prepare fixture

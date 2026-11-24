@@ -12,6 +12,7 @@ thing under test is the *configuration* in ``pyproject.toml``, not the library.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -69,14 +70,14 @@ def _probe_project(tmp_path: Path, domain_source: str) -> Path:
     return tmp_path
 
 
-def _lint(config_dir: Path, pythonpath: Path) -> subprocess.CompletedProcess[str]:
+def _lint(config_dir: Path, *pythonpaths: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [*RUNNER, "--no-cache", str(config_dir / "pyproject.toml")],
         cwd=config_dir,
         capture_output=True,
         text=True,
         check=False,
-        env={"PYTHONPATH": str(pythonpath)},
+        env={"PYTHONPATH": os.pathsep.join(map(str, pythonpaths))},
     )
 
 
@@ -103,18 +104,66 @@ def test_an_upward_import_breaks_the_contract(tmp_path: Path) -> None:
     assert "not allowed to import probe.adapters" in result.stdout
 
 
-def test_the_shipped_contracts_pass_on_the_shipped_tree() -> None:
-    """The repository's own contracts, run against the repository itself."""
-    result = subprocess.run(
-        [*RUNNER, "--no-cache"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-        env={
-            "PYTHONPATH": str(REPO_ROOT / "experiment" / "src")
-            + ":"
-            + str(REPO_ROOT / "experiment-qgis-plugin")
-        },
+def _assert_shipped_contract_bites(
+    project: Path, package: str, source: str, contract: str, violation: str
+) -> None:
+    probe = project / "experiment" / package / "_architecture_probe.py"
+    probe.write_text(source, encoding="utf-8")
+    try:
+        result = _lint(project, project)
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert f"{contract} BROKEN" in result.stdout
+        assert violation in result.stdout
+    finally:
+        probe.unlink()
+
+
+def test_the_shipped_contracts_pass_and_reject_violations(tmp_path: Path) -> None:
+    """Exercise the real configuration on the real graph and mutated copies."""
+    result = _lint(
+        REPO_ROOT, REPO_ROOT / "experiment" / "src", REPO_ROOT / "experiment-qgis-plugin"
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    layers = "CLI, services, adapters and domain follow dependency direction"
+    no_frameworks = "Services have no CLI or presentation framework dependencies"
+    assert f"{layers} KEPT" in result.stdout
+    assert f"{no_frameworks} KEPT" in result.stdout
+    shutil.copytree(
+        REPO_ROOT / "experiment" / "src" / "experiment",
+        tmp_path / "experiment",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    shutil.copyfile(REPO_ROOT / "pyproject.toml", tmp_path / "pyproject.toml")
+    for package, source, contract, violation in (
+        (
+            "services",
+            "from experiment.cli import qgis\n",
+            layers,
+            "experiment.services is not allowed to import experiment.cli",
+        ),
+        (
+            "adapters",
+            "from experiment import services\n",
+            layers,
+            "experiment.adapters is not allowed to import experiment.services",
+        ),
+        (
+            "domain",
+            "from experiment import services\n",
+            layers,
+            "experiment.domain is not allowed to import experiment.services",
+        ),
+        (
+            "services",
+            "import typer\n",
+            no_frameworks,
+            "experiment.services is not allowed to import typer",
+        ),
+        (
+            "services",
+            "import rich\n",
+            no_frameworks,
+            "experiment.services is not allowed to import rich",
+        ),
+    ):
+        _assert_shipped_contract_bites(tmp_path, package, source, contract, violation)

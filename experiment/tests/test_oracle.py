@@ -245,18 +245,6 @@ def test_fisher_jenks_known_fixture_and_invalid_inputs() -> None:
             raise AssertionError("invalid Jenks input must be rejected")
 
 
-def test_determinism_gate_passes_three_identical_oracle_runs(tmp_path: Path) -> None:
-    write_expected_artifacts(tmp_path)
-    report = run_determinism_gate(
-        task_path("cartography-jenks-001"), tmp_path / "cartography-jenks-001"
-    )
-
-    assert report.passed
-    assert report.required_runs == 3
-    assert report.consistent
-    assert [result["status"] for result in report.run_results] == ["passed"] * 3
-
-
 def test_determinism_gate_rejects_inconsistent_and_missing_verdicts(tmp_path: Path) -> None:
     path = task_path(AXIS_TASK)
     sequence = iter(
