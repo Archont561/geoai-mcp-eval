@@ -37,6 +37,7 @@ markers = [
   "analysis: analysis-ready data preparation",
   "proto: prototype runs, scoring, and the MCP self-test",
   "workflow: the end-to-end pass from suite check to predicate matrix",
+  "qgis: the PyQGIS sandbox availability check and script runner",
 ]
 
 [tool.coverage.run]

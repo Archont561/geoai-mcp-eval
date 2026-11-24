@@ -14,14 +14,17 @@ from __future__ import annotations
 
 import json
 import shlex
+import subprocess
 from pathlib import Path
 
+import pytest
 from cli_harness import check, write_cell, write_jenks_artifact
 from cli_harness import write_point_artifact as _write_point
 from cli_harness import write_relation_artifact as _write_relation
 from pytest_bdd import given, parsers, scenarios, then, when
 from typer.testing import CliRunner
 
+from experiment.cli import qgis as qgis_cli
 from experiment.cli._loader import app
 
 FEATURE_DIR = Path(__file__).resolve().parents[1] / "features"
@@ -313,6 +316,127 @@ def output_names_missing_fixture(result: dict) -> None:
     assert "fixtures/prepare/poland.geojson" in result["output"]
 
 
+# --- the PyQGIS sandbox gate -------------------------------------------------
+#
+# PyQGIS is not importable in the test interpreter, so these scenarios replace
+# the one boundary the suite cannot cross: ``_qgis_versions``. Every other path
+# -- argument handling, exit codes, subprocess plumbing, output rendering -- runs
+# as shipped.
+
+_PYQGIS_AVAILABLE = {
+    "qgis": "4.2",
+    "gdal": "x",
+    "geos": "y",
+    "proj": "z",
+    "python": "3.13",
+}
+
+
+@given("a harness that cannot import PyQGIS")
+def harness_without_pyqgis(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(qgis_cli, "_qgis_versions", lambda: None)
+
+
+@given("a working PyQGIS harness")
+def harness_with_pyqgis(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(qgis_cli, "_qgis_versions", lambda: dict(_PYQGIS_AVAILABLE))
+
+
+@given("a sandbox script path that does not exist", target_fixture="script")
+def sandbox_script_missing(tmp_path: Path) -> Path:
+    return tmp_path / "nope.py"
+
+
+@given(parsers.parse('a sandbox script that prints "{text}"'), target_fixture="script")
+def sandbox_script_printing(tmp_path: Path, text: str) -> Path:
+    script = tmp_path / "ok.py"
+    script.write_text(f"print({text!r})\n", encoding="utf-8")
+    return script
+
+
+@given(parsers.parse("a sandbox script that exits with code {code:d}"), target_fixture="script")
+def sandbox_script_exiting(tmp_path: Path, code: int) -> Path:
+    script = tmp_path / "fail.py"
+    script.write_text(
+        f"import sys\nprint('out')\nprint('sandbox-error', file=sys.stderr)\nsys.exit({code})\n",
+        encoding="utf-8",
+    )
+    return script
+
+
+@given("a sandbox script that never finishes", target_fixture="script")
+def sandbox_script_slow(tmp_path: Path) -> Path:
+    script = tmp_path / "slow.py"
+    script.write_text("print('never')\n", encoding="utf-8")
+    return script
+
+
+@when("I ask the sandbox whether PyQGIS is available", target_fixture="result")
+def ask_sandbox_availability(cli: CliRunner) -> dict:
+    return run_cli(cli, "qgis check")
+
+
+@when("I run that script in the sandbox", target_fixture="result")
+def run_that_script(cli: CliRunner, script: Path, tmp_path: Path) -> dict:
+    return run_cli(cli, f"qgis run {script} --artifacts-dir {tmp_path / 'art'}")
+
+
+@when("I run that script in the sandbox with a one second timeout", target_fixture="result")
+def run_that_script_with_timeout(
+    cli: CliRunner, script: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> dict:
+    def never_returns(*_args: object, **_kwargs: object) -> None:
+        raise subprocess.TimeoutExpired(cmd="python", timeout=1)
+
+    monkeypatch.setattr(qgis_cli.subprocess, "run", never_returns)
+    return run_cli(cli, f"qgis run {script} --artifacts-dir {tmp_path / 'art'} --timeout 1")
+
+
+@then("the sandbox reports a definite verdict")
+def sandbox_reports_verdict(result: dict) -> None:
+    # Either PyQGIS is there (0) or it is not (3); nothing in between is honest.
+    # The panels' titles are the verdict, because "available" is a substring of
+    # "PyQGIS unavailable" and would match both branches.
+    assert result["exit_code"] in {0, 3}, result["output"]
+    available = "PyQGIS sandbox — available" in result["output"]
+    unavailable = "PyQGIS unavailable" in result["output"]
+    assert available != unavailable, result["output"]
+    assert available == (result["exit_code"] == 0), result["output"]
+
+
+@then("the command exits with the verdict's code")
+def command_exits_with_verdict(result: dict) -> None:
+    expected = 0 if "PyQGIS sandbox — available" in result["output"] else 3
+    assert result["exit_code"] == expected, result["output"]
+
+
+@then("the output names the sandbox environment to install")
+def output_names_sandbox_env(result: dict) -> None:
+    reported = result["output"] + result["stderr"] + result["raised"]
+    assert "PyQGIS unavailable" in reported
+    assert "-e sandbox" in reported
+
+
+@then("the output says the script is missing")
+def output_says_script_missing(result: dict) -> None:
+    assert "missing script" in result["output"]
+
+
+@then(parsers.parse("the sandbox exits with code {code:d}"))
+def sandbox_exits_with_code(result: dict, code: int) -> None:
+    assert result["exit_code"] == code, result["output"]
+
+
+@then("the output shows the script's error output")
+def output_shows_stderr(result: dict) -> None:
+    assert "sandbox-error" in result["output"]
+
+
+@then("the output says the script timed out")
+def output_says_timed_out(result: dict) -> None:
+    assert "timed out" in result["output"]
+
+
 # --- analysis ----------------------------------------------------------------
 
 
@@ -478,5 +602,6 @@ for _feature in (
     "analysis.feature",
     "prototype-runs.feature",
     "workflow.feature",
+    "qgis-sandbox.feature",
 ):
     scenarios(str(FEATURE_DIR / _feature))
