@@ -63,6 +63,9 @@ jobs:
       - name: Ruff check & format check
         run: pixi run tools run lint
 
+      - name: Verify architecture contracts
+        run: pixi run tools run architecture
+
       - name: Validate pilot task suite
         run: pixi run experiment pilot validate
 
