@@ -24,8 +24,8 @@ from experiment.harness import (
     append_transcript,
     extract_iso,
     fixture_fc,
-    fixture_path,
     run_python_sandboxed,
+    stage_fixture_input,
     write_deliverable,
 )
 
@@ -231,8 +231,7 @@ def scripted_arm_b(req: CellRequest) -> None:
     code = _ARM_B_CODE.get(task.id)
     if code is None:
         raise ValueError(f"no scripted plan for task {task.id}")
-    fixture_bytes = fixture_path(task_path, task).read_bytes()
-    (cell / "input.geojson").write_bytes(fixture_bytes)
+    stage_fixture_input(task_path, task, cell)
     append_transcript(
         req.cell, {_K_ROLE: "assistant", _K_CONTENT: f"```python\n{code.strip()}\n```"}
     )

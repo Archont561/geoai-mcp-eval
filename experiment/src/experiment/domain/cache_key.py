@@ -14,18 +14,22 @@ from dataclasses import dataclass
 from typing import Any
 
 
-def build_cache_key(
-    *,
-    backend_id: str,
-    model_digest: str,
-    messages: Sequence[Mapping[str, Any]],
-    tools: Sequence[Mapping[str, Any]] | None,
-    temperature: float,
-    max_tokens: int,
-) -> str:
-    """Compute a deterministic SHA-256 cache key pinned to ``model_digest``."""
-    clean_backend = backend_id.strip()
-    clean_digest = model_digest.strip()
+@dataclass(frozen=True)
+class CacheKeySpec:
+    """All inputs that determine a deterministic LLM completion cache key."""
+
+    backend_id: str
+    model_digest: str
+    messages: Sequence[Mapping[str, Any]]
+    tools: Sequence[Mapping[str, Any]] | None
+    temperature: float
+    max_tokens: int
+
+
+def build_cache_key(spec: CacheKeySpec) -> str:
+    """Compute a deterministic SHA-256 cache key pinned to ``spec.model_digest``."""
+    clean_backend = spec.backend_id.strip()
+    clean_digest = spec.model_digest.strip()
     if not clean_backend:
         raise ValueError("backend_id must be non-empty")
     if not clean_digest:
@@ -33,10 +37,10 @@ def build_cache_key(
     payload = {
         "backend_id": clean_backend,
         "model_digest": clean_digest,
-        "messages": list(messages),
-        "tools": list(tools) if tools else None,
-        "temperature": float(temperature),
-        "max_tokens": int(max_tokens),
+        "messages": list(spec.messages),
+        "tools": list(spec.tools) if spec.tools else None,
+        "temperature": float(spec.temperature),
+        "max_tokens": int(spec.max_tokens),
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode(
         "utf-8"
@@ -44,15 +48,22 @@ def build_cache_key(
     return hashlib.sha256(encoded).hexdigest()
 
 
-def is_cacheable_response(payload: Any) -> bool:
-    """Return True only for valid, non-error chat-completion payloads."""
-    if not isinstance(payload, Mapping) or "error" in payload:
-        return False
-    choices = payload.get("choices")
+def _is_mapping(obj: Any) -> bool:
+    return isinstance(obj, Mapping)
+
+
+def _has_choice_message(choices: Any) -> bool:
     if not isinstance(choices, list) or not choices:
         return False
     first = choices[0]
-    return isinstance(first, Mapping) and isinstance(first.get("message"), Mapping)
+    return _is_mapping(first) and _is_mapping(first.get("message"))
+
+
+def is_cacheable_response(payload: Any) -> bool:
+    """Return True only for valid, non-error chat-completion payloads."""
+    if not _is_mapping(payload) or "error" in payload:
+        return False
+    return _has_choice_message(payload.get("choices"))
 
 
 @dataclass

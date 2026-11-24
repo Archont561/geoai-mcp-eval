@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from dataclasses import dataclass
 from typing import Any
 
 import requests
@@ -18,7 +19,7 @@ from mcp.client.stdio import stdio_client
 
 from experiment import backends, mcp_client
 from experiment.adapters.llm_cache import CompletionCache
-from experiment.domain.cache_key import build_cache_key
+from experiment.domain.cache_key import CacheKeySpec, build_cache_key
 from experiment.domain.usage import (
     ABORT_REASON_TOKEN_CAP,
     TokenCapExceededError,
@@ -34,14 +35,58 @@ from experiment.harness import (
     CellRequest,
     append_transcript,
     fixture_fc,
-    fixture_path,
     run_python_sandboxed,
+    stage_fixture_input,
     write_deliverable,
 )
 
 _MAX_TOOL_STEPS = 12
 _TOOL_RESULT_CAP = 6000
 _TRANSCRIPT_USER_CAP = 4000
+
+
+@dataclass(frozen=True)
+class _DriverSession:
+    """Bundled cell request, validated backend profile, and live HTTP session."""
+
+    req: CellRequest
+    session: requests.Session
+    profile: backends.BackendProfile
+
+
+def _post_chat(
+    session: requests.Session,
+    profile: backends.BackendProfile,
+    body: dict[str, Any],
+) -> requests.Response:
+    try:
+        return session.post(profile.chat_url, json=body, timeout=profile.timeout)
+    except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError) as exc:
+        raise backends.BackendError(
+            "connection", f"cannot reach {profile.base_url}: {exc}"
+        ) from exc
+    except requests.exceptions.ReadTimeout as exc:
+        msg = f"no response within {profile.read_timeout_s}s from {profile.base_url}"
+        raise backends.BackendError("timeout", msg) from exc
+    except requests.exceptions.RequestException as exc:
+        raise backends.BackendError("transport", f"{exc.__class__.__name__}: {exc}") from exc
+
+
+def _parse_chat_response(
+    resp: requests.Response, profile: backends.BackendProfile
+) -> dict[str, Any]:
+    if resp.status_code == 429:
+        retry_after = resp.headers.get("Retry-After", "unspecified")
+        detail = f"HTTP 429 after {profile.retries} retries (Retry-After: {retry_after})"
+        raise backends.BackendError("rate-limit", detail)
+    if resp.status_code >= 400:
+        raise backends.BackendError(f"http-{resp.status_code}", resp.text[:300])
+    try:
+        return resp.json()
+    except ValueError as exc:
+        raise backends.BackendError(
+            "invalid-response", f"response is not JSON: {resp.text[:300]}"
+        ) from exc
 
 
 def _chat_completions(
@@ -59,29 +104,8 @@ def _chat_completions(
     }
     if tools:
         body["tools"] = tools
-    try:
-        resp = session.post(profile.chat_url, json=body, timeout=profile.timeout)
-    except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError) as exc:
-        detail = f"cannot reach {profile.base_url}: {exc}"
-        raise backends.BackendError("connection", detail) from exc
-    except requests.exceptions.ReadTimeout as exc:
-        raise backends.BackendError(
-            "timeout", f"no response within {profile.read_timeout_s}s from {profile.base_url}"
-        ) from exc
-    except requests.exceptions.RequestException as exc:
-        raise backends.BackendError("transport", f"{exc.__class__.__name__}: {exc}") from exc
-    if resp.status_code == 429:
-        retry_after = resp.headers.get("Retry-After", "unspecified")
-        raise backends.BackendError(
-            "rate-limit", f"HTTP 429 after {profile.retries} retries (Retry-After: {retry_after})"
-        )
-    if resp.status_code >= 400:
-        raise backends.BackendError(f"http-{resp.status_code}", resp.text[:300])
-    try:
-        return resp.json()
-    except ValueError as exc:
-        detail = f"response is not JSON: {resp.text[:300]}"
-        raise backends.BackendError("invalid-response", detail) from exc
+    resp = _post_chat(session, profile, body)
+    return _parse_chat_response(resp, profile)
 
 
 def _openai_tool_from_mcp(tool: Any) -> dict[str, Any]:
@@ -163,48 +187,54 @@ def _emit_usage_events(req: CellRequest, snapshot: UsageSnapshot) -> None:
         raise TokenCapExceededError(tokens_used=tokens_used, max_cell_tokens=cap)
 
 
+def _prepare_cache(
+    ctx: _DriverSession,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None,
+) -> tuple[CompletionCache | None, str | None]:
+    if not (ctx.req.use_cache and ctx.req.model_digest):
+        return None, None
+    key = build_cache_key(
+        CacheKeySpec(
+            backend_id=ctx.req.backend_id,
+            model_digest=ctx.req.model_digest,
+            messages=messages,
+            tools=tools,
+            temperature=ctx.profile.temperature,
+            max_tokens=ctx.profile.max_tokens,
+        )
+    )
+    return CompletionCache(ctx.req.cache_dir), key
+
+
 def _cached_chat_completions(
-    req: CellRequest,
-    session: requests.Session,
-    profile: backends.BackendProfile,
+    ctx: _DriverSession,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """Call the LLM endpoint, using the digest-keyed disk cache when eligible."""
-    cache: CompletionCache | None = None
-    key: str | None = None
-    if req.use_cache and req.model_digest:
-        key = build_cache_key(
-            backend_id=req.backend_id,
-            model_digest=req.model_digest,
-            messages=messages,
-            tools=tools,
-            temperature=profile.temperature,
-            max_tokens=profile.max_tokens,
-        )
-        cache = CompletionCache(req.cache_dir)
+    cache, key = _prepare_cache(ctx, messages, tools)
+    if cache is not None and key is not None:
         cached = cache.get(key)
         if cached is not None:
-            if req.cache_stats is not None:
-                req.cache_stats.record(hit=True)
+            if ctx.req.cache_stats is not None:
+                ctx.req.cache_stats.record(hit=True)
             return cached, True
-    reply = _chat_completions(session, profile, messages, tools)
+    reply = _chat_completions(ctx.session, ctx.profile, messages, tools)
     if cache is not None and key is not None:
         cache.put(key, reply)
-    if req.cache_stats is not None:
-        req.cache_stats.record(hit=False)
+    if ctx.req.cache_stats is not None:
+        ctx.req.cache_stats.record(hit=False)
     return reply, False
 
 
 def _tool_reply(
-    req: CellRequest,
+    ctx: _DriverSession,
     messages: list[dict[str, Any]],
     tool_specs: list[dict[str, Any]],
-    session: requests.Session,
-    profile: backends.BackendProfile,
 ) -> dict[str, Any]:
-    reply, cache_hit = _cached_chat_completions(req, session, profile, messages, tool_specs)
-    snapshot = _record_completion_usage(req, reply)
+    reply, cache_hit = _cached_chat_completions(ctx, messages, tool_specs)
+    snapshot = _record_completion_usage(ctx.req, reply)
     message = reply["choices"][0]["message"]
     messages.append(message)
     entry: dict[str, Any] = {
@@ -216,8 +246,8 @@ def _tool_reply(
     }
     if snapshot.warning:
         entry["usage_warning"] = snapshot.warning
-    append_transcript(req.cell, entry)
-    _emit_usage_events(req, snapshot)
+    append_transcript(ctx.req.cell, entry)
+    _emit_usage_events(ctx.req, snapshot)
     return message
 
 
@@ -250,22 +280,21 @@ def _deliver_json(req: CellRequest, final: str) -> None:
     write_deliverable(req.cell, req.task, payload)
 
 
-def _profile_and_session(req: CellRequest) -> tuple[backends.BackendProfile, requests.Session]:
+def _open_driver_session(req: CellRequest) -> _DriverSession:
     profile = req.profile or backends.fallback_profile(req.host, req.model)
-    return profile, backends.build_session(profile)
+    return _DriverSession(req=req, session=backends.build_session(profile), profile=profile)
 
 
 def ollama_arm_a(req: CellRequest) -> None:
-    profile, session = _profile_and_session(req)
+    ctx = _open_driver_session(req)
     try:
-        return _ollama_arm_a(req, session, profile)
+        return _ollama_arm_a(ctx)
     finally:
-        session.close()
+        ctx.session.close()
 
 
-def _ollama_arm_a(
-    req: CellRequest, session: requests.Session, profile: backends.BackendProfile
-) -> None:
+def _ollama_arm_a(ctx: _DriverSession) -> None:
+    req = ctx.req
     fixture = fixture_fc(req.task_path, req.task)
     tool_specs, _ = asyncio.run(_mcp_tool_specs())
     system = (
@@ -277,7 +306,7 @@ def _ollama_arm_a(
     user = f"{req.task.prompt}\n\nFixture file ({req.task.fixture_input}):\n{json.dumps(fixture)}"
     messages = _initial_messages(req, system, user)
     for _step in range(_MAX_TOOL_STEPS):
-        message = _tool_reply(req, messages, tool_specs, session, profile)
+        message = _tool_reply(ctx, messages, tool_specs)
         tool_calls = message.get("tool_calls") or []
         if not tool_calls:
             break
@@ -296,36 +325,14 @@ _ARM_B_SYSTEM = (
 
 
 def ollama_arm_b(req: CellRequest) -> None:
-    profile, session = _profile_and_session(req)
+    ctx = _open_driver_session(req)
     try:
-        return _ollama_arm_b(req, session, profile)
+        return _ollama_arm_b(ctx)
     finally:
-        session.close()
+        ctx.session.close()
 
 
-def _ollama_arm_b(
-    req: CellRequest, session: requests.Session, profile: backends.BackendProfile
-) -> None:
-    fixture = fixture_fc(req.task_path, req.task)
-    (req.cell / "input.geojson").write_bytes(fixture_path(req.task_path, req.task).read_bytes())
-    system = _ARM_B_SYSTEM
-    size = len(json.dumps(fixture))
-    head = json.dumps(fixture)[:_TOOL_RESULT_CAP]
-    user = f"{req.task.prompt}\n\nFixture head (input.geojson, {size} bytes):\n{head}"
-    messages = _initial_messages(req, system, user)
-    reply, cache_hit = _cached_chat_completions(req, session, profile, messages, None)
-    snapshot = _record_completion_usage(req, reply)
-    content = reply["choices"][0]["message"].get(_K_CONTENT) or ""
-    entry: dict[str, Any] = {
-        _K_ROLE: "assistant",
-        _K_CONTENT: content,
-        "cache_hit": cache_hit,
-        "usage": snapshot.to_transcript_usage(),
-    }
-    if snapshot.warning:
-        entry["usage_warning"] = snapshot.warning
-    append_transcript(req.cell, entry)
-    _emit_usage_events(req, snapshot)
+def _execute_arm_b_reply(req: CellRequest, content: str) -> None:
     # Only ```/```py/```python fences are code; a bare language tag (e.g. ```json)
     # must not leak into the captured source and get executed as Python.
     blocks = re.findall(r"```(?:python|py)?[ \t]*\r?\n(.*?)```", content, re.DOTALL | re.IGNORECASE)
@@ -343,6 +350,31 @@ def _ollama_arm_b(
         },
     )
     _deliver_stdout_json(req, completed.stdout)
+
+
+def _ollama_arm_b(ctx: _DriverSession) -> None:
+    req = ctx.req
+    fixture_text = json.dumps(fixture_fc(req.task_path, req.task))
+    stage_fixture_input(req.task_path, req.task, req.cell)
+    user = (
+        f"{req.task.prompt}\n\nFixture head (input.geojson, {len(fixture_text)} bytes):\n"
+        f"{fixture_text[:_TOOL_RESULT_CAP]}"
+    )
+    messages = _initial_messages(req, _ARM_B_SYSTEM, user)
+    reply, cache_hit = _cached_chat_completions(ctx, messages, None)
+    snapshot = _record_completion_usage(req, reply)
+    content = reply["choices"][0]["message"].get(_K_CONTENT) or ""
+    entry: dict[str, Any] = {
+        _K_ROLE: "assistant",
+        _K_CONTENT: content,
+        "cache_hit": cache_hit,
+        "usage": snapshot.to_transcript_usage(),
+    }
+    if snapshot.warning:
+        entry["usage_warning"] = snapshot.warning
+    append_transcript(req.cell, entry)
+    _emit_usage_events(req, snapshot)
+    _execute_arm_b_reply(req, content)
 
 
 def _deliver_stdout_json(req: CellRequest, stdout: str) -> None:

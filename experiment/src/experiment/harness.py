@@ -103,14 +103,18 @@ def resolve_output_dir(output_dir: Path | None) -> Path:
     else:
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         path = RESULTS_ROOT / f"prototype-{stamp}"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return run_store.ensure_dir(path)
 
 
 def cell_dir(output_root: Path, task_id: str, arm: str) -> Path:
-    path = output_root / task_id / f"{ARM_PREFIX}{arm}"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return run_store.ensure_dir(output_root / task_id / f"{ARM_PREFIX}{arm}")
+
+
+def stage_fixture_input(task_path: Path, task: Task, cell: Path) -> Path:
+    """Copy the task's fixture into ``cell/input.geojson`` for sandboxed Arm B runs."""
+    target = cell / "input.geojson"
+    target.write_bytes(fixture_path(task_path, task).read_bytes())
+    return target
 
 
 def append_transcript(cell: Path, record: dict[str, Any]) -> None:

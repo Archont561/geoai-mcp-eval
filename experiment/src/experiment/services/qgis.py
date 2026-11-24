@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import os
 import sys
@@ -35,10 +36,9 @@ def _safe_call(obj: object, method_name: str, *args: object) -> object:
     method = getattr(obj, method_name, None)
     if not callable(method):
         return None
-    try:
+    with contextlib.suppress(Exception):
         return method(*args)
-    except Exception:
-        return None
+    return None
 
 
 def _qgis_version(qgis_core: object) -> str:
@@ -77,26 +77,38 @@ def _gdal_version(qgis_core: object) -> str:
     return _clean(raw) or "unknown"
 
 
+def _as_int(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _format_proj_tuple(major: object, minor: object, micro: object = None) -> str | None:
+    maj, min_ = _as_int(major), _as_int(minor)
+    if maj is None or maj <= 0 or min_ is None:
+        return None
+    mic = _as_int(micro)
+    suffix = f".{mic}" if mic is not None else ""
+    return f"{maj}.{min_}{suffix}"
+
+
 def _proj_version(qgis_core: object) -> str:
     direct = _clean(getattr(qgis_core, "PROJ_VERSION", None) or os.environ.get("PROJ_VERSION"))
     if direct is not None:
         return direct
-    try:
+    with contextlib.suppress(ImportError):
         osr = importlib.import_module("osgeo.osr")
-        major = _safe_call(osr, "GetPROJVersionMajor")
-        minor = _safe_call(osr, "GetPROJVersionMinor")
-        micro = _safe_call(osr, "GetPROJVersionMicro")
-        if isinstance(major, int) and major > 0 and isinstance(minor, int):
-            suffix = f".{micro}" if isinstance(micro, int) else ""
-            return f"{major}.{minor}{suffix}"
-    except ImportError:
-        pass
+        formatted = _format_proj_tuple(
+            _safe_call(osr, "GetPROJVersionMajor"),
+            _safe_call(osr, "GetPROJVersionMinor"),
+            _safe_call(osr, "GetPROJVersionMicro"),
+        )
+        if formatted is not None:
+            return formatted
     proj_utils = getattr(qgis_core, "QgsProjUtils", None)
-    major = _safe_call(proj_utils, "projVersionMajor")
-    minor = _safe_call(proj_utils, "projVersionMinor")
-    if isinstance(major, int) and major > 0 and isinstance(minor, int):
-        return f"{major}.{minor}"
-    return "unknown"
+    formatted = _format_proj_tuple(
+        _safe_call(proj_utils, "projVersionMajor"),
+        _safe_call(proj_utils, "projVersionMinor"),
+    )
+    return formatted or "unknown"
 
 
 def qgis_versions() -> dict[str, str] | None:

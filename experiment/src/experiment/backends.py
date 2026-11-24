@@ -101,6 +101,19 @@ def _normalize_host(host: str) -> str:
     return host.strip().rstrip("/")
 
 
+def _select_profile(name: str, profiles: dict[str, BackendProfile], path: Path) -> BackendProfile:
+    chosen = profiles.get(name)
+    if chosen is not None:
+        return chosen
+    if name == LOCAL_BACKEND:
+        return BackendProfile(base_url=DEFAULT_BASE_URL, model=DEFAULT_MODEL)
+    if path.is_file():
+        known = ", ".join(sorted(profiles)) or "none defined"
+        raise BackendError("config", f"unknown backend {name!r}; known: {known}")
+    msg = f"backends file not found: {path} (needed for --backend {name!r})"
+    raise BackendError("config", msg)
+
+
 def resolve_profile(
     backend: str | None,
     *,
@@ -112,21 +125,11 @@ def resolve_profile(
     path = path or DEFAULT_BACKENDS_PATH
     name = backend or LOCAL_BACKEND
     profiles = load_profiles(path) if path.is_file() else {}
-    chosen = profiles.get(name)
-    if chosen is None and name != LOCAL_BACKEND:
-        if path.is_file():
-            known = ", ".join(sorted(profiles)) or "none defined"
-            raise BackendError("config", f"unknown backend {name!r}; known: {known}")
-        msg = f"backends file not found: {path} (needed for --backend {name!r})"
-        raise BackendError("config", msg)
-    if chosen is None:
-        chosen = BackendProfile(base_url=DEFAULT_BASE_URL, model=DEFAULT_MODEL)
+    chosen = _select_profile(name, profiles, path)
     env_host = os.environ.get("OLLAMA_HOST") if name == LOCAL_BACKEND else None
-    url = host or env_host or str(chosen.base_url)
-    chosen_model = model or chosen.model
     data = chosen.model_dump(mode="json")
-    data["base_url"] = _normalize_host(url)
-    data["model"] = chosen_model
+    data["base_url"] = _normalize_host(host or env_host or str(chosen.base_url))
+    data["model"] = model or chosen.model
     try:
         return BackendProfile.model_validate(data)
     except ValidationError as exc:
