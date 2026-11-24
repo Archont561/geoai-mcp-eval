@@ -25,7 +25,9 @@ from experiment.domain.run.measurement import (
     TokenUsage,
     TrialMeasurement,
     compute_outcome_metrics,
+    infer_assertion_tier,
 )
+from experiment.domain.run.metrics import extract_transcript_metrics
 from experiment.domain.run.provenance import EnvironmentPin, ModelPin, RunProvenance
 from experiment.domain.run.trial import (
     ArtifactRef,
@@ -66,4 +68,6 @@ __all__ = [
     "arm_to_paradigm",
     "compute_outcome_metrics",
     "enforce_code_to_level",
+    "extract_transcript_metrics",
+    "infer_assertion_tier",
 ]

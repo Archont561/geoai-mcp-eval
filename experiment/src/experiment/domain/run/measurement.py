@@ -109,20 +109,71 @@ class BehavioralAnnotations(BaseModel):
     semantic_judge_notes: str | None = None
 
 
-def compute_outcome_metrics(assertions: Sequence[AssertionResult]) -> OutcomeMetrics:
+TIER_TRIVIAL: AssertionTier = "trivial"
+TIER_SPATIAL: AssertionTier = "spatial"
+TIER_VALUE: AssertionTier = "value"
+
+_TIER_ALIASES: dict[str, AssertionTier] = {
+    "a": TIER_TRIVIAL,
+    "b": TIER_SPATIAL,
+    "c": TIER_VALUE,
+    "trivial": TIER_TRIVIAL,
+    "spatial": TIER_SPATIAL,
+    "value": TIER_VALUE,
+}
+_TYPE_TO_TIER: dict[str, AssertionTier] = {
+    "file_exists": TIER_TRIVIAL,
+    "ogr_readable": TIER_TRIVIAL,
+    "feature_count": TIER_TRIVIAL,
+    "geojson_feature_count": TIER_TRIVIAL,
+    "raster_shape": TIER_TRIVIAL,
+    "nodata_ok": TIER_TRIVIAL,
+    "fields_present": TIER_TRIVIAL,
+    "crs_equals": TIER_SPATIAL,
+    "axis_order_ok": TIER_SPATIAL,
+    "geom_type_in": TIER_SPATIAL,
+    "geometry_valid": TIER_SPATIAL,
+    "de9im_relation": TIER_SPATIAL,
+    "representative_point_matches": TIER_SPATIAL,
+    "extent_within_tol": TIER_SPATIAL,
+    "buffer_distance": TIER_SPATIAL,
+    "attr_stats": TIER_VALUE,
+    "jenks_classification": TIER_VALUE,
+    "min_dist_to": TIER_VALUE,
+}
+
+
+def infer_assertion_tier(
+    assertion_type: str,
+    explicit_tier: str | None = None,
+) -> AssertionTier | None:
+    """Resolve an assertion's English complexity tier from an explicit tag or type name."""
+    if explicit_tier is not None:
+        mapped = _TIER_ALIASES.get(explicit_tier.strip().lower())
+        if mapped is not None:
+            return mapped
+    return _TYPE_TO_TIER.get(assertion_type.strip().lower())
+
+
+def compute_outcome_metrics(
+    assertions: Sequence[AssertionResult],
+    *,
+    deliverable_readable: bool | None = None,
+) -> OutcomeMetrics:
     """Derive task_success, predicate_score, and silent_invalid from oracle assertions."""
     if not assertions:
         return OutcomeMetrics(task_success=False, predicate_score=0.0, silent_invalid=False)
     passed_count = sum(1 for item in assertions if item.passed)
     task_success = passed_count == len(assertions)
     predicate_score = passed_count / len(assertions)
-    trivial = [item for item in assertions if item.tier == "trivial"]
-    domain_checks = [item for item in assertions if item.tier in ("spatial", "value")]
-    silent_invalid = (
-        bool(trivial)
-        and all(item.passed for item in trivial)
-        and any(not item.passed for item in domain_checks)
-    )
+    trivial = [item for item in assertions if item.tier == TIER_TRIVIAL]
+    domain_checks = [item for item in assertions if item.tier in (TIER_SPATIAL, TIER_VALUE)]
+    has_domain_failure = any(not item.passed for item in domain_checks)
+    if trivial:
+        deliverable_ok = all(item.passed for item in trivial) and deliverable_readable is not False
+    else:
+        deliverable_ok = deliverable_readable is True
+    silent_invalid = deliverable_ok and has_domain_failure
     return OutcomeMetrics(
         task_success=task_success,
         predicate_score=predicate_score,
@@ -153,12 +204,33 @@ class TrialMeasurement(BaseModel):
         economics: CostAndProcessMetrics | None = None,
     ) -> TrialMeasurement:
         """Build a TrialMeasurement DTO with OutcomeMetrics derived strictly from assertions."""
+        return cls.build(
+            key=key,
+            assertions=assertions,
+            determinism=determinism,
+            economics=economics,
+        )
+
+    @classmethod
+    def build(  # noqa: CC102
+        cls,
+        *,
+        key: TrialKey,
+        assertions: Sequence[AssertionResult],
+        deliverable_readable: bool | None = None,
+        determinism: DeterminismAudit | None = None,
+        economics: CostAndProcessMetrics | None = None,
+    ) -> TrialMeasurement:
+        """Build a TrialMeasurement DTO with optional explicit deliverable readability signal."""
         assertion_list = list(assertions)
+        outcomes = compute_outcome_metrics(
+            assertion_list, deliverable_readable=deliverable_readable
+        )
         return cls(
             trial_id=key.slug,
             key=key,
             assertions=assertion_list,
-            outcomes=compute_outcome_metrics(assertion_list),
+            outcomes=outcomes,
             determinism=determinism,
             economics=economics or CostAndProcessMetrics(),
         )
