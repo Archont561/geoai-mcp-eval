@@ -58,7 +58,7 @@ jobs:
         with:
           environment: default
       - name: Validate and pin (writes results/${{ github.run_id }}-${{ github.sha }}/env-pins.txt)
-        run: pixi run tools run experiment_preflight --run-id "$RUN_ID"
+        run: pixi run tools run experiment preflight
       - name: Upload preflight pins
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -91,7 +91,7 @@ jobs:
           key: ollama-${{ inputs.model }}-${{ hashFiles('pixi.lock') }}
           restore-keys: ollama-${{ inputs.model }}-
       - name: Pull and smoke the model
-        run: pixi run tools run experiment_model --model "$MODEL" --run-id "$RUN_ID"
+        run: pixi run tools run experiment model
       - name: Upload model records
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -156,7 +156,13 @@ jobs:
             llm-cache-${{ inputs.model }}-
             llm-cache-
       - name: Run cell
-        run: pixi run tools run experiment_run --arm ${{ matrix.arm }} --task-id ${{ matrix.task_id }} --repetition ${{ matrix.rep }} --stage ${{ inputs.stage }} --enforce ${{ inputs.enforce }} --model "$MODEL" --run-id "$RUN_ID"
+        env:
+          EXPERIMENT_ARM: ${{ matrix.arm }}
+          EXPERIMENT_TASK_ID: ${{ matrix.task_id }}
+          EXPERIMENT_REPETITION: ${{ matrix.rep }}
+          EXPERIMENT_STAGE: ${{ inputs.stage }}
+          EXPERIMENT_ENFORCE: ${{ inputs.enforce }}
+        run: pixi run tools run experiment run
       - name: Upload cell artefacts
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -190,7 +196,13 @@ jobs:
           merge-multiple: false
       - name: Harvest and check completeness
         if: inputs.stage != 'preflight'
-        run: pixi run tools run experiment_harvest --harvest-dir harvest --arms A --arms B --repetitions ${{ inputs.repetitions }} ${{ inputs.stage == 'smoke' && '--no-fail-on-missing --skip-oracle' || '' }} --run-id "$RUN_ID"
+        env:
+          EXPERIMENT_HARVEST_DIR: harvest
+          EXPERIMENT_ARMS: A,B
+          EXPERIMENT_REPETITIONS: ${{ inputs.repetitions }}
+          EXPERIMENT_FAIL_ON_MISSING: ${{ inputs.stage == 'smoke' && 'false' || 'true' }}
+          EXPERIMENT_SKIP_ORACLE: ${{ inputs.stage == 'smoke' && 'true' || 'false' }}
+        run: pixi run tools run experiment harvest
       - name: Upload merged results
         if: inputs.stage != 'preflight'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -224,7 +236,9 @@ jobs:
           path: harvest
           merge-multiple: false
       - name: Render step summary
-        run: pixi run tools run experiment_summary --harvest-dir harvest --run-id "$RUN_ID"
+        env:
+          EXPERIMENT_HARVEST_DIR: harvest
+        run: pixi run tools run experiment summary
       - name: Upload summary
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

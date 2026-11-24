@@ -11,34 +11,37 @@ Lint GitHub Actions workflows with actionlint.
 ### `pixi run tools run alint` (`alint`)
 Check repository layout and policy with alint.
 
+### `pixi run tools run architecture` (`architecture`)
+Verify the layer boundaries with import-linter.
+- Marks: lint
+
 ### `pixi run tools run check` (`check`)
 Run the offline-friendly repository quality gate.
-- Depends: alint, lint, test, md
+- Depends: alint, lint, architecture, test, md
 
-### `pixi run tools run experiment_harvest` (`experiment_harvest`)
-Merge cell outputs, re-run the oracle gate, list any missing runs.
+### `pixi run tools run experiment backend-check` (`experiment.backend-check`)
+Verify remote-ollama SSH tunnel, poll /v1/models digest, and run one tiny completion.
+- Marks: workflow
+
+### `pixi run tools run experiment harvest` (`experiment.harvest`)
+Merge cell outputs, re-run the oracle gate, and assert completeness.
 - Marks: ci, workflow
-- Options: --harvest-dir &lt;Path&gt;, --arms &lt;list[&#39;A&#39;|&#39;B&#39;]&gt;, --repetitions &lt;int&gt;, --fail-on-missing &lt;bool&gt;, --skip-oracle &lt;bool&gt;, --run-id &lt;str&gt;
 
-### `pixi run tools run experiment_model` (`experiment_model`)
+### `pixi run tools run experiment model` (`experiment.model`)
 Start Ollama, pull the pinned model, and record its digest.
 - Marks: ci, workflow, setup
-- Options: --model &lt;str&gt;, --run-id &lt;str&gt;
 
-### `pixi run tools run experiment_preflight` (`experiment_preflight`)
+### `pixi run tools run experiment preflight` (`experiment.preflight`)
 Validate the pilot task suite and pin the run environment.
 - Marks: ci, workflow
-- Options: --run-id &lt;str&gt;
 
-### `pixi run tools run experiment_run` (`experiment_run`)
+### `pixi run tools run experiment run` (`experiment.run`)
 Run one experiment cell (arm, task, repetition).
 - Marks: ci, workflow
-- Options: --arm &lt;&#39;A&#39;|&#39;B&#39;&gt;, --task-id &lt;str&gt;, --repetition &lt;int&gt;, --stage &lt;&#39;smoke&#39;|&#39;pilot&#39;&gt;, --enforce &lt;&#39;N1&#39;|&#39;N2&#39;|&#39;N3&#39;|&#39;N4&#39;&gt;, --model &lt;str&gt;, --run-id &lt;str&gt;
 
-### `pixi run tools run experiment_summary` (`experiment_summary`)
+### `pixi run tools run experiment summary` (`experiment.summary`)
 Write the experiment step summary (artifacts, pins, completeness).
 - Marks: ci, workflow
-- Options: --harvest-dir &lt;Path&gt;, --run-id &lt;str&gt;
 
 ### `pixi run tools run fmt` (`fmt`)
 Apply ruff autofixes and formatting (modifies files).

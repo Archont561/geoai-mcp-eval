@@ -1,4 +1,4 @@
-"""Render the run digest: pins, completeness, oracle verdicts, artifact locations."""
+"""Render the Markdown digest for an experiment workflow run."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
-from tasknest import ToolContext, tool
+from experiment.services.workflow import find_repo_root
 
 
 def _find_one(root: Path, name: str) -> Path | None:
@@ -27,7 +27,7 @@ def _pins(root: Path) -> dict[str, str]:
     return pins
 
 
-def _summary_payload(harvest: Path) -> dict:
+def _summary_payload(harvest: Path) -> dict[str, object]:
     path = _find_one(harvest, "summary.json")
     if path is None:
         return {}
@@ -38,10 +38,10 @@ def _summary_payload(harvest: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _oracle_rows(payload: dict) -> list[tuple[str, str]]:
+def _oracle_rows(payload: dict[str, object]) -> list[tuple[str, str]]:
     oracle = payload.get("oracle")
     rows = oracle if isinstance(oracle, dict) else {}
-    return sorted(rows.items())
+    return sorted((str(k), str(v)) for k, v in rows.items())
 
 
 def _run_id(run_id: str) -> str:
@@ -87,11 +87,6 @@ def _artifact_lines(run_url: str, rid: str) -> list[str]:
     ]
 
 
-def _completeness_label(complete: object) -> str:
-    # Missing or falsy `complete` is conservatively reported as INCOMPLETE.
-    return "complete" if complete else "INCOMPLETE"
-
-
 def _oracle_table_lines(oracle_rows: list[tuple[str, str]]) -> list[str]:
     lines = ["### Oracle verdicts", "", "| Cell | Gate |", "|---|---|"]
     if oracle_rows:
@@ -101,7 +96,9 @@ def _oracle_table_lines(oracle_rows: list[tuple[str, str]]) -> list[str]:
     return lines
 
 
-def _what_happened_lines(completeness: dict, oracle_rows: list[tuple[str, str]]) -> list[str]:
+def _what_happened_lines(
+    completeness: dict[str, object], oracle_rows: list[tuple[str, str]]
+) -> list[str]:
     lines = ["## What happened", ""]
     if not completeness:
         lines.append(
@@ -110,14 +107,14 @@ def _what_happened_lines(completeness: dict, oracle_rows: list[tuple[str, str]])
             "the pipeline end-to-end."
         )
         return lines
-    missing = list(completeness.get("missing", []))
-    logged = list(completeness.get("logged_cells", []))
-    expected = list(completeness.get("expected_cells", []))
-    complete = bool(completeness.get("complete"))
+    missing = list(completeness.get("missing", []))  # type: ignore[arg-type]
+    logged = list(completeness.get("logged_cells", []))  # type: ignore[arg-type]
+    expected = list(completeness.get("expected_cells", []))  # type: ignore[arg-type]
+    label = "complete" if completeness.get("complete") else "INCOMPLETE"
     lines += [
         f"- Expected cells: {len(expected)}",
         f"- Logged cells (manifest.json lines): {len(logged)}",
-        f"- Completeness: {_completeness_label(complete)}",
+        f"- Completeness: {label}",
         "",
     ]
     if missing:
@@ -128,6 +125,15 @@ def _what_happened_lines(completeness: dict, oracle_rows: list[tuple[str, str]])
     return lines
 
 
+def _smoke_line(model_smoke: Path) -> str:
+    try:
+        payload = json.loads(model_smoke.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return "- Smoke completion: unreadable"
+    response = payload.get("response", "") if isinstance(payload, dict) else ""
+    return f"- Smoke completion: `{str(response).strip()[:80]}`"
+
+
 def _model_lines(harvest: Path) -> list[str]:
     digest = _find_one(harvest, "model-digest.txt")
     model_smoke = _find_one(harvest, "model-smoke.json")
@@ -135,24 +141,23 @@ def _model_lines(harvest: Path) -> list[str]:
         return []
     lines = ["", "## Model", ""]
     if digest:
-        lines += [f"- Pin: `{digest.read_text(encoding='utf-8').strip()}`"]
+        lines.append(f"- Pin: `{digest.read_text(encoding='utf-8').strip()}`")
     if model_smoke:
         lines.append(_smoke_line(model_smoke))
     return lines
 
 
-def _smoke_line(model_smoke: Path) -> str:
-    try:
-        payload = json.loads(model_smoke.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return "- Smoke completion: unreadable"
-    response = payload.get("response", "") if isinstance(payload, dict) else ""
-    snippet = str(response).strip()[:80]
-    return f"- Smoke completion: `{snippet}`"
-
-
-def _footer_lines() -> list[str]:
-    return [
+def render_summary(harvest_dir: Path = Path("harvest"), run_id: str = "") -> str:
+    """Write ``<harvest_dir>/summary.md`` (and append to ``$GITHUB_STEP_SUMMARY`` if set)."""
+    repo_root = find_repo_root()
+    harvest = harvest_dir if harvest_dir.is_absolute() else (repo_root / harvest_dir)
+    rid = _run_id(run_id)
+    payload = _summary_payload(harvest)
+    lines = _header_lines(rid, _pins(harvest))
+    lines += _artifact_lines(_run_url(), rid)
+    lines += _what_happened_lines(payload, _oracle_rows(payload))
+    lines += _model_lines(harvest)
+    lines += [
         "",
         "## Next steps",
         "",
@@ -162,30 +167,11 @@ def _footer_lines() -> list[str]:
         f"_(generated {datetime.now(UTC).isoformat()})_",
         "",
     ]
-
-
-@tool(
-    description="Write the experiment step summary (artifacts, pins, completeness).",
-    marks=["ci", "workflow"],
-)
-def experiment_summary(
-    ctx: ToolContext,
-    harvest_dir: Path = Path("harvest"),
-    run_id: str = "",
-) -> None:
-    """Write the experiment step summary (artifacts, pins, completeness)."""
-    harvest = (ctx.repo_root / harvest_dir) if not harvest_dir.is_absolute() else harvest_dir
-    rid = _run_id(run_id)
-    payload = _summary_payload(harvest)
-    lines = _header_lines(rid, _pins(harvest))
-    lines += _artifact_lines(_run_url(), rid)
-    lines += _what_happened_lines(payload, _oracle_rows(payload))
-    lines += _model_lines(harvest)
-    lines += _footer_lines()
     markdown = "\n".join(lines)
     summary_target = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary_target:
         with open(summary_target, "a", encoding="utf-8") as handle:
             handle.write(markdown)
+    harvest.mkdir(parents=True, exist_ok=True)
     (harvest / "summary.md").write_text(markdown, encoding="utf-8")
-    print(markdown)
+    return markdown

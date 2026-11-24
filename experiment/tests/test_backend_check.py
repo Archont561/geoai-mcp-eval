@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -286,17 +285,15 @@ def test_completion_rejected_on_empty_choices(tmp_path: Path) -> None:
     assert exc_info.value.exit_code == EXIT_COMPLETION_REJECTED
 
 
-def test_tasknest_tool_wrapper_prints_ready_and_propagates_exit_code(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_cli_backend_check_prints_ready_and_propagates_exit_code(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    tool_path = Path(__file__).resolve().parents[2] / "tools" / "experiment_backend_check.py"
-    spec = importlib.util.spec_from_file_location("experiment_backend_check", tool_path)
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    from typer.testing import CliRunner
 
+    from experiment.cli import app
     from experiment.services import backend_check
 
+    cli_runner = CliRunner()
     monkeypatch.setattr(
         backend_check,
         "run_backend_check",
@@ -308,18 +305,16 @@ def test_tasknest_tool_wrapper_prints_ready_and_propagates_exit_code(
             base_url="http://127.0.0.1:11435/v1",
         ),
     )
-    ctx = SimpleNamespace(repo_root=Path(__file__).resolve().parents[2])
-    mod.experiment_backend_check(ctx, ssh_host="gpu-box")
-    out = capsys.readouterr().out
-    assert "READY" in out and "sha256:pinned123" in out
+    ok = cli_runner.invoke(app, ["workflow", "backend-check", "--ssh-host", "gpu-box"])
+    assert ok.exit_code == 0, ok.output
+    assert "READY" in ok.output and "sha256:pinned123" in ok.output
 
     def boom(_cfg: Any) -> Any:
         raise BackendCheckError("tunnel-dead", EXIT_TUNNEL_DEAD, "socket closed", "restart ssh")
 
     monkeypatch.setattr(backend_check, "run_backend_check", boom)
-    with pytest.raises(SystemExit) as sysexit:
-        mod.experiment_backend_check(ctx, ssh_host="gpu-box")
-    assert sysexit.value.code == EXIT_TUNNEL_DEAD
+    err = cli_runner.invoke(app, ["workflow", "backend-check", "--ssh-host", "gpu-box"])
+    assert err.exit_code == EXIT_TUNNEL_DEAD
 
 
 def test_backend_check_edge_errors(tmp_path: Path) -> None:
