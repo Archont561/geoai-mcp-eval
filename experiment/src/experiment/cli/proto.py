@@ -13,6 +13,7 @@ from rich.table import Table
 from rich.text import Text
 
 from experiment import backends, gis_ops, mcp_client, prototype
+from experiment.adapters.task_repository import discover_task_files, load_task
 from experiment.harness import (
     ARM_PREFIX,
     DRIVERS,
@@ -231,7 +232,7 @@ def _print_score_table(summary: dict) -> None:
 
 
 def _task_paths_by_id() -> dict[str, Path]:
-    return {prototype.load_task(p)["id"]: p for p in prototype.discover_tasks(TASK_ROOT)}
+    return {load_task(path).id: path for path in discover_task_files(TASK_ROOT)}
 
 
 def _rescore_cell(task_path: Path, cell: Path) -> dict:

@@ -14,9 +14,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from experiment import drivers, oracle, scripted
+from experiment.adapters.task_repository import discover_task_files, load_task
+from experiment.domain.task import Task
 from experiment.harness import (
     _K_CONTENT,
     _K_ROLE,
@@ -41,15 +41,8 @@ __all__ = [
 
 
 def discover_tasks(root: Path) -> list[Path]:
-    """Return the committed task YAML paths (excludes schema-v1.json)."""
-    return sorted(p for p in root.glob("*.yaml") if p.is_file())
-
-
-def load_task(path: Path) -> dict[str, Any]:
-    task = yaml.safe_load(path.read_text(encoding=UTF8))
-    if not isinstance(task, dict) or "id" not in task:
-        raise ValueError(f"{path} is not a task YAML")
-    return task
+    """The committed task YAML paths (excludes schema-v1.json)."""
+    return discover_task_files(root)
 
 
 def score_cell(task_path: Path, cell: Path) -> dict[str, Any]:
@@ -81,7 +74,7 @@ def run_cell(req: CellRequest) -> dict[str, Any]:
     score = score_cell(req.task_path, req.cell)
     meta = {
         "run_id": req.run_id,
-        "task": req.task["id"],
+        "task": req.task.id,
         "arm": req.arm,
         "driver": req.driver,
         "model": model_label(req.driver, req.model),
@@ -98,19 +91,19 @@ def run_cell(req: CellRequest) -> dict[str, Any]:
 
 
 def _run_one_cell(
-    task_path: Path, task: dict[str, Any], arm: str, spec: RunSpec, output_root: Path
+    task_path: Path, task: Task, arm: str, spec: RunSpec, output_root: Path
 ) -> dict[str, Any]:
-    cell = cell_dir(output_root, task["id"], arm)
+    cell = cell_dir(output_root, task.id, arm)
     append_transcript(
         cell,
         {
             _K_ROLE: "meta",
-            "task": task["id"],
+            "task": task.id,
             "arm": arm,
             "driver": spec.driver,
             "model": model_label(spec.driver, spec.model),
             "prototype": True,
-            "required_traps": task.get("required_traps", []),
+            "required_traps": list(task.required_traps),
         },
     )
     req = CellRequest(
@@ -148,7 +141,7 @@ def run_experiment(task_root: Path, spec: RunSpec, output_root: Path) -> dict[st
     cells: list[dict[str, Any]] = []
     for task_path in discover_tasks(task_root):
         task = load_task(task_path)
-        if spec.task_ids and task["id"] not in spec.task_ids:
+        if spec.task_ids and task.id not in spec.task_ids:
             continue
         cells.extend(_run_one_cell(task_path, task, arm, spec, output_root) for arm in spec.arms)
     return _write_summary(output_root, spec, cells)

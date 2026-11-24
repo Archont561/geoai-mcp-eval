@@ -135,9 +135,9 @@ def scripted_arm_a(req: CellRequest) -> None:
     """Canned plan: call the real MCP server for every step."""
     fixture = fixture_fc(req.task_path, req.task)
     log = _CallLog(req.cell)
-    plan = _SCRIPTED_ARM_A_PLANS.get(req.task["id"])
+    plan = _SCRIPTED_ARM_A_PLANS.get(req.task.id)
     if plan is None:
-        raise ValueError(f"no scripted plan for task {req.task['id']}")
+        raise ValueError(f"no scripted plan for task {req.task.id}")
     plan(_PlanContext(req=req, fixture=fixture, log=log))
     append_transcript(
         req.cell,
@@ -229,9 +229,9 @@ def _record_tool_result(cell: Path, completed) -> None:
 def scripted_arm_b(req: CellRequest) -> None:
     """Canned plan: write fixture as input.geojson, run canned code, capture stdout."""
     task, task_path, cell = req.task, req.task_path, req.cell
-    code = _ARM_B_CODE.get(task["id"])
+    code = _ARM_B_CODE.get(task.id)
     if code is None:
-        raise ValueError(f"no scripted plan for task {task['id']}")
+        raise ValueError(f"no scripted plan for task {task.id}")
     fixture_bytes = fixture_path(task_path, task).read_bytes()
     (cell / "input.geojson").write_bytes(fixture_bytes)
     append_transcript(

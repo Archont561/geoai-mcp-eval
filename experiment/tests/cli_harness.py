@@ -40,50 +40,86 @@ def suite(tmp_path: Path) -> dict[str, Any]:
     return {"root": root, "path": str(root)}
 
 
+# The predicate matrix scenario only cares about two fields per task, but a task
+# document is validated on load, so the fixtures below are complete tasks. Keep
+# this in step with experiment/tasks/schema-v1.json.
+_TASK_CONTEXT: dict[str, Any] = {
+    "schema_version": 1,
+    "title": "fixture task",
+    "prompt": "fixture prompt",
+    "family": "A",
+    "difficulty_rubric": {
+        "tier": 2,
+        "n_tools_human": 1,
+        "n_steps_human": 1,
+        "expressible": "medium",
+    },
+    "provenance": {
+        "source": "constructed",
+        "source_url": "https://example.invalid",
+        "source_file": "fixture.geojson",
+        "source_commit": "0" * 40,
+        "license": "CC0",
+        "contamination": "constructed",
+    },
+    "fixtures": {"input": "fixtures/fixture.geojson"},
+    "human_baseline": {
+        "status": "pending",
+        "artifact_dir": "baselines/fixture",
+        "produced_with": None,
+        "human_time_min": None,
+        "human_steps": None,
+        "human_tools": [],
+    },
+    "budget_bounds": {"max_tool_calls": 10, "max_wall_s": 60},
+    "runs": 2,
+    "required_traps": [],
+}
+
+
+def _task_document(task_id: str, assertions: list[dict[str, Any]]) -> dict[str, Any]:
+    """A complete task document carrying just these assertions."""
+    return {
+        **_TASK_CONTEXT,
+        "id": task_id,
+        "oracle": {"determinism_runs": 3, "assertions": assertions},
+    }
+
+
 @pytest.fixture()
 def results(tmp_path: Path) -> dict[str, Any]:
     """A results directory with a task suite and one scored run per arm."""
     tasks = tmp_path / "tasks"
     tasks.mkdir()
-    (tasks / "analysis-de9im-001.yaml").write_text(
-        yaml.safe_dump(
-            {
-                "id": "analysis-de9im-001",
-                "oracle": {
-                    "assertions": [
-                        {
-                            "id": "shared-boundary-relation",
-                            "type": "de9im_relation",
-                            "predicate": "touches",
-                        }
-                    ]
-                },
-            }
+    documents = {
+        "analysis-de9im-001.yaml": _task_document(
+            "analysis-de9im-001",
+            [
+                {
+                    "id": "shared-boundary-relation",
+                    "type": "de9im_relation",
+                    "predicate": "touches",
+                }
+            ],
         ),
-        encoding=UTF8,
-    )
-    (tasks / "prep-axis-order-001.yaml").write_text(
-        yaml.safe_dump(
-            {
-                "id": "prep-axis-order-001",
-                "oracle": {
-                    "assertions": [
-                        {
-                            "id": "single-output-feature",
-                            "type": "geojson_feature_count",
-                            "predicate": "feature_count",
-                        },
-                        {
-                            "id": "representative-point-axis-order",
-                            "type": "representative_point_matches",
-                            "predicate": "point_axis_order",
-                        },
-                    ]
+        "prep-axis-order-001.yaml": _task_document(
+            "prep-axis-order-001",
+            [
+                {
+                    "id": "single-output-feature",
+                    "type": "geojson_feature_count",
+                    "predicate": "feature_count",
                 },
-            }
+                {
+                    "id": "representative-point-axis-order",
+                    "type": "representative_point_matches",
+                    "predicate": "point_axis_order",
+                },
+            ],
         ),
-        encoding=UTF8,
-    )
+    }
+    for name, document in documents.items():
+        (tasks / name).write_text(yaml.safe_dump(document), encoding=UTF8)
     return {"dir": tmp_path / "results", "tasks": tasks, "cells": []}
 
 

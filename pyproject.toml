@@ -39,7 +39,15 @@ source_modules = ["experiment.domain"]
 forbidden_modules = [
   "typer", "rich", "requests", "yaml", "jsonschema", "mcp", "subprocess",
   "pathlib", "tomllib", "os",
-  "experiment.cli", "experiment.oracle", "experiment.gis_ops",
+  "experiment.adapters", "experiment.cli", "experiment.oracle", "experiment.gis_ops",
+]
+
+[[tool.importlinter.contracts]]
+name = "Adapters are the only layer that reads or writes files"
+type = "forbidden"
+source_modules = ["experiment.adapters"]
+forbidden_modules = [
+  "experiment.cli", "experiment.oracle",
 ]
 
 [[tool.importlinter.contracts]]

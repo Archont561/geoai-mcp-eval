@@ -6,8 +6,9 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
 from shapely.geometry import shape
+
+from experiment.adapters.task_repository import load_task as _load_task
 
 from ._base import AssertionResult, OracleVerdict, geojson_features, read_json, safe_path
 from ._jenks import jenks_assignments
@@ -246,11 +247,9 @@ def evaluate_task(task_path: Path, artifact_root: Path) -> OracleVerdict:
     """Evaluate every assertion for a task against one fixed artifact directory."""
     task_path = task_path.resolve()
     task_root = task_path.parent
-    task = yaml.safe_load(task_path.read_text(encoding="utf-8"))
-    if not isinstance(task, dict):
-        raise ValueError("task YAML must contain a mapping")
+    task = _load_task(task_path)
     checks: list[AssertionResult] = []
-    for assertion in task.get("oracle", {}).get("assertions", []):
+    for assertion in task.oracle.assertions:
         assertion_id = str(assertion.get("id", "<unnamed>"))
         try:
             checks.append(_evaluate_assertion(assertion, task_root, artifact_root))
