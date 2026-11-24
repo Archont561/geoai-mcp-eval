@@ -1,7 +1,7 @@
 ---
 id: GEO-017
 title: Wire oracle, economics extraction, and human reference into TrialMeasurement DTO
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-24T00:00:00Z'
 labels:
@@ -29,11 +29,11 @@ Close the measurement gaps between the frozen study specification and the curren
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Scoring a trial produces a validated `TrialMeasurement` DTO with `task_success`, `predicate_score`, `silent_invalid`, assertion tiers/predicates, and extracted transcript metrics (`tool_calls`, `repair_turns`, `wall_seconds`, nullable `TokenUsage`).
-- [ ] #2 The 3-pass oracle determinism gate populates a typed `DeterminismAudit` inside `TrialMeasurement` rather than an opaque status string.
-- [ ] #3 `silent_invalid` accurately distinguishes missing/unreadable outputs from executable-but-invalid geospatial outputs (trivial pass + spatial/value fail).
-- [ ] #4 Human reference records from `experiment-qgis-plugin` convert cleanly into `TrialMeasurement` DTOs with `paradigm="human_gui"` using the same oracle verdicts.
-- [ ] #5 Unit tests cover all metric edge cases (partial token reporting, empty transcript, silent-invalid boundary, human-reference conversion).
+- [x] #1 Scoring a trial produces a validated `TrialMeasurement` DTO with `task_success`, `predicate_score`, `silent_invalid`, assertion tiers/predicates, and extracted transcript metrics (`tool_calls`, `repair_turns`, `wall_seconds`, nullable `TokenUsage`).
+- [x] #2 The 3-pass oracle determinism gate populates a typed `DeterminismAudit` inside `TrialMeasurement` rather than an opaque status string.
+- [x] #3 `silent_invalid` accurately distinguishes missing/unreadable outputs from executable-but-invalid geospatial outputs (trivial pass + spatial/value fail).
+- [x] #4 Human reference records from `experiment-qgis-plugin` convert cleanly into `TrialMeasurement` DTOs with `paradigm="human_gui"` using the same oracle verdicts.
+- [x] #5 Unit tests cover all metric edge cases (partial token reporting, empty transcript, silent-invalid boundary, human-reference conversion).
 <!-- AC:END -->
 
 ## Implementation Plan

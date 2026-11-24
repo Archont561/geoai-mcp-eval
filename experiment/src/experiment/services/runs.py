@@ -17,6 +17,7 @@ from experiment import backends, drivers, scripted
 from experiment.adapters import run_store
 from experiment.adapters.task_repository import discover_task_files, load_task
 from experiment.domain.cache_key import CacheStats
+from experiment.domain.run import TrialKey, arm_to_paradigm
 from experiment.domain.task import Task
 from experiment.domain.usage import (
     TokenCapExceededError,
@@ -33,6 +34,7 @@ from experiment.harness import (
     cell_dir,
     model_label,
 )
+from experiment.services.measurement import TrialMeasurementOptions, measure_trial
 from experiment.services.scoring import score_cell
 
 
@@ -170,6 +172,17 @@ def _build_cell_meta(
     }
 
 
+def _trial_key_for_cell(req: CellRequest) -> TrialKey:
+    paradigm = arm_to_paradigm(req.arm)
+    enforcement = "semantic_repair" if paradigm == "typed_mcp" else "none"
+    return TrialKey(
+        task_id=req.task.id,
+        paradigm=paradigm,
+        enforcement_level=enforcement,
+        repetition=1,
+    )
+
+
 def run_cell(req: CellRequest) -> dict[str, Any]:
     accumulator = req.usage or UsageAccumulator(max_cell_tokens=req.max_cell_tokens)
     active_req = replace(req, usage=accumulator, cache_stats=req.cache_stats or CacheStats())
@@ -181,8 +194,20 @@ def run_cell(req: CellRequest) -> dict[str, Any]:
     )
     score = score_cell(active_req.task_path, active_req.cell)
     meta = _build_cell_meta(active_req, outcome, score, usage_summary)
-    run_store.write_json(active_req.cell / "score.json", {**score, "meta": meta})
-    return {**meta, "checks": score["checks"]}
+    measurement = measure_trial(
+        active_req.task_path,
+        active_req.cell,
+        key=_trial_key_for_cell(active_req),
+        options=TrialMeasurementOptions(
+            wall_seconds=outcome.wall_s,
+            token_usage=accumulator.to_token_usage(),
+        ),
+    )
+    run_store.write_json(
+        active_req.cell / "score.json",
+        {**score, "meta": meta, "measurement": measurement.model_dump(mode="json")},
+    )
+    return {**meta, "checks": score["checks"], "measurement": measurement.model_dump(mode="json")}
 
 
 def _resolve_run_digest(spec: RunSpec) -> str | None:
