@@ -1,7 +1,7 @@
 ---
 id: GEO-012
 title: Flat binary predicate matrix on real results
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-22T00:00:00Z'
 labels: []
@@ -18,9 +18,9 @@ Validate `experiment analyze flatten` against a complete scored results director
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Flatten runs on the full pilot results dir and prints the expected matrix shape.
-- [ ] #2 Every predicate column maps 1:1 to task-suite assertions (no missing mappings, no orphans).
-- [ ] #3 Missing checks score 0; unknown assertions fail loudly.
+- [x] #1 Flatten runs on the full pilot results dir and prints the expected matrix shape.
+- [x] #2 Every predicate column maps 1:1 to task-suite assertions (no missing mappings, no orphans).
+- [x] #3 Missing checks score 0; unknown assertions fail loudly.
 <!-- AC:END -->
 
 ## Implementation Plan

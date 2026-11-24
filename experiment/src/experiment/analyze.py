@@ -22,19 +22,33 @@ KEY_COLUMNS = ("run_id", "task", "arm", "driver", "model")
 
 
 def load_predicates(tasks_root: Path) -> dict[str, str]:
-    """Map assertion id -> predicate slug across the task suite.
+    """Map assertion id -> predicate slug 1:1 across the task suite.
 
-    The task shape is the repository's business; this only reads the two fields
-    it needs. A suite holding an unloadable task raises rather than silently
-    omitting its predicates -- a missing predicate mapping scores a passing
-    check as zero, which is a wrong result, not a missing one.
+    Every assertion in the suite must declare a unique, non-empty ``predicate``
+    slug, and no two assertions may share the same slug. Failing loudly here
+    prevents silent zero-scoring or collapsed columns in downstream analysis.
     """
     mapping: dict[str, str] = {}
+    by_predicate: dict[str, str] = {}
     for task in load_suite(tasks_root):
         for assertion in task.oracle.assertions:
-            assertion_id, predicate = assertion.get("id"), assertion.get("predicate")
-            if isinstance(assertion_id, str) and isinstance(predicate, str):
-                mapping[assertion_id] = predicate
+            assertion_id = assertion.get("id")
+            predicate = assertion.get("predicate")
+            if not isinstance(assertion_id, str) or not assertion_id.strip():
+                raise ValueError(f"{task.id}: oracle assertion is missing a valid id")
+            if not isinstance(predicate, str) or not predicate.strip():
+                raise ValueError(
+                    f"{task.id}: assertion {assertion_id!r} is missing a predicate mapping"
+                )
+            if assertion_id in mapping:
+                raise ValueError(f"duplicate assertion id {assertion_id!r} across task suite")
+            if predicate in by_predicate:
+                prev = by_predicate[predicate]
+                raise ValueError(
+                    f"predicate {predicate!r} is not 1:1 (mapped by {prev!r} and {assertion_id!r})"
+                )
+            mapping[assertion_id] = predicate
+            by_predicate[predicate] = assertion_id
     return mapping
 
 

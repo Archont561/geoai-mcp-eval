@@ -20,7 +20,7 @@ embedded matrix from real run output, see the regeneration notes below.
 
 ## Cell 1 — Inputs: the flat binary predicate matrix snapshot
 
-**Intent.** The matrix. One row per cell (run × task), one 0/1 column per named predicate, columns sorted (`feature_count`, `natural_breaks`, `point_axis_order`, `touches`). Predicate names come from the `predicate` key of each oracle assertion in the task YAMLs—the single source of truth. Missing or failed assertions score 0 (strict WSZ semantics; never impute, never NaN). The rows printed here are the illustration described above; `results/` in the repository currently holds no `score.json` files.
+**Intent.** The matrix. One row per cell (run × task), one 0/1 column per named predicate, columns sorted (`feature_count`, `natural_breaks`, `point_axis_order`, `touches`). Predicate names come 1:1 from the `predicate` key of each oracle assertion in the task YAMLs—the single source of truth. Missing or failed assertions score 0 (strict WSZ semantics; never impute, never NaN). **Cross-task zero semantics:** cells also score `0` for predicates belonging to *other* tasks, so always filter by `task` (or restrict to `TASK_PREDICATES[task]`) before averaging predicate pass rates, WSZ, or OQS. The rows printed here are the illustration described above; `results/` in the repository currently holds no `score.json` files.
 
 ```{marimo} python
 import json

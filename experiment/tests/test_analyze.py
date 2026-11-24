@@ -115,3 +115,91 @@ def test_real_suite_predicates_unique_and_present() -> None:
         "representative-point-axis-order": "point_axis_order",
         "natural-breaks-assignments": "natural_breaks",
     }
+    assert len(mapping) == len(set(mapping.values()))
+
+
+def test_load_predicates_rejects_missing_predicate_key(tmp_path: Path) -> None:
+    tasks = tmp_path / "tasks"
+    tasks.mkdir()
+    doc = {
+        **_CONTEXT,
+        "id": "missing-pred-001",
+        "oracle": {
+            "determinism_runs": 3,
+            "assertions": [{"id": "unmapped-assertion", "type": "de9im_relation"}],
+        },
+    }
+    (tasks / "missing-pred-001.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+    with pytest.raises(ValueError, match="missing a predicate"):
+        analyze.load_predicates(tasks)
+
+
+def test_load_predicates_rejects_duplicate_predicate_slug(tmp_path: Path) -> None:
+    tasks = tmp_path / "tasks"
+    tasks.mkdir()
+    doc = {
+        **_CONTEXT,
+        "id": "dup-pred-001",
+        "oracle": {
+            "determinism_runs": 3,
+            "assertions": [
+                {"id": "first-check", "type": "de9im_relation", "predicate": "touches"},
+                {"id": "second-check", "type": "de9im_relation", "predicate": "touches"},
+            ],
+        },
+    }
+    (tasks / "dup-pred-001.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
+    with pytest.raises(ValueError, match="1:1"):
+        analyze.load_predicates(tasks)
+
+
+def test_flatten_full_pilot_results_matrix_shape_mapping_and_cross_task_zeros(
+    tmp_path: Path,
+) -> None:
+    import json
+
+    from experiment.services import runs
+
+    repo = Path(__file__).resolve().parents[2]
+    tasks_root = repo / "experiment" / "tasks"
+    out_dir = tmp_path / "pilot-run"
+    spec = runs.parse_run_spec("scripted", None, None, "both", "all", "local")
+    runs.run_experiment(tasks_root, spec, out_dir)
+
+    df = analyze.flatten(out_dir, tasks_root)
+    assert df.shape == (6, 9)
+    assert list(df.columns) == [
+        "run_id",
+        "task",
+        "arm",
+        "driver",
+        "model",
+        "feature_count",
+        "natural_breaks",
+        "point_axis_order",
+        "touches",
+    ]
+    # Every assertion emitted by the pilot maps 1:1 to the suite predicates (no missing, no orphans)
+    emitted: set[str] = set()
+    for score_file in out_dir.rglob("score.json"):
+        data = json.loads(score_file.read_text(encoding="utf-8"))
+        emitted.update(c["assertion_id"] for c in data["checks"])
+    mapping = analyze.load_predicates(tasks_root)
+    assert emitted == set(mapping.keys())
+    assert len(mapping) == len(set(mapping.values()))
+
+    # Cross-task zero semantics: cells score 1 on their own predicates and 0 on other tasks'
+    de9im = df[df["task"] == "analysis-de9im-001"]
+    assert list(de9im["touches"]) == [1, 1]
+    assert list(de9im["natural_breaks"]) == [0, 0]
+    assert list(de9im["feature_count"]) == [0, 0]
+    assert list(de9im["point_axis_order"]) == [0, 0]
+
+    jenks = df[df["task"] == "cartography-jenks-001"]
+    assert list(jenks["natural_breaks"]) == [1, 1]
+    assert list(jenks["touches"]) == [0, 0]
+
+    axis = df[df["task"] == "prep-axis-order-001"]
+    assert list(axis["feature_count"]) == [1, 1]
+    assert list(axis["point_axis_order"]) == [1, 1]
+    assert list(axis["touches"]) == [0, 0]
