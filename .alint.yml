@@ -169,6 +169,37 @@ rules:
     level: error
     message: "CI must validate the pilot task suite through the experiment CLI."
 
+  # Layer boundaries are only enforced if CI runs the check. The contracts lived in
+  # pyproject.toml and `tools check` ran them, but no workflow invoked that tool, so
+  # CI stayed green while a forbidden import shipped. These rules make the step's
+  # absence a policy failure rather than something a reviewer has to remember.
+  - id: ci-verifies-architecture-contracts
+    kind: file_content_matches
+    paths: .github/workflows/ci.yml
+    pattern: "(?m)^        run: pixi run tools run architecture$"
+    level: error
+    message: "CI must verify the import contracts; a boundary no pipeline checks is not a boundary."
+
+  - id: require-architecture-tool
+    kind: file_exists
+    paths: tools/architecture.py
+    level: error
+    message: "The architecture check tool must exist for CI to invoke it."
+
+  - id: architecture-runs-import-linter
+    kind: file_content_matches
+    paths: tools/architecture.py
+    pattern: "lint-imports"
+    level: error
+    message: "The architecture tool must actually run import-linter."
+
+  - id: require-importlinter-contracts
+    kind: file_content_matches
+    paths: pyproject.toml
+    pattern: "(?m)^\\[\\[tool\\.importlinter\\.contracts\\]\\]"
+    level: error
+    message: "pyproject.toml must declare at least one import-linter contract for the architecture check to verify."
+
   - id: lint-runs-rude
     kind: file_content_matches
     paths: tools/lint.py
