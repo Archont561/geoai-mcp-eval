@@ -59,14 +59,14 @@ jobs:
           environment: default
       - name: Validate and pin (writes results/${{ github.run_id }}-${{ github.sha }}/env-pins.txt)
         run: pixi run tools run experiment preflight
-      - name: Upload preflight pins
+      - name: Upload preflight pins (handoff)
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: experiment-preflight-pins
           path: results/${{ github.run_id }}-${{ github.sha }}/env-pins.txt
           if-no-files-found: error
-          retention-days: ${{ inputs.retention-days }}
+          retention-days: 1
 
   model:
     name: Ollama — cache, pull, pin ${{ inputs.model }}
@@ -92,7 +92,7 @@ jobs:
           restore-keys: ollama-${{ inputs.model }}-
       - name: Pull and smoke the model
         run: pixi run tools run experiment model
-      - name: Upload model records
+      - name: Upload model records (handoff)
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -102,7 +102,7 @@ jobs:
             results/${{ github.run_id }}-${{ github.sha }}/model-smoke.json
             results/${{ github.run_id }}-${{ github.sha }}/ollama-serve.log
           if-no-files-found: ignore
-          retention-days: ${{ inputs.retention-days }}
+          retention-days: 1
 
   run:
     name: Cell ${{ matrix.arm }} · ${{ matrix.task_id }} · rep ${{ matrix.rep }}
@@ -164,21 +164,24 @@ jobs:
           EXPERIMENT_ENFORCE: ${{ inputs.enforce }}
           EXPERIMENT_USE_LLM_CACHE: ${{ inputs.use-llm-cache }}
         run: pixi run tools run experiment run
-      - name: Upload cell artefacts
+      - name: Upload cell artefacts (handoff)
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: experiment-${{ matrix.arm }}-${{ matrix.task_id }}-rep${{ matrix.rep }}
           path: results/${{ github.run_id }}-${{ github.sha }}/${{ matrix.task_id }}/${{ matrix.arm }}/rep-${{ matrix.rep }}
           if-no-files-found: warn
-          retention-days: ${{ inputs.retention-days }}
+          retention-days: 1
 
   harvest:
-    name: Harvest — oracle gate + completeness
+    name: Harvest — pack RunArchive, summary, prune handoffs
     needs: [preflight, model, run]
-    if: always() # runs even when cells fail; gaps must surface
+    if: always() # runs even when cells fail; gaps must surface in the bundle & summary
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -188,68 +191,36 @@ jobs:
         uses: ./.github/actions/setup
         with:
           environment: default
-      - name: Download all experiment artifacts
-        if: inputs.stage != 'preflight'
+      - name: Download all experiment handoff artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: experiment-*
           path: harvest
           merge-multiple: false
-      - name: Harvest and check completeness
-        if: inputs.stage != 'preflight'
+      - name: Harvest, verify oracle gate, pack RunArchive zip, and render summary
         env:
           EXPERIMENT_HARVEST_DIR: harvest
+          EXPERIMENT_ARCHIVE_OUT: bundle/experiment-run-${{ github.run_id }}-${{ github.sha }}.zip
+          EXPERIMENT_STAGE: ${{ inputs.stage }}
           EXPERIMENT_ARMS: A,B
           EXPERIMENT_REPETITIONS: ${{ inputs.repetitions }}
-          EXPERIMENT_FAIL_ON_MISSING: ${{ inputs.stage == 'smoke' && 'false' || 'true' }}
-          EXPERIMENT_SKIP_ORACLE: ${{ inputs.stage == 'smoke' && 'true' || 'false' }}
+          EXPERIMENT_RUN_HARVEST: ${{ inputs.stage != 'preflight' && 'true' || 'false' }}
+          EXPERIMENT_FAIL_ON_MISSING: ${{ inputs.stage == 'pilot' && 'true' || 'false' }}
+          EXPERIMENT_SKIP_ORACLE: ${{ inputs.stage != 'pilot' && 'true' || 'false' }}
         run: pixi run tools run experiment harvest
-      - name: Upload merged results
-        if: inputs.stage != 'preflight'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: experiment-results-${{ github.run_id }}-${{ github.sha }}
-          path: harvest
-          if-no-files-found: warn
-          retention-days: ${{ inputs.retention-days }}
-
-  summary:
-    name: Experiment summary
-    needs: [preflight, model, run, harvest]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Setup Pixi workspace
-        uses: ./.github/actions/setup
-        with:
-          environment: default
-      - name: Download merged results
-        if: inputs.stage != 'preflight'
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: experiment-results-${{ github.run_id }}-${{ github.sha }}
-          path: harvest
-      - name: Download preflight and model records
-        if: inputs.stage == 'preflight'
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: experiment-*
-          path: harvest
-          merge-multiple: false
-      - name: Render step summary
-        env:
-          EXPERIMENT_HARVEST_DIR: harvest
-        run: pixi run tools run experiment summary
-      - name: Upload summary
+      - name: Upload consolidated RunArchive bundle
+        id: upload-bundle
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: experiment-summary-${{ github.run_id }}-${{ github.sha }}
-          path: harvest/summary.md
-          if-no-files-found: ignore
+          name: experiment-run-${{ github.run_id }}-${{ github.sha }}
+          path: bundle/experiment-run-${{ github.run_id }}-${{ github.sha }}.zip
+          compression-level: 0
+          if-no-files-found: error
           retention-days: ${{ inputs.retention-days }}
+      - name: Prune intermediate handoff artifacts
+        if: always() && steps.upload-bundle.outcome == 'success'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EXPERIMENT_KEEP_ARTIFACT: experiment-run-${{ github.run_id }}-${{ github.sha }}
+        run: pixi run tools run experiment prune-ci

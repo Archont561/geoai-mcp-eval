@@ -77,6 +77,7 @@ class CellRequest:
     cache_dir: Path | None = None
     cache_stats: CacheStats | None = None
     enforce: str = "semantic_repair"
+    repetition: int = 1
 
 
 def fixture_path(task_path: Path, task: Task) -> Path:

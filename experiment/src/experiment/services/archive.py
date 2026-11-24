@@ -238,26 +238,30 @@ def _collect_trials(
     return trials, measurements, payloads_map
 
 
-def _maybe_run_harvest(source_dir: Path, rid: str, opts: PackOptions) -> None:
+def _maybe_run_harvest(source_dir: Path, rid: str, opts: PackOptions) -> RuntimeError | None:
     if not opts.run_harvest:
-        return
-    workflow.run_harvest(
-        workflow.HarvestConfig(
-            harvest_dir=source_dir,
-            arms=opts.arms,
-            repetitions=opts.repetitions,
-            fail_on_missing=opts.fail_on_missing,
-            skip_oracle=opts.skip_oracle,
-            run_id=rid,
+        return None
+    try:
+        workflow.run_harvest(
+            workflow.HarvestConfig(
+                harvest_dir=source_dir,
+                arms=opts.arms,
+                repetitions=opts.repetitions,
+                fail_on_missing=opts.fail_on_missing,
+                skip_oracle=opts.skip_oracle,
+                run_id=rid,
+            )
         )
-    )
+    except RuntimeError as exc:
+        return exc
+    return None
 
 
 def pack_archive(opts: PackOptions) -> tuple[ExperimentRun, Path]:
     """Pack a harvest or local run directory into a single ``RunArchive`` zip."""
     source_dir = opts.source_dir.resolve()
     rid = workflow.resolve_run_id(opts.run_id) if opts.run_id else source_dir.name
-    _maybe_run_harvest(source_dir, rid, opts)
+    harvest_error = _maybe_run_harvest(source_dir, rid, opts)
     trials, measurements, trial_payloads = _collect_trials(source_dir)
     provenance = RunProvenance(
         environment=_read_environment_pin(source_dir),
@@ -274,6 +278,8 @@ def pack_archive(opts: PackOptions) -> tuple[ExperimentRun, Path]:
     summary_md = workflow_summary.render_summary(harvest_dir=source_dir, run_id=rid)
     output_zip = opts.output_zip or _default_zip_path(source_dir, rid)
     RunArchive.write(output_zip, run, trial_files=trial_payloads, summary_markdown=summary_md)
+    if harvest_error is not None:
+        raise harvest_error
     return run, output_zip
 
 

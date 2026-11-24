@@ -222,7 +222,7 @@ def _trial_key_for_cell(req: CellRequest) -> TrialKey:
         task_id=req.task.id,
         paradigm=paradigm,
         enforcement_level=enforcement,
-        repetition=1,
+        repetition=req.repetition,
     )
 
 
