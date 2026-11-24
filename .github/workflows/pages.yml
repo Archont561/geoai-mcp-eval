@@ -4,7 +4,31 @@ on:
   push:
     branches:
       - main
+    paths:
+      - "docs/**"
+      - ".github/workflows/pages.yml"
+      - ".github/actions/setup/**"
+      - "pixi.toml"
+      - "pixi.lock"
+      - ".rumdl.toml"
+      - ".vale.ini"
+      - ".vale/**"
+      - "tools/md.py"
+      - "tools/prose.py"
+      - "tasknest.toml"
   pull_request:
+    paths:
+      - "docs/**"
+      - ".github/workflows/pages.yml"
+      - ".github/actions/setup/**"
+      - "pixi.toml"
+      - "pixi.lock"
+      - ".rumdl.toml"
+      - ".vale.ini"
+      - ".vale/**"
+      - "tools/md.py"
+      - "tools/prose.py"
+      - "tasknest.toml"
   workflow_dispatch:
 
 permissions:

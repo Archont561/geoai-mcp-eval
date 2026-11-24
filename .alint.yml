@@ -207,6 +207,33 @@ rules:
     level: error
     message: "The Python lint gate must run rude before Ruff."
 
+  - id: require-clean-code-tool
+    kind: file_exists
+    paths: tools/clean_code.py
+    level: error
+    message: "The strict Clean Code check tool must exist for hooks and CI to invoke it."
+
+  - id: ci-enforces-clean-code
+    kind: file_content_matches
+    paths: .github/workflows/ci.yml
+    pattern: "(?m)^        run: pixi run tools run clean_code$"
+    level: error
+    message: "CI must enforce Clean Code rules through tools run clean_code."
+
+  - id: hooks-enforce-clean-code
+    kind: file_content_matches
+    paths: lefthook.yml
+    pattern: "(?m)^      run: pixi run tools run clean_code$"
+    level: error
+    message: "Git hooks (lefthook.yml) must enforce Clean Code rules through tools run clean_code."
+
+  - id: pages-filters-push-and-pr-paths
+    kind: file_content_matches
+    paths: .github/workflows/pages.yml
+    pattern: "(?s)push:.*?paths:.*?docs/\\*\\*.*?pull_request:.*?paths:.*?docs/\\*\\*"
+    level: error
+    message: "The Pages workflow must filter push and pull_request triggers by docs-affecting paths."
+
   - id: require-codecov-config
     kind: file_exists
     paths: codecov.yml
