@@ -224,12 +224,14 @@ def test_review_preserves_session_logged_manual_actions_and_handles_corrupt_inpu
 def test_review_atomic_write_cleans_up_temp_file_on_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import os
+
     take = make_recorded_take(tmp_path)
 
     def boom(_src: Path, _dst: Path) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr(review.os, "replace", boom)
+    monkeypatch.setattr(os, "replace", boom)
     with pytest.raises(OSError, match="disk full"):
         review.review_session(take, mark_reviewed=True)
     assert not list(take.glob(".human-reference-record-reviewed-*.tmp"))

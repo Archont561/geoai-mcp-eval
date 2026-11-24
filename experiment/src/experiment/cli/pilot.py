@@ -9,13 +9,11 @@ import typer
 from rich.console import Console
 from rich.text import Text
 
-from experiment.adapters.task_repository import TaskNotFoundError, find_task_file
-from experiment.oracle import run_determinism_gate
-from experiment.task_suite import validate_suite
+from experiment.services import pilot as pilot_service
 
 app = typer.Typer(help="Prepare and verify the pilot task suite.")
 console = Console(no_color=True, highlight=False, markup=False)
-DEFAULT_TASK_ROOT = Path("experiment/tasks")
+DEFAULT_TASK_ROOT = pilot_service.default_task_root()
 ROOT_OPTION = typer.Option(DEFAULT_TASK_ROOT, "--root")
 TASK_ID_ARGUMENT = typer.Argument(...)
 ARTIFACTS_OPTION = typer.Option(..., "--artifacts-dir")
@@ -28,15 +26,15 @@ def _find_task(root: Path, task_id: str) -> Path:
     into the message the command line promises.
     """
     try:
-        return find_task_file(root, task_id)
-    except TaskNotFoundError as exc:
+        return pilot_service.find_task_file(root, task_id)
+    except pilot_service.TaskNotFoundError as exc:
         raise typer.BadParameter(f"unknown task ID: {task_id}") from exc
 
 
 @app.command()
 def validate(root: Path = ROOT_OPTION) -> None:
     """Validate task schemas, fixtures, oracle types, and required trap coverage."""
-    report = validate_suite(root)
+    report = pilot_service.validate_suite(root)
     if report.passed:
         console.print(
             Text(
@@ -58,7 +56,7 @@ def determinism(
 ) -> None:
     """Run the task oracle three times against fixed artifacts and report consistency."""
     task_path = _find_task(root, task_id)
-    report = run_determinism_gate(task_path, artifacts_dir)
+    report = pilot_service.run_determinism_gate(task_path, artifacts_dir)
     typer.echo(json.dumps(report.to_dict(), indent=2, sort_keys=True))
     if not report.passed:
         raise typer.Exit(code=1)

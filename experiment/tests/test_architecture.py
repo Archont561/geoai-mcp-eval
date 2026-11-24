@@ -126,8 +126,11 @@ def test_the_shipped_contracts_pass_and_reject_violations(tmp_path: Path) -> Non
     assert result.returncode == 0, result.stdout + result.stderr
     layers = "CLI, services, adapters and domain follow dependency direction"
     no_frameworks = "Services have no CLI or presentation framework dependencies"
-    assert f"{layers} KEPT" in result.stdout
-    assert f"{no_frameworks} KEPT" in result.stdout
+    svc_io = "Services delegate transport, subprocess, and storage I/O to adapters"
+    cli_io = "CLI never performs transport or subprocess I/O directly"
+    cli_adapters = "CLI calls services rather than importing adapters directly"
+    for name in (layers, no_frameworks, svc_io, cli_io, cli_adapters):
+        assert f"{name} KEPT" in result.stdout
     shutil.copytree(
         REPO_ROOT / "experiment" / "src" / "experiment",
         tmp_path / "experiment",
@@ -164,6 +167,30 @@ def test_the_shipped_contracts_pass_and_reject_violations(tmp_path: Path) -> Non
             "import rich\n",
             no_frameworks,
             "experiment.services is not allowed to import rich",
+        ),
+        (
+            "services",
+            "import subprocess\n",
+            svc_io,
+            "experiment.services is not allowed to import subprocess",
+        ),
+        (
+            "services",
+            "import requests\n",
+            svc_io,
+            "experiment.services is not allowed to import requests",
+        ),
+        (
+            "cli",
+            "import subprocess\n",
+            cli_io,
+            "experiment.cli is not allowed to import subprocess",
+        ),
+        (
+            "cli",
+            "from experiment.adapters import paths\n",
+            cli_adapters,
+            "experiment.cli is not allowed to import experiment.adapters",
         ),
     ):
         _assert_shipped_contract_bites(tmp_path, package, source, contract, violation)

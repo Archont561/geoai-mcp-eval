@@ -23,10 +23,9 @@ import platform
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import Any
 
-from experiment_plugin import __version__
+from experiment_plugin import __version__, _io
 from experiment_plugin.metrics import (
     METRICS_STATUS_NOT_STARTED,
     ManualActionGroup,
@@ -277,8 +276,7 @@ class BehaviorTracker:
             "event": event,
             **{k: v for k, v in fields.items() if v is not None},
         }
-        with self.events_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, sort_keys=True, default=str) + "\n")
+        _io.append_jsonl(self.events_path, record)
         self.event_count += 1
         return record
 
@@ -449,29 +447,12 @@ class HumanBaselineSession:
         record = self._build_record(ended, outputs, manual_review_complete=manual_review_complete)
         record_path = self.output_dir / "human-reference-record.json"
         # Publish beside the event log only after its terminal event is written.
-        pending: Path | None = None
-        try:
-            with NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8",
-                dir=self.output_dir,
-                prefix=".human-reference-record-",
-                suffix=".tmp",
-                delete=False,
-            ) as handle:
-                pending = Path(handle.name)
-                handle.write(json.dumps(record, indent=2, sort_keys=True))
-            self.tracker.record("session_end", outputs=len(outputs))
-            pending.replace(record_path)
-        except BaseException as error:
-            if pending is not None:
-                try:
-                    pending.unlink(missing_ok=True)
-                except OSError as cleanup_error:
-                    raise BaseExceptionGroup(
-                        "record writing and cleanup failed", [error, cleanup_error]
-                    ) from None
-            raise
+        _io.write_atomic_text(
+            record_path,
+            _io.format_json(record),
+            prefix=".human-reference-record-",
+            before_replace=lambda: self.tracker.record("session_end", outputs=len(outputs)),
+        )
         self.status = "recorded"
         return record_path
 
@@ -520,7 +501,7 @@ def abandon_session(session: HumanBaselineSession, reason: str = "user requested
     abandoned_at = utc_now()
     marker = session.output_dir / "session-abandoned.json"
     marker.write_text(
-        json.dumps(
+        _io.format_json(
             {
                 "task_id": session.task_id,
                 "abandoned_at_utc": abandoned_at.isoformat(),
@@ -532,10 +513,8 @@ def abandon_session(session: HumanBaselineSession, reason: str = "user requested
                 "manual_action_groups": len(session.metrics.manual_action_groups),
                 "record_written": False,
             },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
+            trailing_newline=True,
+        ),
         encoding="utf-8",
     )
     session.status = "abandoned"

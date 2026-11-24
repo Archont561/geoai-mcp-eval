@@ -10,12 +10,12 @@ WSZ semantics; never impute, never NaN).
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
+from experiment.adapters import run_store
 from experiment.adapters.task_repository import load_suite
 
 KEY_COLUMNS = ("run_id", "task", "arm", "driver", "model")
@@ -67,8 +67,8 @@ def flatten_rows(results_root: Path, tasks_root: Path) -> list[dict[str, Any]]:
     predicates = load_predicates(tasks_root)
     predicate_columns = sorted(set(predicates.values()))
     rows: list[dict[str, Any]] = []
-    for score_file in sorted(results_root.rglob("score.json")):
-        data = json.loads(score_file.read_text(encoding="utf-8"))
+    for score_file in run_store.discover_score_files(results_root):
+        data = run_store.read_json(score_file)
         meta = data.get("meta") if isinstance(data, dict) else None
         if not isinstance(meta, dict) or not isinstance(data.get("checks"), list):
             raise ValueError(f"{score_file}: not a cell score.json (missing meta/checks)")

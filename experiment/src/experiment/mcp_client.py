@@ -5,16 +5,17 @@ from __future__ import annotations
 import json
 import os
 import sys
-from pathlib import Path
 from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from experiment.adapters.paths import package_src_root
+
 
 def server_params() -> StdioServerParameters:
     """Run the GIS prototype server from this interpreter (absolute PYTHONPATH)."""
-    src_root = str(Path(__file__).resolve().parents[1])
+    src_root = str(package_src_root())
     env = dict(os.environ)
     existing = env.get("PYTHONPATH")
     env["PYTHONPATH"] = f"{src_root}{os.pathsep}{existing}" if existing else src_root

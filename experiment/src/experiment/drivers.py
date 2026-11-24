@@ -29,16 +29,14 @@ from experiment.harness import (
     _K_CONTENT,
     _K_ID,
     _K_ROLE,
-    JSON_INDENT,
     RESULT_GEOJSON,
     RESULT_JSON,
-    UTF8,
     CellRequest,
     append_transcript,
-    deliverable_name,
     fixture_fc,
     fixture_path,
     run_python_sandboxed,
+    write_deliverable,
 )
 
 _MAX_TOOL_STEPS = 12
@@ -249,9 +247,7 @@ def _deliver_json(req: CellRequest, final: str) -> None:
             req.cell, {_K_ROLE: "harness", _K_CONTENT: "no JSON deliverable extracted"}
         )
         return
-    (req.cell / deliverable_name(req.task)).write_text(
-        json.dumps(payload, indent=JSON_INDENT), encoding=UTF8
-    )
+    write_deliverable(req.cell, req.task, payload)
 
 
 def _profile_and_session(req: CellRequest) -> tuple[backends.BackendProfile, requests.Session]:
@@ -352,6 +348,4 @@ def _ollama_arm_b(
 def _deliver_stdout_json(req: CellRequest, stdout: str) -> None:
     payload = _extract_json_block(f"```json\n{stdout[-20000:]}\n```") or _extract_json_block(stdout)
     if payload is not None:
-        (req.cell / deliverable_name(req.task)).write_text(
-            json.dumps(payload, indent=JSON_INDENT), encoding=UTF8
-        )
+        write_deliverable(req.cell, req.task, payload)

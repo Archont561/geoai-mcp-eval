@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from typer.testing import CliRunner
 
+from experiment.adapters import subprocess_runner
 from experiment.adapters.github_workflow import GitHubWorkflowAdapter
 from experiment.cli import app
 from experiment.services import backend_check, workflow, workflow_summary
@@ -100,11 +100,8 @@ def test_workflow_commands_emit_github_outputs_via_adapter(
 
     # 1. Preflight emits run_id & pins
     (tmp_path / "pixi.lock").write_text("lock", encoding="utf-8")
-    monkeypatch.setattr(
-        workflow.subprocess,
-        "run",
-        lambda _cmd, **_kw: SimpleNamespace(returncode=0, stdout="deadbeef\n", stderr=""),
-    )
+    monkeypatch.setattr(subprocess_runner, "run_passthrough", lambda _cmd, **_kw: 0)
+    monkeypatch.setattr(subprocess_runner, "soft_version", lambda _cmd, _cwd: "deadbeef")
     workflow.run_preflight("rid-gh")
     text = gh_out.read_text(encoding="utf-8")
     assert "run_id=rid-gh\n" in text

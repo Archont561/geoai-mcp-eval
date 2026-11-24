@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import importlib
 import os
-import subprocess
 import sys
 from pathlib import Path
 
+from experiment.adapters import run_store, subprocess_runner
+from experiment.adapters.subprocess_runner import CommandResult as SandboxRunResult
 from experiment.harness import scrubbed_env
 
 
@@ -119,24 +120,19 @@ def prepare_script(script: Path, artifacts_dir: Path) -> None:
     """Check the script, create its working directory, and require PyQGIS."""
     if not script.is_file():
         raise ScriptNotFoundError(script)
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    run_store.ensure_dir(artifacts_dir)
     if qgis_versions() is None:
         raise QgisUnavailableError()
 
 
-def run_script(
-    script: Path, artifacts_dir: Path, timeout_s: int
-) -> subprocess.CompletedProcess[str]:
+def run_script(script: Path, artifacts_dir: Path, timeout_s: int) -> SandboxRunResult:
     """Run the checked script with an isolated interpreter and a scrubbed env."""
     try:
-        return subprocess.run(
-            [sys.executable, "-I", str(script.resolve())],
-            cwd=artifacts_dir,
+        return subprocess_runner.run_python_script(
+            script,
+            artifacts_dir,
             env=scrubbed_env(artifacts_dir, qt_platform="offscreen"),
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-            check=False,
+            timeout_s=timeout_s,
         )
-    except subprocess.TimeoutExpired as exc:
+    except subprocess_runner.CommandTimeoutError as exc:
         raise SandboxTimeoutError() from exc

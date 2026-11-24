@@ -116,3 +116,8 @@ def find_task_file(suite: Path, task_id: str) -> Path:
 def find_task(suite: Path, task_id: str) -> Task:
     """The validated task carrying ``task_id``."""
     return load_task(find_task_file(suite, task_id))
+
+
+def discover_task_ids(suite: Path) -> tuple[str, ...]:
+    """Sorted task IDs discovered from ``suite`` YAML definitions."""
+    return tuple(sorted(task.id for task in load_suite(suite)))

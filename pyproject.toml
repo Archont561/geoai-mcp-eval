@@ -72,6 +72,27 @@ source_modules = ["experiment.services"]
 forbidden_modules = ["typer", "rich"]
 
 [[tool.importlinter.contracts]]
+name = "Services delegate transport, subprocess, and storage I/O to adapters"
+type = "forbidden"
+source_modules = ["experiment.services"]
+forbidden_modules = ["requests", "urllib", "subprocess", "sqlite3", "tomllib"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "CLI never performs transport or subprocess I/O directly"
+type = "forbidden"
+source_modules = ["experiment.cli"]
+forbidden_modules = ["requests", "urllib", "subprocess", "sqlite3", "tomllib"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "CLI calls services rather than importing adapters directly"
+type = "forbidden"
+source_modules = ["experiment.cli"]
+forbidden_modules = ["experiment.adapters"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
 name = "Analysis never imports or reads the LLM completion cache"
 type = "forbidden"
 source_modules = ["experiment.analyze", "experiment.cli.analyze"]

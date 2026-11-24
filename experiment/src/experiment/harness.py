@@ -6,14 +6,14 @@ kept dependency-free so it can be imported from either side without cycles.
 
 from __future__ import annotations
 
-import json
 import os
-import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from experiment.adapters import paths, run_store, subprocess_runner
 
 if TYPE_CHECKING:
     from experiment.backends import BackendProfile
@@ -21,14 +21,14 @@ if TYPE_CHECKING:
     from experiment.domain.task import Task
     from experiment.domain.usage import UsageAccumulator
 
-TASK_ROOT = Path(__file__).resolve().parents[2] / "tasks"
-RESULTS_ROOT = TASK_ROOT.parent.parent / "results"
+TASK_ROOT = paths.tasks_root()
+RESULTS_ROOT = paths.results_root()
 
 RESULT_JSON = "result.json"
 RESULT_GEOJSON = "result.geojson"
 
-UTF8 = "utf-8"
-JSON_INDENT = 2
+UTF8 = run_store.UTF8
+JSON_INDENT = run_store.JSON_INDENT
 _K_ROLE = "role"
 _K_CONTENT = "content"
 _K_ID = "id"
@@ -114,15 +114,20 @@ def cell_dir(output_root: Path, task_id: str, arm: str) -> Path:
 
 
 def append_transcript(cell: Path, record: dict[str, Any]) -> None:
-    record = {"ts": datetime.now(UTC).isoformat(), **record}
-    with (cell / "transcript.jsonl").open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record, sort_keys=True, default=str) + "\n")
+    run_store.append_jsonl(
+        cell / "transcript.jsonl", {"ts": datetime.now(UTC).isoformat(), **record}
+    )
 
 
 def deliverable_name(task: Task) -> str:
     if any(a.get("output") == RESULT_GEOJSON for a in task.oracle.assertions):
         return RESULT_GEOJSON
     return RESULT_JSON
+
+
+def write_deliverable(cell: Path, task: Task, payload: Any) -> Path:
+    """Persist the cell's JSON/GeoJSON deliverable under the expected filename."""
+    return run_store.write_json(cell / deliverable_name(task), payload, sort_keys=False)
 
 
 def scrubbed_env(cell: Path, *, qt_platform: str | None = None) -> dict[str, str]:
@@ -146,20 +151,17 @@ def scrubbed_env(cell: Path, *, qt_platform: str | None = None) -> dict[str, str
 
 def run_python_sandboxed(
     code: str, cell: Path, timeout_s: int = 120
-) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+) -> subprocess_runner.CommandResult:
+    return subprocess_runner.run_command(
         [sys.executable, "-I", "-c", code],
         cwd=cell,
         env=scrubbed_env(cell),
-        capture_output=True,
-        text=True,
         timeout=timeout_s,
-        check=False,
     )
 
 
 def fixture_fc(task_path: Path, task: Task) -> dict[str, Any]:
-    return json.loads(fixture_path(task_path, task).read_text(encoding="utf-8"))
+    return run_store.read_json(fixture_path(task_path, task))
 
 
 def extract_iso(features: list[dict[str, Any]]) -> list[str]:

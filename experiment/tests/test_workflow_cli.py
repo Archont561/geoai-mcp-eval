@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from typer.testing import CliRunner
 
+from experiment.adapters import ollama as ollama_adapter
+from experiment.adapters import subprocess_runner
 from experiment.cli import app
 from experiment.services import workflow
 
@@ -53,11 +54,16 @@ def test_workflow_preflight_writes_env_pins(
     monkeypatch.setattr(workflow, "find_repo_root", lambda: tmp_path)
     calls: list[list[str]] = []
 
-    def fake_run(cmd: list[str], **_kwargs: Any) -> SimpleNamespace:
-        calls.append(cmd)
-        return SimpleNamespace(returncode=0, stdout="v1.0.0\n", stderr="")
+    def fake_passthrough(cmd: list[str], **_kwargs: Any) -> int:
+        calls.append(list(cmd))
+        return 0
 
-    monkeypatch.setattr(workflow.subprocess, "run", fake_run)
+    def fake_version(cmd: list[str], _cwd: Path) -> str:
+        calls.append(list(cmd))
+        return "v1.0.0"
+
+    monkeypatch.setattr(subprocess_runner, "run_passthrough", fake_passthrough)
+    monkeypatch.setattr(subprocess_runner, "soft_version", fake_version)
     res = runner.invoke(app, ["workflow", "preflight", "--run-id", "rid-1"])
     assert res.exit_code == 0, res.output
     pins = (tmp_path / "results" / "rid-1" / "env-pins.txt").read_text(encoding="utf-8")
@@ -70,21 +76,16 @@ def test_workflow_model_records_digest_and_smoke(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(workflow, "find_repo_root", lambda: tmp_path)
-    monkeypatch.setattr(workflow.shutil, "which", lambda _name: "/usr/bin/ollama")
-    monkeypatch.setattr(workflow, "serve_running", lambda: True)
-    monkeypatch.setattr(workflow, "wait_ready", lambda: True)
+    monkeypatch.setattr(subprocess_runner, "which", lambda _name: "/usr/bin/ollama")
+    monkeypatch.setattr(ollama_adapter, "start_ollama", lambda *_a, **_kw: None)
+    monkeypatch.setattr(ollama_adapter, "wait_ready", lambda *_a, **_kw: True)
+    monkeypatch.setattr(ollama_adapter, "pull_model", lambda *_a, **_kw: 0)
+    monkeypatch.setattr(ollama_adapter, "list_model_digest", lambda *_a, **_kw: "abcdef123456")
     monkeypatch.setattr(
-        workflow,
-        "_smoke_model",
-        lambda _model: {"response": "OK"},
+        ollama_adapter,
+        "smoke_generate",
+        lambda _model, **_kw: {"response": "OK"},
     )
-
-    def fake_run(cmd: list[str], **_kwargs: Any) -> SimpleNamespace:
-        if "list" in cmd:
-            return SimpleNamespace(returncode=0, stdout="qwen2.5:3b abcdef123456\n", stderr="")
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr(workflow.subprocess, "run", fake_run)
     res = runner.invoke(app, ["workflow", "model", "--model", "qwen2.5:3b", "--run-id", "rid-m"])
     assert res.exit_code == 0, res.output
     run_dir = tmp_path / "results" / "rid-m"
@@ -121,13 +122,9 @@ def test_workflow_run_refuses_pilot_and_runs_smoke(
         "harness-missing"
     )
 
-    monkeypatch.setattr(workflow.shutil, "which", lambda _name: "/usr/bin/ollama")
-    monkeypatch.setattr(workflow, "serve_running", lambda: True)
-    monkeypatch.setattr(
-        workflow.subprocess,
-        "run",
-        lambda _cmd, **_kw: SimpleNamespace(returncode=0, stdout="hello\n", stderr=""),
-    )
+    monkeypatch.setattr(subprocess_runner, "which", lambda _name: "/usr/bin/ollama")
+    monkeypatch.setattr(ollama_adapter, "start_ollama", lambda *_a, **_kw: None)
+    monkeypatch.setattr(subprocess_runner, "run_passthrough", lambda _cmd, **_kw: 0)
     smoke_res = runner.invoke(
         app,
         [

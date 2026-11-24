@@ -16,11 +16,12 @@ from pathlib import Path
 
 import requests
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, ValidationError
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
-DEFAULT_BACKENDS_PATH = Path(__file__).resolve().parents[2] / "backends.toml"
-DEFAULT_BASE_URL = "http://127.0.0.1:11434"
+from experiment.adapters import ollama as ollama_adapter
+from experiment.adapters.paths import backends_path
+
+DEFAULT_BACKENDS_PATH = backends_path()
+DEFAULT_BASE_URL = ollama_adapter.DEFAULT_BASE_URL
 DEFAULT_MODEL = "qwen2.5-coder:0.5b"
 LOCAL_BACKEND = "local"
 
@@ -146,56 +147,20 @@ def fallback_profile(host: str, model: str) -> BackendProfile:
 
 def build_session(profile: BackendProfile) -> requests.Session:
     """Session carrying auth (if any) and the retry policy for PROFILE."""
-    session = requests.Session()
-    session.headers.update({"Accept": "application/json"})
     require_api_key(profile)
-    if profile.api_key_env:
-        session.headers["Authorization"] = f"Bearer {os.environ[profile.api_key_env]}"
-    retry = Retry(
-        total=profile.retries,
-        connect=profile.retries,
-        read=profile.retries,
-        status=profile.retries,
-        backoff_factor=0.8,
-        status_forcelist=(429, 500, 502, 503, 504),
-        respect_retry_after_header=True,
-        allowed_methods={"POST"},  # temp=0 ⇒ deterministic for a pinned digest
-        raise_on_status=False,  # terminal status comes back as a response we classify
+    headers = (
+        {"Authorization": f"Bearer {os.environ[profile.api_key_env]}"}
+        if profile.api_key_env
+        else None
     )
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-    return session
-
-
-def _extract_digest_from_tags(payload: object, model: str) -> str | None:
-    if not isinstance(payload, dict):
-        return None
-    models = payload.get("models")
-    if not isinstance(models, list):
-        return None
-    candidates = {model, f"{model}:latest"} if ":" not in model else {model}
-    for entry in models:
-        if not isinstance(entry, dict):
-            continue
-        names = {entry.get("name"), entry.get("model")}
-        if names & candidates:
-            digest = entry.get("digest")
-            if isinstance(digest, str) and digest.strip():
-                return digest.strip()
-    return None
+    return ollama_adapter.build_retry_session(profile.retries, headers=headers)
 
 
 def resolve_model_digest(session: requests.Session, profile: BackendProfile) -> str | None:
     """Query Ollama ``/api/tags`` for the pinned model digest; return None if unavailable."""
-    try:
-        resp = session.get(f"{profile.api_root}/api/tags", timeout=(profile.connect_timeout_s, 10))
-    except requests.exceptions.RequestException:
-        return None
-    if resp.status_code != 200:
-        return None
-    try:
-        payload = resp.json()
-    except ValueError:
-        return None
-    return _extract_digest_from_tags(payload, profile.model)
+    return ollama_adapter.resolve_model_digest(
+        session,
+        profile.api_root,
+        profile.model,
+        connect_timeout_s=profile.connect_timeout_s,
+    )

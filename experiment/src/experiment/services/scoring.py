@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 from experiment import oracle
+from experiment.adapters import run_store
 from experiment.adapters.task_repository import discover_task_files, load_task
 from experiment.harness import ARM_PREFIX, TASK_ROOT
 
@@ -36,11 +36,11 @@ def _rescore_cell(task_path: Path, cell: Path) -> dict[str, Any]:
 def rescore_run(run_dir: Path, task_root: Path = TASK_ROOT) -> dict[str, Any] | None:
     """Build a display summary, or return None when no known cells exist."""
     task_by_id = {load_task(path).id: path for path in discover_task_files(task_root)}
-    cells = []
-    for cell in sorted(run_dir.glob(f"*/{ARM_PREFIX}*")):
-        task_id = cell.parent.name
-        if cell.is_dir() and task_id in task_by_id:
-            cells.append(_rescore_cell(task_by_id[task_id], cell))
+    cells = [
+        _rescore_cell(task_by_id[cell.parent.name], cell)
+        for cell in run_store.discover_cell_dirs(run_dir, ARM_PREFIX)
+        if cell.parent.name in task_by_id
+    ]
     if not cells:
         return None
     return {
@@ -60,4 +60,4 @@ def load_summary(run_dir: Path) -> Any:
     path = run_dir / "summary.json"
     if not path.is_file():
         raise SummaryNotFoundError(path)
-    return json.loads(path.read_text(encoding="utf-8"))
+    return run_store.read_json(path)
