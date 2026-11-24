@@ -11,6 +11,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from experiment.domain.run.measurement import TokenUsage
+
 WARNING_MISSING_USAGE = "endpoint did not report token usage"
 WARNING_PARTIAL_USAGE = "endpoint reported partial token usage"
 WARNING_NO_LLM_CALLS = "no LLM completions recorded"
@@ -140,6 +142,10 @@ class UsageAccumulator:
     @property
     def observed_total_tokens(self) -> int:
         return self._observed_total
+
+    def to_token_usage(self) -> TokenUsage:
+        """Return a validated TokenUsage DTO without imputing missing values."""
+        return TokenUsage.from_summary_dict(self.to_summary())
 
     def to_summary(self) -> dict[str, Any]:
         """Return a JSON-safe per-cell usage summary without imputing missing values."""
