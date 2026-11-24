@@ -81,47 +81,51 @@ def _log_capped(
         session.log(event, source=source, **fields)  # type: ignore[arg-type]
 
 
+def _project_read_signal(project: object) -> str | None:
+    """Resolve the QGIS 3/4 project-read signal name (readProject vs projectRead)."""
+    for name in ("readProject", "projectRead"):
+        candidate = getattr(project, name, None)
+        if callable(candidate) and hasattr(candidate, "connect"):
+            return name
+    return None
+
+
+def _project_callbacks(
+    session: baseline.HumanBaselineSession, project: object
+) -> dict[str, Callable[..., None]]:
+    def layers_added(layers: object, *_args: object) -> None:
+        _log_capped(session, "layers_added", "host:project", count=len(layers or []))  # type: ignore[arg-type]
+
+    def layers_removed(ids: object, *_args: object) -> None:
+        _log_capped(session, "layers_removed", "host:project", count=len(ids or []))  # type: ignore[arg-type]
+
+    def crs_changed(*_args: object) -> None:
+        _log_capped(session, "crs_changed", "host:project", crs=project.crs().authid())  # type: ignore[attr-defined]
+
+    def project_read(*_args: object) -> None:
+        _log_capped(session, "project_read", "host:project", path=project.fileName())  # type: ignore[attr-defined]
+
+    return {
+        "layersAdded": layers_added,
+        "layersWillBeRemoved": layers_removed,
+        "crsChanged": crs_changed,
+        "projectRead": project_read,
+    }
+
+
 def _wire_project_hooks(
     session: baseline.HumanBaselineSession, project: object, connections: HostHooks | None = None
 ) -> list[str]:
     """Wire project hooks. Returns a list of non-fatal warnings (empty if all wired)."""
     connections = connections if connections is not None else HostHooks()
     warnings: list[str] = []
-
-    def layers_added(layers: object, *_args: object) -> None:
-        count = len(layers or [])  # type: ignore[arg-type]
-        _log_capped(session, "layers_added", "host:project", count=count)
-
-    def layers_removed(ids: object, *_args: object) -> None:
-        count = len(ids or [])  # type: ignore[arg-type]
-        _log_capped(session, "layers_removed", "host:project", count=count)
-
-    def crs_changed(*_args: object) -> None:
-        crs = project.crs().authid()  # type: ignore[attr-defined]
-        _log_capped(session, "crs_changed", "host:project", crs=crs)
-
-    def project_read(*_args: object) -> None:
-        path = project.fileName()  # type: ignore[attr-defined]
-        _log_capped(session, "project_read", "host:project", path=path)
-
-    # QGIS 4 renamed the project-read signal: projectRead -> readProject
-    # (PyQt bound signal in both). Bind whichever exists so QGIS 3 and 4 hosts
-    # both report hooks connected instead of silently failing the whole hook.
-    def _connectable(name: str) -> object | None:
-        candidate = getattr(project, name, None)
-        if callable(candidate) and hasattr(candidate, "connect"):
-            return candidate
-        return None
-
-    read_signal = next(
-        (name for name in ("readProject", "projectRead") if _connectable(name)), None
-    )
-
-    connections.connect(project, "layersAdded", layers_added)
-    connections.connect(project, "layersWillBeRemoved", layers_removed)
-    connections.connect(project, "crsChanged", crs_changed)
+    callbacks = _project_callbacks(session, project)
+    connections.connect(project, "layersAdded", callbacks["layersAdded"])
+    connections.connect(project, "layersWillBeRemoved", callbacks["layersWillBeRemoved"])
+    connections.connect(project, "crsChanged", callbacks["crsChanged"])
+    read_signal = _project_read_signal(project)
     if read_signal is not None:
-        connections.connect(project, read_signal, project_read)
+        connections.connect(project, read_signal, callbacks["projectRead"])
     else:
         warnings.append("project_read: no project-read signal found (readProject/projectRead)")
     return warnings
@@ -153,6 +157,15 @@ def _wire_canvas_hooks(
     connections.connect(canvas, "scaleChanged", scale_changed)
 
 
+def _extract_processing_details(entry: object) -> tuple[str | None, object]:
+    details = getattr(entry, "entry", None)
+    if not isinstance(details, Mapping):
+        return None, None
+    alg_id = details.get("algorithm_id")
+    clean_id = alg_id.strip() if isinstance(alg_id, str) and alg_id.strip() else None
+    return clean_id, details.get("parameters")
+
+
 def _wire_processing_hooks(
     session: baseline.HumanBaselineSession,
     registry: object,
@@ -163,13 +176,12 @@ def _wire_processing_hooks(
     def entry_added(entry_id: object, entry: object, *_args: object) -> None:
         if getattr(entry, "providerId", None) != "processing":
             return
-        details = getattr(entry, "entry", None)
         parsed_id = entry_id if isinstance(entry_id, int) else None
-        alg_id = details.get("algorithm_id") if isinstance(details, Mapping) else None
-        if isinstance(alg_id, str) and alg_id.strip():
+        alg_id, params = _extract_processing_details(entry)
+        if alg_id is not None:
             session.record_processing_execution(
-                alg_id.strip(),
-                parameters=details.get("parameters") if isinstance(details, Mapping) else None,
+                alg_id,
+                parameters=params,
                 history_entry_id=parsed_id,
                 entry_timestamp=getattr(entry, "timestamp", None),
             )
@@ -237,3 +249,9 @@ def connect_host_hooks(
         failures.append(f"canvas: {exc}")
     _connect_processing_hook(session, connections, connected, failures)
     return connected, failures
+
+
+# Public aliases for plugin re-exports and host-hook unit tests.
+log_capped = _log_capped
+wire_canvas_hooks = _wire_canvas_hooks
+wire_project_hooks = _wire_project_hooks
