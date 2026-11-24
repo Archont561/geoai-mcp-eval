@@ -333,6 +333,7 @@ def every_cell_keeps_artifacts(output: Path) -> None:
         assert (cell_dir / "transcript.jsonl").is_file(), cell_dir
         score = json.loads((cell_dir / "score.json").read_text(encoding="utf-8"))
         assert score["meta"]["prototype"] is True
+        assert score["checks"], cell_dir
 
 
 @then("the table has one row per cell of that run")

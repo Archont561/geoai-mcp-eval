@@ -151,10 +151,13 @@ def test_single_geometry_requires_features() -> None:
 def test_mcp_server_exposes_exactly_the_ops_registry() -> None:
     import asyncio
 
-    from experiment import mcp_server
+    from experiment import mcp_client, mcp_server
 
     tools = asyncio.run(mcp_server.server.list_tools())
+    advertised = asyncio.run(mcp_client.list_tools())
     assert {tool.name for tool in tools} == set(gis_ops.OPS)
+    assert set(advertised) == set(gis_ops.OPS)
+    assert len(advertised) == len(gis_ops.OPS)
 
 
 def test_area_geographic_non_polygon_reports_warning() -> None:
