@@ -47,9 +47,8 @@ def _artifact_lines(run_url: str, rid: str) -> list[str]:
         return [f"- Local results root: `results/{rid}` (not uploaded; local run)", ""]
     return [
         f"- Run page: {run_url}",
-        f"- Merged results artifact: `experiment-results-{rid}`",
-        "- Per-cell artifacts: `experiment-<arm>-<task>-rep<n>`",
-        f"- Summary artifact: `experiment-summary-{rid}`",
+        f"- Consolidated RunArchive artifact: `experiment-run-{rid}` "
+        f"(`experiment-run-{rid}.zip` with `run.json`, JSON Schema, `summary.md`, and trials)",
         "",
     ]
 

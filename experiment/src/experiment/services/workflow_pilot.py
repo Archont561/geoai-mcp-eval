@@ -64,6 +64,8 @@ def _build_pilot_request(
         model_digest=digest,
         use_cache=spec.use_cache,
         cache_dir=(repo_root / ".cache" / "llm") if spec.use_cache else None,
+        enforce=spec.enforce,
+        repetition=spec.repetition,
     )
 
 

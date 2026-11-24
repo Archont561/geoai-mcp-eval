@@ -59,6 +59,12 @@ KEEP_OPT = typer.Option(
     envvar="EXPERIMENT_KEEP_ARTIFACT",
     help="Artifact name to retain when pruning CI handoff artifacts",
 )
+GH_RUN_ID_OPT = typer.Option(
+    "",
+    "--gh-run-id",
+    envvar="GITHUB_RUN_ID",
+    help="Numeric GitHub Actions run ID (defaults to $GITHUB_RUN_ID)",
+)
 
 
 def _emit_pack_report(run_id: str, stage: str, trial_count: int, zip_path: Path) -> None:
@@ -140,10 +146,10 @@ def inspect(archive_path: Path = ARCHIVE_ARG) -> None:
 
 
 @app.command("prune-ci")
-def prune_ci(keep: str = KEEP_OPT, run_id: str = RUN_ID_OPT) -> None:
+def prune_ci(keep: str = KEEP_OPT, gh_run_id: str = GH_RUN_ID_OPT) -> None:
     """Delete intermediate GitHub Actions artifacts for the current run except KEEP."""
     try:
-        deleted = archive_service.prune_ci_artifacts(keep, run_id=run_id)
+        deleted = archive_service.prune_ci_artifacts(keep, run_id=gh_run_id)
     except RuntimeError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
