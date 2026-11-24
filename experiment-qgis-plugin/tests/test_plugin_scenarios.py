@@ -21,6 +21,7 @@ from plugin_harness import (
     DEMO_TASK_ID,
     FakeCanvas,
     FakeFileDialog,
+    FakeHistoryRegistry,
     FakeMessageBox,
     FakeProject,
     FakeTimer,
@@ -158,6 +159,11 @@ def end_session(loaded: PluginHandle) -> str:
     return loaded.call("end_session")
 
 
+@when("I end the session with manual review completed", target_fixture="reply")
+def end_session_reviewed(loaded: PluginHandle) -> str:
+    return loaded.call("end_session", manual_review_complete=True)
+
+
 @when("I abandon the session", target_fixture="reply")
 def abandon_session(loaded: PluginHandle) -> str:
     return loaded.call("abandon_session")
@@ -174,12 +180,17 @@ def a_session_is_active(loaded: PluginHandle, raw_task_suite) -> dict:
     return {"recorder": recorder, "output_dir": recorder.output_dir}
 
 
-@given("a session is active with two logged events", target_fixture="running")
-def a_session_with_two_events(loaded: PluginHandle, raw_task_suite) -> dict:
+@given("a session is active with raw host observations and a note", target_fixture="running")
+def a_session_with_raw_observations_and_note(
+    loaded: PluginHandle, raw_task_suite: Path, monkeypatch: pytest.MonkeyPatch
+) -> dict:
+    project = FakeProject("readProject")
+    install_host(monkeypatch, project=project, canvas=lambda: None)
     _start(loaded, DEMO_TASK_ID, raw_task_suite)
     recorder = plugin._ACTIVE["session"]
-    recorder.log("layers_added", tool="host:project", count=1)
-    recorder.log("note", tool="note", message="mid-take")
+    assert recorder is not None
+    project.layersAdded.fire(["layer-1"])
+    loaded.call("log_note", message="mid-take")
     return {"recorder": recorder, "output_dir": recorder.output_dir}
 
 
@@ -234,11 +245,45 @@ def the_record_exists(running: dict) -> None:
     assert (running["output_dir"] / "human-reference-record.json").is_file()
 
 
-@then("the record's step count excludes the start and end markers")
-def the_step_count_excludes_markers(running: dict) -> None:
+@then("the record leaves study steps and tools pending review")
+def the_record_leaves_metrics_pending_review(running: dict) -> None:
     record = read_record(running["output_dir"])
-    assert record["session"]["steps"] == 2
-    assert set(record["session"]["tools"]) == {"host:project", "note"}
+    assert record["record_version"] == 2
+    assert record["session"]["steps"] is None
+    assert record["session"]["tools"] is None
+    assert record["session"]["metrics_status"] == "pending_review"
+    assert record["study_metrics"]["status"] == "pending_review"
+    assert record["study_metrics"]["pending_reasons"]
+
+
+@then("the record retains raw observations separately from study metrics")
+def the_record_retains_raw_observations_separately(running: dict) -> None:
+    record = read_record(running["output_dir"])
+    observations = record["observations"]
+    assert observations["raw_event_count"] == 2
+    assert observations["sources"] == ["host:project", "note"]
+    assert record["study_metrics"]["processing_step_count"] is None
+    assert record["study_metrics"]["processing_tools"] is None
+    events = read_events(running["output_dir"])
+    assert [e["event"] for e in events] == ["session_start", "layers_added", "note", "session_end"]
+    assert events[1]["source"] == "host:project"
+    assert "tool" not in events[1]
+    assert events[2]["source"] == "note"
+    assert "tool" not in events[2]
+
+
+@then("the record reports missing processing history and pending manual review")
+def the_record_reports_missing_processing_and_pending_review(running: dict) -> None:
+    record = read_record(running["output_dir"])
+    metrics = record["study_metrics"]
+    assert metrics["processing_hook_connected"] is False
+    assert metrics["processing_step_count"] is None
+    assert metrics["processing_tools"] is None
+    assert metrics["manual_step_count"] is None
+    assert metrics["pending_reasons"] == [
+        "processing_history_unavailable",
+        "manual_review_pending",
+    ]
 
 
 @then("the record hashes every output file the participant left behind")
@@ -1069,7 +1114,8 @@ def project_observations_keep_source_and_order(running: dict) -> None:
         "crs_changed",
         "project_read",
     ]
-    assert all(event["tool"] == "host:project" for event in events[1:])
+    assert all(event["source"] == "host:project" for event in events[1:])
+    assert all("tool" not in event for event in events[1:])
 
 
 @then("the legacy project-read listener is disconnected")
@@ -1095,8 +1141,8 @@ def log_records_partial_project_changes(running: dict) -> None:
         {key: value for key, value in event.items() if key != "ts"} for event in events[1:]
     ]
     assert observations == [
-        {"event": "layers_added", "tool": "host:project", "count": 1},
-        {"event": "crs_changed", "tool": "host:project", "crs": "EPSG:2180"},
+        {"event": "layers_added", "source": "host:project", "count": 1},
+        {"event": "crs_changed", "source": "host:project", "crs": "EPSG:2180"},
     ]
 
 
@@ -1113,8 +1159,8 @@ def log_records_changes_after_project_failure(running: dict) -> None:
         {key: value for key, value in event.items() if key != "ts"} for event in events[1:]
     ]
     assert observations == [
-        {"event": "layers_added", "tool": "host:project", "count": 1},
-        {"event": "canvas_scale", "tool": "host:canvas", "scale": 50000.0},
+        {"event": "layers_added", "source": "host:project", "count": 1},
+        {"event": "canvas_scale", "source": "host:canvas", "scale": 50000.0},
     ]
 
 
@@ -1216,10 +1262,10 @@ def log_records_extent_and_scale(host: dict) -> None:
     assert observations == [
         {
             "event": "canvas_extent",
-            "tool": "host:canvas",
+            "source": "host:canvas",
             "extent": {"xmin": 0.0, "ymin": 1.0, "xmax": 100.0, "ymax": 51.0},
         },
-        {"event": "canvas_scale", "tool": "host:canvas", "scale": 50000.0},
+        {"event": "canvas_scale", "source": "host:canvas", "scale": 50000.0},
     ]
 
 
@@ -1435,6 +1481,292 @@ def start_message_has_no_failures(started: dict) -> None:
 def start_message_reports_canvas_failure(started: dict) -> None:
     assert "host hooks: project" in started["reply"]
     assert "host hook failed: canvas: iface exploded" in started["reply"]
+
+
+@given("a QGIS host with project, canvas, and processing history open", target_fixture="host")
+def host_with_project_canvas_and_processing(monkeypatch: pytest.MonkeyPatch) -> dict:
+    project = FakeProject("readProject")
+    canvas = FakeCanvas()
+    history = FakeHistoryRegistry()
+    install_host(
+        monkeypatch,
+        project=project,
+        canvas=lambda: canvas,
+        history_registry=history,
+    )
+    return {"project": project, "canvas": canvas, "history": history}
+
+
+@given("a QGIS host whose processing history cannot be wired", target_fixture="host")
+def host_with_broken_processing(monkeypatch: pytest.MonkeyPatch) -> dict:
+    install_host(
+        monkeypatch,
+        project=FakeProject("readProject"),
+        canvas=FakeCanvas,
+        history_raises=RuntimeError("history registry exploded"),
+    )
+    return {}
+
+
+@when("a layer is added, three processing algorithms run, and a note is logged")
+def layer_three_algs_and_note(host: dict, loaded: PluginHandle) -> None:
+    host["project"].layersAdded.fire(["layer-1"])
+    host["history"].add_entry(
+        "processing", {"algorithm_id": "native:buffer", "parameters": {"DISTANCE": 10}}
+    )
+    host["history"].add_entry(
+        "processing", {"algorithm_id": "native:buffer", "parameters": {"DISTANCE": 20}}
+    )
+    host["history"].add_entry(
+        "processing", {"algorithm_id": "native:clip", "parameters": {"OVERLAY": "mask"}}
+    )
+    loaded.call("log_note", message="checked parameters")
+
+
+@when("a non-processing history entry and a malformed processing entry arrive")
+def non_processing_and_malformed_entries(host: dict) -> None:
+    host["history"].add_entry("dbquery", {"query": "SELECT 1"})
+    host["history"].add_entry("processing", {"parameters": {"DISTANCE": 10}})
+
+
+@when(parsers.parse('the processing algorithm "{algorithm_id}" executes'))
+def processing_algorithm_executes(host: dict, algorithm_id: str) -> None:
+    host["history"].add_entry(
+        "processing", {"algorithm_id": algorithm_id, "parameters": {"INPUT": "poland"}}
+    )
+
+
+@then("the record preserves the observed processing executions and their algorithm ids")
+def record_preserves_observed_processing(running: dict) -> None:
+    record = read_record(running["output_dir"])
+    metrics = record["study_metrics"]
+    assert metrics["processing_hook_connected"] is True
+    assert metrics["processing_step_count"] == 3
+    assert metrics["processing_tools"] == ["native:buffer", "native:clip"]
+    assert [item["algorithm_id"] for item in metrics["processing_executions"]] == [
+        "native:buffer",
+        "native:buffer",
+        "native:clip",
+    ]
+    assert metrics["manual_step_count"] is None
+    assert metrics["pending_reasons"] == ["manual_review_pending"]
+    events = [e for e in read_events(running["output_dir"]) if e["event"] == "processing_algorithm"]
+    assert [e["algorithm_id"] for e in events] == ["native:buffer", "native:buffer", "native:clip"]
+    assert all(e["source"] == "host:processing" for e in events)
+
+
+@then("the record excludes raw host observations and notes from processing metrics")
+def record_excludes_raw_from_processing(running: dict) -> None:
+    record = read_record(running["output_dir"])
+    assert record["observations"]["raw_event_count"] == 2
+    assert record["observations"]["sources"] == ["host:project", "note"]
+    assert "processing" in record["observations"]["hooks_connected"]
+    for bad in ("host:project", "host:canvas", "note"):
+        assert bad not in record["study_metrics"]["processing_tools"]
+
+
+@then("the record notes zero observed processing executions while manual review is pending")
+def record_notes_zero_processing_pending_review(running: dict) -> None:
+    record = read_record(running["output_dir"])
+    metrics = record["study_metrics"]
+    assert metrics["processing_hook_connected"] is True
+    assert metrics["processing_step_count"] == 0
+    assert metrics["processing_tools"] == []
+    assert metrics["manual_step_count"] is None
+    assert metrics["pending_reasons"] == ["manual_review_pending"]
+
+
+@then("the record flags incomplete processing history without inventing an algorithm id")
+def record_flags_incomplete_processing(running: dict) -> None:
+    record = read_record(running["output_dir"])
+    metrics = record["study_metrics"]
+    assert metrics["processing_step_count"] == 0
+    assert metrics["processing_tools"] == []
+    assert metrics["pending_reasons"] == ["processing_history_incomplete"]
+    events = read_events(running["output_dir"])
+    unparsed = [e for e in events if e["event"] == "processing_history_unparsed"]
+    assert len(unparsed) == 1
+    assert not [e for e in events if e["event"] == "processing_algorithm"]
+
+
+@then("the start message reports the processing hook failure")
+def start_message_reports_processing_failure(started: dict) -> None:
+    assert "host hooks: project, canvas" in started["reply"]
+    assert "host hook failed: processing: history registry exploded" in started["reply"]
+
+
+@then(parsers.parse('the record preserves one observed processing execution for "{algorithm_id}"'))
+def record_preserves_one_processing_execution(running: dict, algorithm_id: str) -> None:
+    record = read_record(running["output_dir"])
+    metrics = record["study_metrics"]
+    assert metrics["processing_step_count"] == 1
+    assert metrics["processing_tools"] == [algorithm_id]
+    assert record["session"]["steps"] is None
+    assert record["session"]["tools"] is None
+
+
+@when(
+    parsers.parse('I log the manual action group "{action_group}"'),
+    target_fixture="reply",
+)
+def log_manual_action_group(loaded: PluginHandle, action_group: str) -> str:
+    return loaded.call("log_manual_action", action_group=action_group)
+
+
+@when(
+    parsers.parse('I log the manual action group "{action_group}" using tool "{tool}"'),
+    target_fixture="reply",
+)
+def log_manual_action_group_with_tool(loaded: PluginHandle, action_group: str, tool: str) -> str:
+    return loaded.call("log_manual_action", action_group=action_group, tool=tool)
+
+
+@then("the plugin explains that a manual action group description is required")
+def manual_action_group_requires_description(reply: str, running: dict) -> None:
+    assert "required" in reply.lower()
+    assert [e["event"] for e in read_events(running["output_dir"])] == ["session_start"]
+
+
+@then("the record retains the manual action group without attributing a tool")
+def record_retains_manual_group_without_tool(running: dict) -> None:
+    record = read_record(running["output_dir"])
+    metrics = record["study_metrics"]
+    assert metrics["manual_step_count"] is None
+    assert metrics["pending_reasons"] == ["manual_review_pending"]
+    assert len(metrics["manual_action_groups"]) == 1
+    assert metrics["manual_action_groups"][0]["action_group"] == "styled Jenks classes"
+    assert metrics["manual_action_groups"][0]["tool"] is None
+    events = [e for e in read_events(running["output_dir"]) if e["event"] == "manual_action_group"]
+    assert len(events) == 1
+    assert events[0]["source"] == "manual"
+    assert "tool" not in events[0]
+
+
+@then(
+    parsers.parse(
+        "the record verifies {expected_steps:d} study steps and the observed processing tools"
+    )
+)
+def record_verifies_steps_and_processing_tools(running: dict, expected_steps: int) -> None:
+    record = read_record(running["output_dir"])
+    assert record["session"]["steps"] == expected_steps
+    assert record["session"]["tools"] == ["native:buffer", "native:clip"]
+    assert record["session"]["metrics_status"] == "reviewed"
+    metrics = record["study_metrics"]
+    assert metrics["status"] == "reviewed"
+    assert metrics["pending_reasons"] == []
+    assert metrics["processing_step_count"] == 3
+    assert metrics["manual_step_count"] == 1
+    assert metrics["manual_review_completed"] is True
+    assert record["observations"]["raw_event_count"] == 2
+    assert record["observations"]["sources"] == ["host:project", "note"]
+
+
+@then("the end summary reports reviewed steps and tools without raw sources")
+def end_summary_reports_reviewed_metrics(reply: str) -> None:
+    assert "steps: 4" in reply
+    assert "native:buffer, native:clip" in reply
+    assert "(reviewed)" in reply
+    assert "host:project" not in reply
+    assert "note" not in reply.splitlines()[1]
+
+
+@then(
+    parsers.parse(
+        "the record verifies {expected_steps:d} study steps and an explicitly empty tools list"
+    )
+)
+def record_verifies_steps_and_empty_tools(running: dict, expected_steps: int) -> None:
+    record = read_record(running["output_dir"])
+    assert record["session"]["steps"] == expected_steps
+    assert record["session"]["tools"] == []
+    assert record["session"]["metrics_status"] == "reviewed"
+    assert record["study_metrics"]["status"] == "reviewed"
+    assert record["study_metrics"]["processing_step_count"] == 0
+    assert record["study_metrics"]["manual_step_count"] == expected_steps
+
+
+@then("the record reports missing processing history while retaining the manual action group")
+def record_reports_missing_processing_with_manual_group(running: dict) -> None:
+    record = read_record(running["output_dir"])
+    metrics = record["study_metrics"]
+    assert metrics["processing_hook_connected"] is False
+    assert metrics["manual_review_completed"] is True
+    assert metrics["manual_step_count"] is None
+    assert metrics["pending_reasons"] == ["processing_history_unavailable"]
+    assert len(metrics["manual_action_groups"]) == 1
+    assert metrics["manual_action_groups"][0]["action_group"] == "exported GeoJSON"
+    assert metrics["manual_action_groups"][0]["tool"] == "qgis:save-features-as"
+
+
+@given("another component listens to processing history changes")
+def other_processing_listener(host: dict) -> None:
+    received: list[str] = []
+
+    def listener(_entry_id, entry, _backend) -> None:
+        received.append(entry.entry["algorithm_id"])
+
+    host["history"].entryAdded.connect(listener)
+    host["other_processing_received"] = received
+    host["other_processing_listener"] = listener
+
+
+@when(
+    parsers.parse('a processing execution for "{algorithm_id}" is queued'),
+    target_fixture="queued_changes",
+)
+def processing_execution_is_queued(host: dict, algorithm_id: str) -> list:
+    return [
+        host["history"].queue_entry(
+            "processing", {"algorithm_id": algorithm_id, "parameters": {"INPUT": "poland"}}
+        )
+    ]
+
+
+@when(parsers.parse('I start another session and execute processing algorithm "{algorithm_id}"'))
+def start_another_and_run_processing(
+    reloaded: dict, host: dict, task_suite: Path, algorithm_id: str
+) -> None:
+    reply = _start(reloaded["handle"], DEMO_TASK_ID, task_suite)
+    assert reply.startswith("session started for task"), reply
+    recorder = plugin._ACTIVE["session"]
+    assert recorder is not None
+    reloaded["output_dir"] = recorder.output_dir
+    host["history"].add_entry("processing", {"algorithm_id": algorithm_id, "parameters": {}})
+
+
+@then("the processing history listener is disconnected")
+def processing_listener_disconnected(host: dict) -> None:
+    assert not host["history"].entryAdded.slots
+
+
+@then(parsers.parse('the new session alone records processing execution "{algorithm_id}"'))
+def new_session_alone_records_processing(
+    host: dict, running: dict, new_take: Path, algorithm_id: str
+) -> None:
+    assert new_take != running["output_dir"]
+    events = [e for e in read_events(new_take) if e["event"] == "processing_algorithm"]
+    assert [e["algorithm_id"] for e in events] == [algorithm_id]
+    assert len(host["history"].entryAdded.slots) == 1
+
+
+@then(parsers.parse('only the reloaded session records processing execution "{algorithm_id}"'))
+def reloaded_session_records_processing(running: dict, reloaded: dict, algorithm_id: str) -> None:
+    assert reloaded["output_dir"] != running["output_dir"]
+    events = [
+        e for e in read_events(reloaded["output_dir"]) if e["event"] == "processing_algorithm"
+    ]
+    assert [e["algorithm_id"] for e in events] == [algorithm_id]
+
+
+@then("the other component still receives the processing history entry")
+def other_processing_listener_receives_entry(host: dict) -> None:
+    assert host["other_processing_received"] == ["native:buffer"]
+
+
+@then("no session processing listener remains connected")
+def no_session_processing_listener_remains(host: dict) -> None:
+    assert host["history"].entryAdded.slots == [host["other_processing_listener"]]
 
 
 @then("the session is still running")

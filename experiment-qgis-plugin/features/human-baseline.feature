@@ -23,11 +23,19 @@ Feature: Human-baseline session recording
     And the reply reports that the session holds two events
 
   Scenario: Ending a session writes the human-reference record
-    Given a session is active with two logged events
+    Given a session is active with raw host observations and a note
     When I end the session
     Then human-reference-record.json exists in the session directory
-    And the record's step count excludes the start and end markers
+    And the record leaves study steps and tools pending review
+    And the record retains raw observations separately from study metrics
     And the record hashes every output file the participant left behind
+
+  Scenario: Ending a session with no evidence leaves study metrics unknown
+    Given a session is active
+    When I end the session
+    Then human-reference-record.json exists in the session directory
+    And the record leaves study steps and tools pending review
+    And the record reports missing processing history and pending manual review
 
   Scenario: A finished session is closed for good
     Given a session is active
@@ -44,7 +52,7 @@ Feature: Human-baseline session recording
     Then the plugin explains that the session cannot be started
 
   Scenario: Abandoning a session keeps the evidence but promotes nothing
-    Given a session is active with two logged events
+    Given a session is active with raw host observations and a note
     When I abandon the session
     Then the event log records that the session was abandoned
     And a session-abandoned marker exists in the session directory
@@ -66,3 +74,70 @@ Feature: Human-baseline session recording
   Scenario: Two sessions started in the same second keep separate evidence
     When I start two sessions for task "prep-axis-order-001" in the same second
     Then each session has its own directory and its own event log
+
+  Scenario: Processing executions are captured as partial evidence pending manual review
+    Given a QGIS host with project, canvas, and processing history open
+    And a session is active
+    When a layer is added, three processing algorithms run, and a note is logged
+    And I end the session
+    Then human-reference-record.json exists in the session directory
+    And the record leaves study steps and tools pending review
+    And the record preserves the observed processing executions and their algorithm ids
+    And the record excludes raw host observations and notes from processing metrics
+
+  Scenario: Zero processing executions without manual review still leaves study metrics unknown
+    Given a QGIS host with project, canvas, and processing history open
+    And a session is active
+    When a layer is added and the canvas scale changes
+    And I end the session
+    Then the record leaves study steps and tools pending review
+    And the record notes zero observed processing executions while manual review is pending
+
+  Scenario: Non-processing entries are ignored and malformed processing entries block verification
+    Given a QGIS host with project, canvas, and processing history open
+    And a session is active
+    When a non-processing history entry and a malformed processing entry arrive
+    And I end the session with manual review completed
+    Then the record leaves study steps and tools pending review
+    And the record flags incomplete processing history without inventing an algorithm id
+
+  Scenario: Logging a manual action group with no session running is harmless
+    When I log the manual action group "styled Jenks classes"
+    Then the plugin answers "no active session"
+
+  Scenario: Logging a blank manual action group is refused
+    Given a session is active
+    When I log the manual action group "   "
+    Then the plugin explains that a manual action group description is required
+
+  Scenario: Manual action groups without completed review remain partial evidence
+    Given a QGIS host with project, canvas, and processing history open
+    And a session is active
+    When I log the manual action group "styled Jenks classes"
+    And I end the session
+    Then the record leaves study steps and tools pending review
+    And the record retains the manual action group without attributing a tool
+
+  Scenario: Reviewed processing executions and manual action groups populate study steps and tools
+    Given a QGIS host with project, canvas, and processing history open
+    And a session is active
+    When a layer is added, three processing algorithms run, and a note is logged
+    And I log the manual action group "styled Jenks classes"
+    And I end the session with manual review completed
+    Then the record verifies 4 study steps and the observed processing tools
+    And the end summary reports reviewed steps and tools without raw sources
+
+  Scenario: A reviewed pure-manual workflow verifies an empty tools list honestly
+    Given a QGIS host with project, canvas, and processing history open
+    And a session is active
+    When I log the manual action group "selected POL polygon"
+    And I log the manual action group "exported GeoJSON"
+    And I end the session with manual review completed
+    Then the record verifies 2 study steps and an explicitly empty tools list
+
+  Scenario: Manual review cannot verify study metrics when processing history was unavailable
+    Given a session is active
+    When I log the manual action group "exported GeoJSON" using tool "qgis:save-features-as"
+    And I end the session with manual review completed
+    Then the record leaves study steps and tools pending review
+    And the record reports missing processing history while retaining the manual action group

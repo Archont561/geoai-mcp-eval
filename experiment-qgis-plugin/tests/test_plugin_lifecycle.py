@@ -8,7 +8,14 @@ from pathlib import Path
 from threading import Event
 
 import pytest
-from plugin_harness import DEMO_TASK_ID, FakeCanvas, FakeProject, install_host, read_events
+from plugin_harness import (
+    DEMO_TASK_ID,
+    FakeCanvas,
+    FakeHistoryRegistry,
+    FakeProject,
+    install_host,
+    read_events,
+)
 from qgis_sdk.ui.actions import ViewActions
 
 from experiment_plugin import plugin
@@ -196,3 +203,35 @@ def test_failed_record_publication_closes_the_incomplete_take(
     project.crsChanged.fire()
     assert recorder.tracker.events_path.read_bytes() == before
     assert loaded_plugin.call("log_note", message="late") == "no active session"
+
+
+def test_failed_record_publication_with_processing_evidence_closes_take_and_disconnects_history(
+    monkeypatch, loaded_plugin, task_suite
+) -> None:
+    project, canvas, history = FakeProject(), FakeCanvas(), FakeHistoryRegistry()
+    install_host(monkeypatch, project=project, canvas=lambda: canvas, history_registry=history)
+    loaded_plugin.call("start_session", task_id=DEMO_TASK_ID, base_dir=str(task_suite))
+    recorder = plugin._ACTIVE["session"]
+    assert recorder is not None
+    history.add_entry(
+        "processing",
+        {"algorithm_id": "native:buffer", "parameters": {"DISTANCE": 5}},
+    )
+    replace = Path.replace
+
+    def fail_publication(path, target):
+        if path.name.startswith(".human-reference-record-"):
+            raise OSError("record publication failed")
+        return replace(path, target)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "replace", fail_publication)
+        with pytest.raises(OSError, match="record publication failed"):
+            loaded_plugin.call("end_session", manual_review_complete=True)
+
+    assert recorder.status == "incomplete"
+    assert not (recorder.output_dir / "human-reference-record.json").exists()
+    assert not history.entryAdded.slots
+    before = recorder.tracker.events_path.read_bytes()
+    history.add_entry("processing", {"algorithm_id": "native:clip", "parameters": {}})
+    assert recorder.tracker.events_path.read_bytes() == before

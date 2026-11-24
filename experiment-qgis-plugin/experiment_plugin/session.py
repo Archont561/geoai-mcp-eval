@@ -26,11 +26,21 @@ from tempfile import NamedTemporaryFile
 from typing import Any
 
 from experiment_plugin import __version__
+from experiment_plugin.metrics import (
+    METRICS_STATUS_NOT_STARTED,
+    ManualActionGroup,
+    ProcessingExecution,
+    SessionMetricsState,
+    normalize_timestamp,
+    sanitize_parameters,
+    study_metrics_skeleton,
+)
 
 # Single source of truth is experiment_plugin.__version__. pyproject.toml carries the
 # same literal because qgis-sdk build reads [project] version statically (it rejects
 # PEP 621 dynamic with META002); test_version_is_single_sourced pins the two equal.
 RECORDER_VERSION = __version__
+RECORD_VERSION = 2
 TEMPLATE_KEYS = (
     "record_version",
     "status",
@@ -41,6 +51,7 @@ TEMPLATE_KEYS = (
     "participant_code",
     "consent",
     "session",
+    "study_metrics",
     "outputs",
     "oracle_report_path",
     "oracle_passed",
@@ -100,7 +111,7 @@ def baseline_dir_for(task_yaml: Path, task_id: str) -> Path:
 
 def template_skeleton() -> dict[str, Any]:
     return {
-        "record_version": 1,
+        "record_version": RECORD_VERSION,
         "status": "not_started",
         "task_id": None,
         "task_file_sha256": None,
@@ -113,11 +124,13 @@ def template_skeleton() -> dict[str, Any]:
             "ended_at_utc": None,
             "elapsed_minutes": None,
             "steps": None,
-            "tools": [],
+            "tools": None,
+            "metrics_status": METRICS_STATUS_NOT_STARTED,
             "software_versions": {"qgis": None, "gdal": None, "geos": None, "proj": None},
             "network_disabled": None,
             "deviations_or_interruptions": [],
         },
+        "study_metrics": study_metrics_skeleton(),
         "outputs": [],
         "oracle_report_path": None,
         "oracle_passed": None,
@@ -192,15 +205,82 @@ class HumanBaselineSession:
     # None = the host did not verify network isolation (every host today); never
     # default to True, which would fabricate an offline session the host never enforced.
     network_disabled: bool | None = None
-    tools_used: list[str] = field(default_factory=list)
+    metrics: SessionMetricsState = field(default_factory=SessionMetricsState)
     status: str = "in_progress"
 
     # -- events -----------------------------------------------------------
 
-    def log(self, event: str, tool: str | None = None, **fields: Any) -> None:
-        if tool and tool not in self.tools_used:
-            self.tools_used.append(tool)
-        self.tracker.record(event, tool=tool, **fields)
+    def log(self, event: str, source: str | None = None, **fields: Any) -> None:
+        self.metrics.note_observation_source(source)
+        self.metrics.raw_event_count += 1
+        self.tracker.record(event, source=source, **fields)
+
+    def record_processing_execution(
+        self,
+        algorithm_id: str,
+        *,
+        parameters: Any = None,
+        history_entry_id: int | None = None,
+        entry_timestamp: Any = None,
+    ) -> dict[str, Any]:
+        clean_params = sanitize_parameters(parameters)
+        clean_ts = normalize_timestamp(entry_timestamp)
+        entry = self.tracker.record(
+            "processing_algorithm",
+            source="host:processing",
+            algorithm_id=algorithm_id,
+            parameters=clean_params,
+            history_entry_id=history_entry_id,
+            entry_timestamp=clean_ts,
+        )
+        self.metrics.processing_executions.append(
+            ProcessingExecution(
+                ts=entry["ts"],
+                algorithm_id=algorithm_id,
+                parameters=clean_params,
+                history_entry_id=history_entry_id,
+                entry_timestamp=clean_ts,
+            )
+        )
+        return entry
+
+    def record_unparsed_processing_entry(
+        self, *, history_entry_id: int | None = None, detail: str = "missing algorithm_id"
+    ) -> dict[str, Any]:
+        self.metrics.processing_history_incomplete = True
+        self.metrics.note_observation_source("host:processing")
+        self.metrics.raw_event_count += 1
+        return self.tracker.record(
+            "processing_history_unparsed",
+            source="host:processing",
+            history_entry_id=history_entry_id,
+            detail=detail,
+        )
+
+    def record_manual_action_group(
+        self, action_group: str, *, tool: str | None = None
+    ) -> dict[str, Any]:
+        clean_group = action_group.strip()
+        if not clean_group:
+            raise ValueError("action_group must be non-empty")
+        clean_tool = tool.strip() if isinstance(tool, str) and tool.strip() else None
+        entry = self.tracker.record(
+            "manual_action_group",
+            source="manual",
+            action_group=clean_group,
+            tool=clean_tool,
+        )
+        self.metrics.manual_action_groups.append(
+            ManualActionGroup(ts=entry["ts"], action_group=clean_group, tool=clean_tool)
+        )
+        return entry
+
+    def set_hook_status(
+        self, connected: list[str], failures: list[str], *, processing_connected: bool
+    ) -> None:
+        self.metrics.hooks_connected = list(connected)
+        self.metrics.hook_failures = list(failures)
+        self.metrics.processing_hook_connected = processing_connected
 
     # -- finish -----------------------------------------------------------
 
@@ -214,7 +294,13 @@ class HumanBaselineSession:
                 )
         return outputs
 
-    def _build_record(self, ended: datetime, outputs: list[dict[str, Any]]) -> dict[str, Any]:
+    def _build_record(
+        self,
+        ended: datetime,
+        outputs: list[dict[str, Any]],
+        *,
+        manual_review_complete: bool = False,
+    ) -> dict[str, Any]:
         record = template_skeleton()
         record.update(
             {
@@ -227,28 +313,34 @@ class HumanBaselineSession:
             }
         )
         elapsed = round((ended - self.started_at).total_seconds() / 60, 2)
+        steps, tools, metrics_status, study_metrics = self.metrics.build_summary(
+            manual_review_complete=manual_review_complete
+        )
         record["session"].update(
             {
                 "started_at_utc": self.started_at.isoformat(),
                 "ended_at_utc": ended.isoformat(),
                 "elapsed_minutes": elapsed,
-                "steps": max(0, self.tracker.event_count - 1),  # exclude session_start marker
-                "tools": list(self.tools_used),
+                "steps": steps,
+                "tools": tools,
+                "metrics_status": metrics_status,
                 "software_versions": host_software_versions(),
                 "network_disabled": self.network_disabled,
                 "deviations_or_interruptions": [],
             }
         )
+        record["study_metrics"] = study_metrics
+        record["observations"] = self.metrics.build_observations()
         record["outputs"] = outputs
         record["recorder"] = f"experiment-plugin session recorder v{RECORDER_VERSION}"
         record["environment"] = host_identity()
         record["events_path"] = "events.jsonl"
         return record
 
-    def finish(self) -> Path:
+    def finish(self, *, manual_review_complete: bool = False) -> Path:
         ended = utc_now()
         outputs = self._collect_outputs()
-        record = self._build_record(ended, outputs)
+        record = self._build_record(ended, outputs, manual_review_complete=manual_review_complete)
         record_path = self.output_dir / "human-reference-record.json"
         # Publish beside the event log only after its terminal event is written.
         pending: Path | None = None
@@ -329,7 +421,9 @@ def abandon_session(session: HumanBaselineSession, reason: str = "user requested
                 "reason": reason,
                 "started_at_utc": session.started_at.isoformat(),
                 "event_count": session.tracker.event_count,
-                "tools_used": list(session.tools_used),
+                "observation_sources": list(session.metrics.observation_sources),
+                "processing_executions": len(session.metrics.processing_executions),
+                "manual_action_groups": len(session.metrics.manual_action_groups),
                 "record_written": False,
             },
             indent=2,

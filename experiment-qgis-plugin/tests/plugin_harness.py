@@ -268,6 +268,7 @@ def install_fake_qt(monkeypatch: pytest.MonkeyPatch) -> None:
     # Cached native host modules are not children of the fake qgis package.
     # Isolate the panel doubles even when Pixi has already imported PyQGIS.
     monkeypatch.setitem(sys.modules, "qgis.core", None)
+    monkeypatch.setitem(sys.modules, "qgis.gui", None)
     monkeypatch.setitem(sys.modules, "qgis.utils", None)
     monkeypatch.setitem(sys.modules, "qgis.PyQt", pyqt)
     monkeypatch.setitem(sys.modules, "qgis.PyQt.QtCore", core)
@@ -331,14 +332,61 @@ class FakeCanvas:
         return FakeExtent()
 
 
+class FakeHistoryEntry:
+    def __init__(
+        self,
+        provider_id: str,
+        entry: dict[str, Any],
+        timestamp: Any = "2026-11-24T12:00:00+00:00",
+    ) -> None:
+        self.providerId = provider_id
+        self.entry = entry
+        self.timestamp = timestamp
+
+
+class FakeHistoryRegistry:
+    """A QgsHistoryProviderRegistry stand-in emitting entryAdded signals."""
+
+    def __init__(self) -> None:
+        self.entryAdded = FakeSignal()
+        self._next_id = 0
+
+    def add_entry(
+        self,
+        provider_id: str,
+        details: dict[str, Any],
+        *,
+        timestamp: Any = "2026-11-24T12:00:00+00:00",
+        backend: str = "LocalProfile",
+    ) -> int:
+        self._next_id += 1
+        entry = FakeHistoryEntry(provider_id, details, timestamp=timestamp)
+        self.entryAdded.fire(self._next_id, entry, backend)
+        return self._next_id
+
+    def queue_entry(
+        self,
+        provider_id: str,
+        details: dict[str, Any],
+        *,
+        timestamp: Any = "2026-11-24T12:00:00+00:00",
+        backend: str = "LocalProfile",
+    ) -> Callable[[], None]:
+        self._next_id += 1
+        entry = FakeHistoryEntry(provider_id, details, timestamp=timestamp)
+        return self.entryAdded.queue(self._next_id, entry, backend)
+
+
 def install_host(
     monkeypatch: pytest.MonkeyPatch,
     *,
     project: object | None = None,
     canvas: object | None = None,
     iface_raises: Exception | None = None,
+    history_registry: object | None = None,
+    history_raises: Exception | None = None,
 ) -> None:
-    """Fake ``qgis.core``/``qgis.utils`` so the desktop host looks installed.
+    """Fake ``qgis.core``/``qgis.utils``/``qgis.gui`` so the desktop host looks installed.
 
     With ``project`` left as ``None`` the module imports but ``QgsProject
     .instance()`` raises, which is the "standalone run, no project open" host.
@@ -368,15 +416,33 @@ def install_host(
         utils.iface = types.SimpleNamespace(mapCanvas=canvas_factory)
     monkeypatch.setitem(sys.modules, "qgis.core", core)
     monkeypatch.setitem(sys.modules, "qgis.utils", utils)
+    if history_registry is not None or history_raises is not None:
+        gui = types.ModuleType("qgis.gui")
+
+        class FakeQgsGui:
+            @staticmethod
+            def historyProviderRegistry():
+                if history_raises is not None:
+                    raise history_raises
+                return history_registry
+
+        gui.QgsGui = FakeQgsGui
+        monkeypatch.setitem(sys.modules, "qgis.gui", gui)
+    else:
+        gui = None
+        monkeypatch.setitem(sys.modules, "qgis.gui", None)
     qgis_pkg = sys.modules.get("qgis")
     if qgis_pkg is not None:
         monkeypatch.setattr(qgis_pkg, "core", core, raising=False)
         monkeypatch.setattr(qgis_pkg, "utils", utils, raising=False)
+        if gui is not None:
+            monkeypatch.setattr(qgis_pkg, "gui", gui, raising=False)
 
 
 def remove_host(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make ``import qgis.core`` fail, i.e. no QGIS on this machine."""
+    """Make ``import qgis.core``/``qgis.gui`` fail, i.e. no QGIS on this machine."""
     monkeypatch.setitem(sys.modules, "qgis.core", None)
+    monkeypatch.setitem(sys.modules, "qgis.gui", None)
 
 
 # --- the plugin under test ---------------------------------------------------
@@ -558,6 +624,8 @@ __all__ = [
     "DEMO_TASK_ID",
     "FakeCanvas",
     "FakeFileDialog",
+    "FakeHistoryEntry",
+    "FakeHistoryRegistry",
     "FakeMessageBox",
     "FakeProject",
     "FakeTimer",

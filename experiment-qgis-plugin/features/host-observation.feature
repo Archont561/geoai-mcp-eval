@@ -335,3 +335,81 @@ Feature: Observing the QGIS host
     When I start a session for task "prep-axis-order-001"
     Then the start message reports the canvas hook failure
     And the session is still running
+
+  Scenario: A processing history hook failure is reported without stopping the recording
+    Given a QGIS host whose processing history cannot be wired
+    When I start a session for task "prep-axis-order-001"
+    Then the start message reports the processing hook failure
+    And the session is still running
+
+  Scenario: Processing executions survive a raw host observation flood
+    Given a QGIS host with project, canvas, and processing history open
+    And a session is active
+    When the project reports 2005 CRS changes
+    And the processing algorithm "native:buffer" executes
+    And I end the session
+    Then the record preserves one observed processing execution for "native:buffer"
+
+  Scenario Outline: Processing executions after a terminal take cannot alter its evidence
+    Given a QGIS host with project, canvas, and processing history open
+    And a session is active
+    When the processing algorithm "native:buffer" executes
+    And I <action> the session
+    And I capture the terminal evidence
+    And the processing algorithm "native:clip" executes
+    Then the terminal evidence remains unchanged
+    And the processing history listener is disconnected
+
+    Examples:
+      | action  |
+      | end     |
+      | abandon |
+
+  Scenario Outline: Queued processing executions cannot alter a terminal take
+    Given a QGIS host with project, canvas, and processing history open
+    And a session is active
+    When a processing execution for "native:clip" is queued
+    And I <action> the session
+    And I capture the terminal evidence
+    And the queued changes are delivered
+    Then the terminal evidence remains unchanged
+    And the processing history listener is disconnected
+
+    Examples:
+      | action  |
+      | end     |
+      | abandon |
+
+  Scenario Outline: A new session isolates processing executions from a previous take
+    Given a QGIS host with project, canvas, and processing history open
+    And a session is active
+    When the processing algorithm "native:buffer" executes
+    And I <action> the session
+    And I capture the terminal evidence
+    And I start a new session
+    And the processing algorithm "native:clip" executes
+    Then the terminal evidence remains unchanged
+    And the new session alone records processing execution "native:clip"
+
+    Examples:
+      | action  |
+      | end     |
+      | abandon |
+
+  Scenario: Unloading and reloading isolates processing history across takes
+    Given a QGIS host with project, canvas, and processing history open
+    And a session is active
+    When the plugin is unloaded and reloaded
+    And I start another session and execute processing algorithm "native:clip"
+    Then the unloaded take is marked abandoned without a record
+    And the unloaded take's evidence remains unchanged
+    And only the reloaded session records processing execution "native:clip"
+
+  Scenario: Ending a session leaves other processing history listeners connected
+    Given a QGIS host with project, canvas, and processing history open
+    And another component listens to processing history changes
+    And a session is active
+    When I end the session
+    And the processing algorithm "native:buffer" executes
+    Then the other component still receives the processing history entry
+    And no session processing listener remains connected

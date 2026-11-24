@@ -28,25 +28,29 @@ def copy_suite(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def assert_record(record: dict, out_dir: Path) -> None:
-    import hashlib
-
-    assert set(session.TEMPLATE_KEYS) <= set(record)
-    assert record["status"] == "recorded"
-    assert record["task_id"] == "prep-axis-order-001"
-    assert len(record["task_file_sha256"]) == 64
-    assert len(record["fixture_sha256"]) == 64
-    assert record["participant_code"] == "P01"
-    assert record["session"]["network_disabled"] is True
-    assert record["session"]["steps"] == 2  # start/end markers are not steps
-    assert set(record["session"]["tools"]) == {"host:project", "note"}
-    assert record["session"]["elapsed_minutes"] >= 0
-    outputs = {o["path"]: o for o in record["outputs"]}
-    assert "result.geojson" in outputs
-    assert (
-        outputs["result.geojson"]["sha256"]
-        == hashlib.sha256((out_dir / "result.geojson").read_bytes()).hexdigest()
+def test_template_skeleton_matches_committed_template() -> None:
+    template = json.loads(
+        (TASK_ROOT / "human-reference-record.template.json").read_text(encoding=UTF8)
     )
+    assert session.template_skeleton() == template
+    assert set(session.TEMPLATE_KEYS) == set(template)
+    assert template["record_version"] == 2
+    assert template["session"]["steps"] is None
+    assert template["session"]["tools"] is None
+    assert template["session"]["metrics_status"] == "not_started"
+    assert template["study_metrics"]["status"] == "not_started"
+
+
+def test_abandon_session_records_observation_sources_not_tools(tmp_path: Path) -> None:
+    suite = copy_suite(tmp_path)
+    recorder = session.start_session("prep-axis-order-001", suite)
+    recorder.log("layers_added", source="host:project", count=1)
+    recorder.log("note", source="note", message="interrupted")
+    marker = session.abandon_session(recorder)
+    payload = json.loads(marker.read_text(encoding=UTF8))
+    assert payload["record_written"] is False
+    assert payload["observation_sources"] == ["host:project", "note"]
+    assert "tools_used" not in payload
 
 
 def test_finish_hashes_every_output_file(tmp_path: Path) -> None:
@@ -67,7 +71,7 @@ def test_finish_hashes_every_output_file(tmp_path: Path) -> None:
 def test_render_log_renders_events_and_header(tmp_path: Path) -> None:
     suite = copy_suite(tmp_path)
     recorder = session.start_session("prep-axis-order-001", suite, participant_code="P1")
-    recorder.log("note", tool="note", message="hello world")
+    recorder.log("note", source="note", message="hello world")
     text = session.render_log(recorder)
     lines = text.splitlines()
     assert lines[0].startswith("human-baseline session log")
@@ -93,3 +97,43 @@ def test_render_log_reports_missing_event_log(tmp_path: Path) -> None:
     recorder.tracker.events_path.unlink()
     text = session.render_log(recorder)
     assert "(event log unavailable:" in text
+
+
+def test_metrics_helpers_sanitize_non_json_parameters_and_timestamps() -> None:
+    from datetime import UTC, datetime
+
+    from experiment_plugin import metrics
+
+    class CustomQgisValue:
+        def __str__(self) -> str:
+            return "EPSG:2180"
+
+    class FakeQDateTime:
+        def toPyDateTime(self) -> datetime:
+            return datetime(2026, 11, 24, 12, 30, 0, tzinfo=UTC)
+
+    assert metrics.sanitize_parameters({"CRS": CustomQgisValue(), "N": 5}) == {
+        "CRS": "EPSG:2180",
+        "N": 5,
+    }
+    assert metrics.sanitize_parameters("not-a-mapping") is None
+    assert metrics.normalize_timestamp(FakeQDateTime()) == "2026-11-24T12:30:00+00:00"
+    assert metrics.normalize_timestamp(" 2026-11-24T12:00:00Z ") == "2026-11-24T12:00:00Z"
+    assert metrics.normalize_timestamp("   ") is None
+    assert metrics.normalize_timestamp(None) is None
+    assert metrics.normalize_timestamp(12345) == "12345"
+
+
+def test_reviewed_metrics_merge_and_deduplicate_processing_and_manual_tools(
+    tmp_path: Path,
+) -> None:
+    suite = copy_suite(tmp_path)
+    recorder = session.start_session("prep-axis-order-001", suite)
+    recorder.set_hook_status(["project", "processing"], [], processing_connected=True)
+    recorder.record_processing_execution("native:buffer", parameters={"DISTANCE": 10})
+    recorder.record_manual_action_group("re-ran buffer check", tool="native:buffer")
+    recorder.record_manual_action_group("exported layer", tool="qgis:save-features-as")
+    record = json.loads(recorder.finish(manual_review_complete=True).read_text(encoding=UTF8))
+    assert record["session"]["steps"] == 3
+    assert record["session"]["tools"] == ["native:buffer", "qgis:save-features-as"]
+    assert record["session"]["metrics_status"] == "reviewed"

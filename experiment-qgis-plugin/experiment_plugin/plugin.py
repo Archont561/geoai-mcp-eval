@@ -471,6 +471,11 @@ def start_session(
     _ACTIVE["session"] = session
     try:
         hooks, failures = _connect_host_hooks(session, resources.hooks)
+        session.set_hook_status(
+            hooks,
+            failures,
+            processing_connected="processing" in hooks,
+        )
         return _start_message(session, hooks, failures)
     except BaseException as error:
         _retire_failed_session(session, resources, error, "starting")
@@ -514,8 +519,22 @@ def log_note(_ctx: PluginContext, message: str) -> str:
     session = _ACTIVE["session"]
     if session is None:
         return "no active session"
-    session.log("note", tool="note", message=message)
+    session.log("note", source="note", message=message)
     return f"note recorded ({session.tracker.event_count} events so far)"
+
+
+@app.action(id="log_manual_action", title="Log manual action group")
+def log_manual_action(_ctx: PluginContext, action_group: str, tool: str = "") -> str:
+    """Record one manually identified GIS action group without fabricating a tool."""
+    session = _ACTIVE["session"]
+    if session is None:
+        return "no active session"
+    try:
+        session.record_manual_action_group(action_group, tool=tool or None)
+    except ValueError:
+        return "manual action group description is required"
+    count = len(session.metrics.manual_action_groups)
+    return f"manual action group recorded ({count} manual groups so far)"
 
 
 def _retire_session(
@@ -573,8 +592,25 @@ def abandon_session(_ctx: PluginContext) -> str:
     )
 
 
+def _metrics_summary_line(
+    session: baseline.HumanBaselineSession, *, manual_review_complete: bool
+) -> str:
+    steps, tools, metrics_status, _detail = session.metrics.build_summary(
+        manual_review_complete=manual_review_complete
+    )
+    if metrics_status == "reviewed":
+        tool_text = ", ".join(tools or []) or "none"
+        return (
+            f"events: {session.tracker.event_count}  steps: {steps}  tools: {tool_text} (reviewed)"
+        )
+    return (
+        f"events: {session.tracker.event_count}  "
+        f"observations: {session.metrics.raw_event_count}  metrics: pending review"
+    )
+
+
 @app.action(id="end_session", title="End human-baseline session")
-def end_session(_ctx: PluginContext) -> str:
+def end_session(_ctx: PluginContext, manual_review_complete: bool = False) -> str:
     """Stop the timer, hash outputs, write human-reference-record.json."""
     session = _ACTIVE["session"]
     if session is None:
@@ -588,7 +624,7 @@ def end_session(_ctx: PluginContext) -> str:
     except OSError:
         log_size = None
     try:
-        record_path = session.finish()
+        record_path = session.finish(manual_review_complete=manual_review_complete)
     except BaseException as error:
         try:
             current_size = session.tracker.events_path.stat().st_size
@@ -609,7 +645,7 @@ def end_session(_ctx: PluginContext) -> str:
     _retire_session(session, resources)
     lines = [
         f"session ended for {session.task_id}",
-        f"events: {session.tracker.event_count}  tools: {', '.join(session.tools_used) or 'none'}",
+        _metrics_summary_line(session, manual_review_complete=manual_review_complete),
         f"record written: {record_path}",
         "next: pixi run experiment pilot determinism "
         f"{session.task_id} --artifacts-dir {session.output_dir}",
