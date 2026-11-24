@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import UTC, datetime
 from pathlib import Path
 
+from experiment.adapters.github_workflow import GitHubWorkflowAdapter
 from experiment.services.workflow import find_repo_root
 
 
@@ -42,18 +42,6 @@ def _oracle_rows(payload: dict[str, object]) -> list[tuple[str, str]]:
     oracle = payload.get("oracle")
     rows = oracle if isinstance(oracle, dict) else {}
     return sorted((str(k), str(v)) for k, v in rows.items())
-
-
-def _run_id(run_id: str) -> str:
-    env_run_id = os.environ.get("RUN_ID") or os.environ.get("GITHUB_RUN_ID")
-    return run_id or env_run_id or "local"
-
-
-def _run_url() -> str:
-    repo_url = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
-    repo = os.environ.get("GITHUB_REPOSITORY", "")
-    run_number = os.environ.get("GITHUB_RUN_ID", "")
-    return f"{repo_url}/{repo}/actions/runs/{run_number}" if repo and run_number else ""
 
 
 def _header_lines(rid: str, pins: dict[str, str]) -> list[str]:
@@ -147,14 +135,19 @@ def _model_lines(harvest: Path) -> list[str]:
     return lines
 
 
-def render_summary(harvest_dir: Path = Path("harvest"), run_id: str = "") -> str:
-    """Write ``<harvest_dir>/summary.md`` (and append to ``$GITHUB_STEP_SUMMARY`` if set)."""
+def render_summary(
+    harvest_dir: Path = Path("harvest"),
+    run_id: str = "",
+    gh: GitHubWorkflowAdapter | None = None,
+) -> str:
+    """Write ``<harvest_dir>/summary.md`` and append to ``$GITHUB_STEP_SUMMARY`` via adapter."""
+    adapter = gh or GitHubWorkflowAdapter()
     repo_root = find_repo_root()
     harvest = harvest_dir if harvest_dir.is_absolute() else (repo_root / harvest_dir)
-    rid = _run_id(run_id)
+    rid = adapter.resolve_run_id(run_id, fallback_local=False)
     payload = _summary_payload(harvest)
     lines = _header_lines(rid, _pins(harvest))
-    lines += _artifact_lines(_run_url(), rid)
+    lines += _artifact_lines(adapter.run_url(), rid)
     lines += _what_happened_lines(payload, _oracle_rows(payload))
     lines += _model_lines(harvest)
     lines += [
@@ -168,10 +161,7 @@ def render_summary(harvest_dir: Path = Path("harvest"), run_id: str = "") -> str
         "",
     ]
     markdown = "\n".join(lines)
-    summary_target = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary_target:
-        with open(summary_target, "a", encoding="utf-8") as handle:
-            handle.write(markdown)
+    adapter.write_step_summary(markdown)
     harvest.mkdir(parents=True, exist_ok=True)
     (harvest / "summary.md").write_text(markdown, encoding="utf-8")
     return markdown

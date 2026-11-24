@@ -20,6 +20,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, NamedTuple
 
+from experiment.adapters.github_workflow import GitHubWorkflowAdapter
+
 OLLAMA_API = "http://127.0.0.1:11434"
 READY_ATTEMPTS = 60
 READY_SLEEP_S = 2
@@ -36,15 +38,7 @@ def find_repo_root() -> Path:
 
 
 def resolve_run_id(run_id: str) -> str:
-    if run_id:
-        return run_id
-    env = os.environ
-    if env.get("RUN_ID"):
-        return env["RUN_ID"]
-    if env.get("GITHUB_RUN_ID"):
-        sha = env.get("GITHUB_SHA", "local")[:8]
-        return f"{env['GITHUB_RUN_ID']}-{sha}"
-    return "local-" + datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return GitHubWorkflowAdapter().resolve_run_id(run_id)
 
 
 def experiment_env(repo_root: Path) -> dict[str, str]:
@@ -110,6 +104,7 @@ def run_preflight(run_id: str = "") -> tuple[str, dict[str, str], Path]:
     }
     pins_path = run_dir / "env-pins.txt"
     pins_path.write_text("".join(f"{k}={v}\n" for k, v in pins.items()), encoding="utf-8")
+    GitHubWorkflowAdapter().write_outputs({"run_id": rid, **pins})
     return rid, pins, pins_path
 
 
@@ -193,7 +188,11 @@ def run_model(model: str = "qwen2.5:3b", run_id: str = "") -> tuple[str, str, Pa
         (run_dir / "model-smoke.json").write_text(
             json.dumps(payload, sort_keys=True), encoding="utf-8"
         )
-        return digest, response_text[:80], run_dir
+        snippet = response_text[:80]
+        GitHubWorkflowAdapter().write_outputs(
+            {"run_id": rid, "model": model, "digest": digest, "smoke_response": snippet}
+        )
+        return digest, snippet, run_dir
     finally:
         _stop_owner(owner)
 
@@ -454,6 +453,13 @@ def run_harvest(cfg: HarvestConfig) -> dict[str, object]:
     }
     (harvest / "summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8"
+    )
+    GitHubWorkflowAdapter().write_outputs(
+        {
+            "run_id": rid,
+            "complete": not comp.missing,
+            "missing_count": len(comp.missing),
+        }
     )
     if comp.missing and cfg.fail_on_missing:
         raise RuntimeError(
