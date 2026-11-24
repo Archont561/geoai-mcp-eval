@@ -62,6 +62,11 @@ def run_cli(cli: CliRunner, command: str, **substitutions: str) -> dict:
     }
 
 
+def _unwrapped_output(result: dict) -> str:
+    """Remove console line wraps without inserting spaces into long paths."""
+    return result["output"].replace("\r\n", "\n").replace("\n", "")
+
+
 @when(parsers.parse('I run the command "{command}"'), target_fixture="result")
 def i_run_the_command(
     cli: CliRunner, command: str, suite: dict, request: pytest.FixtureRequest
@@ -454,7 +459,7 @@ def output_names_sandbox_env(result: dict) -> None:
 
 @then("the output says the script is missing")
 def output_says_script_missing(result: dict, script: Path) -> None:
-    assert f"missing script: {script}" in " ".join(result["output"].split())
+    assert f"missing script: {script}" in _unwrapped_output(result)
 
 
 @then("no sandbox artifacts directory is created")
@@ -651,12 +656,12 @@ def output_reports_relation(result: dict) -> None:
 
 @then("the output says no cells were found")
 def output_says_no_cells(result: dict, output: Path) -> None:
-    assert f"no cells under {output}" in " ".join(result["output"].split())
+    assert f"no cells under {output}" in _unwrapped_output(result)
 
 
 @then("the output says the summary is missing")
 def output_says_summary_missing(result: dict, output: Path) -> None:
-    assert f"missing {output / 'summary.json'}" in " ".join(result["output"].split())
+    assert f"missing {output / 'summary.json'}" in _unwrapped_output(result)
 
 
 @then("the rescore reports that one of one cells passed the oracle")
