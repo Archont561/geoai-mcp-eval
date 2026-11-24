@@ -1,8 +1,8 @@
 """Human-baseline session recorder for the experiment plugin.
 
-Pure stdlib — no QGIS, no Qt, no qgis-sdk imports — so the whole recorder is
-testable outside QGIS. The plugin layer (plugin.py) feeds it timestamps and
-host events; the record it produces mirrors
+No top-level QGIS, Qt, or qgis-sdk imports — the recorder is testable outside
+QGIS. Plugin actions and host-observation hooks supply session events; the
+record it produces mirrors
 `experiment/tasks/human-reference-record.template.json` as closely as the host
 can truthfully provide. Fields the host cannot know (consent, oracle gate
 results, evidence storage reference) stay null — never invented.

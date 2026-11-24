@@ -15,22 +15,48 @@ Feature: Observing the QGIS host
     And the event log records one layer removed
     And the event log records the project CRS
     And the event log records the project file path
+    And the project observations keep their source and order
 
   Scenario: A project that only offers the QGIS 3 signal is still observed
     Given a QGIS host with a project that only offers the "projectRead" signal
     And a session is active
-    Then the project read hook is wired
+    When the project is read using its legacy signal
+    Then the event log records the project file path
 
   Scenario: A project with no read signal is reported but otherwise observed
     Given a QGIS host with a project that offers no read signal
     And a session is active
+    When a layer is added and the project CRS changes
     Then the start message reports the missing project read hook
-    And the layer and CRS hooks are still wired
+    And the event log records both project changes
 
   Scenario: Map canvas movement is recorded
     Given a QGIS host with a map canvas and a running session
     When the canvas extent changes and the canvas scale changes
     Then the event log records the extent and the scale
+
+  Scenario: A project hook fails partway through wiring
+    Given a QGIS host whose project hooks fail partway through wiring
+    And a session is active
+    When a layer is added and the canvas scale changes
+    Then the start message reports the project hook failure
+    And the event log records the connected project and canvas changes
+
+  Scenario: Host observations remain in the completed session evidence
+    Given a QGIS host with a project and a map canvas open
+    And a session is active
+    When two layers are added, one is removed, the project CRS changes and the project is read
+    And the canvas extent changes and the canvas scale changes
+    And I end the session
+    Then the completed event log keeps the host observations in order
+    And human-reference-record.json exists in the session directory
+
+  Scenario: A flood of host observations is capped
+    Given a QGIS host with a project open
+    And a session is active
+    When the project reports 2005 CRS changes
+    Then the event log contains 2000 entries
+    And the session is still running
 
   Scenario: A host with no QGIS running records without hooks
     Given no QGIS host on this machine

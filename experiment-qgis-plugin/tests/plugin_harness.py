@@ -250,6 +250,10 @@ def install_fake_qt(monkeypatch: pytest.MonkeyPatch) -> None:
     qgis_pkg = types.ModuleType("qgis")
     qgis_pkg.PyQt = pyqt
     monkeypatch.setitem(sys.modules, "qgis", qgis_pkg)
+    # Cached native host modules are not children of the fake qgis package.
+    # Isolate the panel doubles even when Pixi has already imported PyQGIS.
+    monkeypatch.setitem(sys.modules, "qgis.core", None)
+    monkeypatch.setitem(sys.modules, "qgis.utils", None)
     monkeypatch.setitem(sys.modules, "qgis.PyQt", pyqt)
     monkeypatch.setitem(sys.modules, "qgis.PyQt.QtCore", core)
     monkeypatch.setitem(sys.modules, "qgis.PyQt.QtWidgets", widgets)

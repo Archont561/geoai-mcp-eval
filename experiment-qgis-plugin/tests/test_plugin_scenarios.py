@@ -718,6 +718,19 @@ def host_with_project_and_canvas(monkeypatch: pytest.MonkeyPatch) -> dict:
     return {"project": project, "canvas": canvas}
 
 
+@given("a QGIS host whose project hooks fail partway through wiring", target_fixture="host")
+def host_with_partly_broken_project(monkeypatch: pytest.MonkeyPatch) -> dict:
+    project = FakeProject("readProject")
+    canvas = FakeCanvas()
+
+    def fail_to_connect(_slot) -> None:
+        raise RuntimeError("layer removal signal refused")
+
+    monkeypatch.setattr(project.layersWillBeRemoved, "connect", fail_to_connect)
+    install_host(monkeypatch, project=project, canvas=lambda: canvas)
+    return {"project": project, "canvas": canvas}
+
+
 @given("a QGIS host whose map canvas cannot be wired", target_fixture="host")
 def host_with_broken_canvas(monkeypatch: pytest.MonkeyPatch) -> dict:
     install_host(
@@ -739,7 +752,7 @@ def session_active(loaded: PluginHandle, task_suite: Path) -> dict:
     reply = loaded.call("start_session", task_id=DEMO_TASK_ID, base_dir=str(task_suite))
     recorder = plugin._ACTIVE["session"]
     assert recorder is not None, reply
-    return {"recorder": recorder, "output_dir": recorder.output_dir}
+    return {"recorder": recorder, "output_dir": recorder.output_dir, "reply": reply}
 
 
 @when("two layers are added, one is removed, the project CRS changes and the project is read")
@@ -756,6 +769,29 @@ def drive_canvas_signals(host: dict) -> None:
     canvas = host["canvas"]
     canvas.extentsChanged.fire()
     canvas.scaleChanged.fire(50000.0)
+
+
+@when("the project is read using its legacy signal")
+def drive_legacy_project_read(host: dict) -> None:
+    host["project"].projectRead.fire()
+
+
+@when("a layer is added and the project CRS changes")
+def drive_partial_project_signals(host: dict) -> None:
+    host["project"].layersAdded.fire(["a"])
+    host["project"].crsChanged.fire()
+
+
+@when("a layer is added and the canvas scale changes")
+def drive_project_and_canvas_after_failure(host: dict) -> None:
+    host["project"].layersAdded.fire(["a"])
+    host["canvas"].scaleChanged.fire(50000.0)
+
+
+@when(parsers.parse("the project reports {count:d} CRS changes"))
+def flood_project_crs_changes(host: dict, count: int) -> None:
+    for _ in range(count):
+        host["project"].crsChanged.fire()
 
 
 @then("the event log records two layers added")
@@ -779,34 +815,97 @@ def log_records_crs(running: dict) -> None:
 @then("the event log records the project file path")
 def log_records_project_path(running: dict) -> None:
     events = [e for e in read_events(running["output_dir"]) if e["event"] == "project_read"]
-    assert events[-1]["path"] == "/tmp/fake-project.qgs"
+    assert len(events) == 1
+    assert events[0]["path"] == "/tmp/fake-project.qgs"
 
 
-@then("the project read hook is wired")
-def project_read_wired(host: dict, running: dict) -> None:
-    assert len(host["project"].projectRead.slots) == 1
+@then("the project observations keep their source and order")
+def project_observations_keep_source_and_order(running: dict) -> None:
+    events = read_events(running["output_dir"])
+    assert [event["event"] for event in events] == [
+        "session_start",
+        "layers_added",
+        "layers_removed",
+        "crs_changed",
+        "project_read",
+    ]
+    assert all(event["tool"] == "host:project" for event in events[1:])
 
 
 @then("the start message reports the missing project read hook")
 def start_message_reports_missing_hook(running: dict) -> None:
-    recorder = running["recorder"]
-    assert "project_read" in " ".join(plugin._connect_host_hooks(recorder)[1])
+    assert "host hooks: project (partial)" in running["reply"]
+    assert "host hook failed: project_read: no project-read signal found" in running["reply"]
 
 
-@then("the layer and CRS hooks are still wired")
-def layers_and_crs_still_wired(host: dict) -> None:
-    project = host["project"]
-    assert project.layersAdded.slots
-    assert project.crsChanged.slots
+@then("the event log records both project changes")
+def log_records_partial_project_changes(running: dict) -> None:
+    events = read_events(running["output_dir"])
+    observations = [
+        {key: value for key, value in event.items() if key != "ts"} for event in events[1:]
+    ]
+    assert observations == [
+        {"event": "layers_added", "tool": "host:project", "count": 1},
+        {"event": "crs_changed", "tool": "host:project", "crs": "EPSG:2180"},
+    ]
+
+
+@then("the start message reports the project hook failure")
+def start_message_reports_project_failure(running: dict) -> None:
+    assert "host hooks: canvas" in running["reply"]
+    assert "host hook failed: project: layer removal signal refused" in running["reply"]
+
+
+@then("the event log records the connected project and canvas changes")
+def log_records_changes_after_project_failure(running: dict) -> None:
+    events = read_events(running["output_dir"])
+    observations = [
+        {key: value for key, value in event.items() if key != "ts"} for event in events[1:]
+    ]
+    assert observations == [
+        {"event": "layers_added", "tool": "host:project", "count": 1},
+        {"event": "canvas_scale", "tool": "host:canvas", "scale": 50000.0},
+    ]
 
 
 @then("the event log records the extent and the scale")
 def log_records_extent_and_scale(host: dict) -> None:
     events = read_events(host["running"]["output_dir"])
-    extent = [e for e in events if e["event"] == "canvas_extent"]
-    scale = [e for e in events if e["event"] == "canvas_scale"]
-    assert extent and scale
-    assert scale[-1]["scale"] == 50000.0
+    observations = [
+        {key: value for key, value in event.items() if key != "ts"}
+        for event in events
+        if event["event"] in {"canvas_extent", "canvas_scale"}
+    ]
+    assert observations == [
+        {
+            "event": "canvas_extent",
+            "tool": "host:canvas",
+            "extent": {"xmin": 0.0, "ymin": 1.0, "xmax": 100.0, "ymax": 51.0},
+        },
+        {"event": "canvas_scale", "tool": "host:canvas", "scale": 50000.0},
+    ]
+
+
+@then("the completed event log keeps the host observations in order")
+def completed_log_keeps_host_observations(running: dict) -> None:
+    assert [event["event"] for event in read_events(running["output_dir"])] == [
+        "session_start",
+        "layers_added",
+        "layers_removed",
+        "crs_changed",
+        "project_read",
+        "canvas_extent",
+        "canvas_scale",
+        "session_end",
+    ]
+
+
+@then(parsers.parse("the event log contains {count:d} entries"))
+def event_log_contains_entries(running: dict, count: int) -> None:
+    events = read_events(running["output_dir"])
+    assert len(events) == count
+    assert events[0]["event"] == "session_start"
+    assert all(event["event"] == "crs_changed" for event in events[1:])
 
 
 @then("the start message says no host hooks were connected")
@@ -827,12 +926,14 @@ def start_message_has_no_failures(started: dict) -> None:
 
 @then("the start message reports the canvas hook failure")
 def start_message_reports_canvas_failure(started: dict) -> None:
-    assert "canvas:" in started["reply"]
+    assert "host hooks: project" in started["reply"]
+    assert "host hook failed: canvas: iface exploded" in started["reply"]
 
 
 @then("the session is still running")
-def the_session_is_still_running() -> None:
-    assert plugin._ACTIVE["session"] is not None
+def the_session_is_still_running(loaded: PluginHandle) -> None:
+    reply = loaded.call("start_session", task_id="another-task")
+    assert reply.startswith("session already active")
 
 
 # --- bind the feature files -------------------------------------------------
