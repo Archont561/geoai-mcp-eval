@@ -24,10 +24,9 @@ known-first-party = ["experiment", "experiment_plugin"]
 # (import-linter), wired into `pixi run tools check` through the `architecture`
 # tool's dependency.
 #
-# These describe the *target* boundaries. While the refactor is in flight the
-# contracts that do not yet hold are marked non-breaking; flip `contracts` to
-# emptiness as each layer lands. A contract that never fails is worthless, so
-# `test_architecture_contracts_bite` pins that the shipped graph is exercised.
+# The layers contract is deliberately non-exhaustive while older top-level
+# modules are migrated. The architecture tests run the shipped configuration
+# against both the repository and deliberately broken copies of its import graph.
 [tool.importlinter]
 root_package = "experiment"
 include_external_packages = true
@@ -55,6 +54,22 @@ name = "The arm A catalogue never imports the oracle"
 type = "forbidden"
 source_modules = ["experiment.gis_ops"]
 forbidden_modules = ["experiment.oracle"]
+
+[[tool.importlinter.contracts]]
+name = "CLI, services, adapters and domain follow dependency direction"
+type = "layers"
+layers = [
+  "experiment.cli",
+  "experiment.services",
+  "experiment.adapters",
+  "experiment.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "Services have no CLI or presentation framework dependencies"
+type = "forbidden"
+source_modules = ["experiment.services"]
+forbidden_modules = ["typer", "rich"]
 
 [tool.pytest.ini_options]
 pythonpath = ["experiment/src", "experiment-qgis-plugin"]

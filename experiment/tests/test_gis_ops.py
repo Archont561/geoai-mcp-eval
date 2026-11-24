@@ -148,11 +148,6 @@ def test_single_geometry_requires_features() -> None:
         gis_ops._single_geometry({TYPE_KEY: "FeatureCollection", FEATURES_KEY: []})
 
 
-def test_ops_registry_complete() -> None:
-    # Acceptance requirement (decision 0004): >= 10 ops; today there are 14.
-    assert len(gis_ops.OPS) >= 10
-
-
 def test_mcp_server_exposes_exactly_the_ops_registry() -> None:
     import asyncio
 

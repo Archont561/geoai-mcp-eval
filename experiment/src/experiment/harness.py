@@ -1,6 +1,6 @@
 """Shared plumbing for the prototype cells: paths, transcript, sandbox.
 
-Everything both the runner (prototype.py) and the drivers (drivers.py) need,
+Everything both the run service (services/runs.py) and the drivers need,
 kept dependency-free so it can be imported from either side without cycles.
 """
 

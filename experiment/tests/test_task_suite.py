@@ -69,16 +69,6 @@ def test_standard_jsonschema_keywords_are_supported() -> None:
     assert "is not of type 'string'" in issues[0].message
 
 
-def test_prepared_pilot_suite_validates() -> None:
-    report = validate_suite(TASK_ROOT)
-
-    assert report.passed
-    assert report.task_count == 3
-    assert report.traps_found == frozenset(
-        {"crs-axis-order", "topology-de9im", "jenks-classification"}
-    )
-
-
 def test_validator_reports_duplicate_ids_and_unimplemented_oracle(tmp_path: Path) -> None:
     root = copy_suite(tmp_path)
     first = root / AXIS_TASK_YAML
@@ -252,16 +242,3 @@ def test_validator_does_not_crash_on_wrongly_shaped_yaml_values(tmp_path: Path) 
     (root / "schema-v1.json").write_text("[]", encoding=UTF8)
     report = validate_suite(root)
     assert any("schema root must be an object" in issue.message for issue in report.issues)
-
-
-def test_validator_reports_missing_pilot_family_and_trap(tmp_path: Path) -> None:
-    root = copy_suite(tmp_path)
-    (root / "cartography-jenks-001.yaml").unlink()
-    path = root / AXIS_TASK_YAML
-    task = yaml.safe_load(path.read_text(encoding=UTF8))
-    task["required_traps"] = ["topology-de9im"]
-    write_task(path, task)
-    report = validate_suite(root)
-    messages = " ".join(issue.message for issue in report.issues)
-    assert "missing task family C" in messages
-    assert "required pilot trap is not covered" in messages

@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import json
 import shlex
-import subprocess
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -24,7 +25,6 @@ from cli_harness import write_relation_artifact as _write_relation
 from pytest_bdd import given, parsers, scenarios, then, when
 from typer.testing import CliRunner
 
-from experiment.cli import qgis as qgis_cli
 from experiment.cli._loader import app
 
 FEATURE_DIR = Path(__file__).resolve().parents[1] / "features"
@@ -64,12 +64,13 @@ def run_cli(cli: CliRunner, command: str, **substitutions: str) -> dict:
 
 @when(parsers.parse('I run the command "{command}"'), target_fixture="result")
 def i_run_the_command(
-    cli: CliRunner, command: str, suite: dict, output: Path | None = None
+    cli: CliRunner, command: str, suite: dict, request: pytest.FixtureRequest
 ) -> dict:
-    # `{output}` is only present in the prototype scenarios; keep it empty elsewhere.
+    # pytest does not inject a fixture into an optional defaulted argument.
+    # Resolve it only for scenarios whose command actually uses {output}.
     substitutions = {"suite": suite["path"]}
-    if output is not None:
-        substitutions["output"] = str(output)
+    if "{output}" in command:
+        substitutions["output"] = str(request.getfixturevalue("output"))
     return run_cli(cli, command, **substitutions)
 
 
@@ -91,6 +92,11 @@ def command_succeeds(result: dict) -> None:
 @then("the command fails")
 def command_fails(result: dict) -> None:
     assert result["exit_code"] != 0, result["output"]
+
+
+@then(parsers.parse("the command exits with code {code:d}"))
+def command_exits_with_code(result: dict, code: int) -> None:
+    assert result["exit_code"] == code, result["output"]
 
 
 @then(parsers.parse('the output contains "{expected}"'))
@@ -116,8 +122,10 @@ def a_suite_without_schema(suite: dict) -> dict:
 
 @then("the output reports that 3 tasks are valid and the pilot traps are covered")
 def output_reports_valid_suite(result: dict) -> None:
-    assert "Task suite valid: 3 tasks" in result["stdout"]
-    assert "pilot traps covered:" in result["stdout"]
+    assert " ".join(result["stdout"].split()) == (
+        "Task suite valid: 3 tasks; pilot traps covered: "
+        "crs-axis-order, jenks-classification, topology-de9im"
+    )
 
 
 @then(parsers.parse("the output explains that the schema cannot be read"))
@@ -163,7 +171,10 @@ def report_passed(result: dict) -> None:
 
 @then("the report covers three runs")
 def report_covers_three(result: dict) -> None:
-    assert len(result["report"]["run_results"]) == 3
+    report = result["report"]
+    assert report["required_runs"] == 3
+    assert report["consistent"] is True
+    assert [run["status"] for run in report["run_results"]] == ["passed"] * 3
 
 
 @then("the report says the task failed")
@@ -286,10 +297,13 @@ def run_holds_no_cell(output: Path, task_id: str) -> None:
 @then("every cell keeps a transcript and a score file")
 def every_cell_keeps_artifacts(output: Path) -> None:
     summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+    assert summary["prototype"] is True
     for cell in summary["cells"]:
         cell_dir = output / cell["task"] / f"arm-{cell['arm']}"
+        assert cell["prototype"] is True
         assert (cell_dir / "transcript.jsonl").is_file(), cell_dir
-        assert (cell_dir / "score.json").is_file(), cell_dir
+        score = json.loads((cell_dir / "score.json").read_text(encoding="utf-8"))
+        assert score["meta"]["prototype"] is True
 
 
 @then("the table has one row per cell of that run")
@@ -304,10 +318,10 @@ def output_names_missing_family(result: dict) -> None:
     assert "missing task family C" in result["output"]
 
 
-@then("the output names the pilot trap that is uncovered")
-def output_names_uncovered_trap(result: dict) -> None:
+@then(parsers.parse('the output names the uncovered pilot trap "{trap}"'))
+def output_names_uncovered_trap(result: dict, trap: str) -> None:
     assert "required pilot trap is not covered" in result["output"]
-    assert "crs-axis-order" in result["output"]
+    assert trap in result["output"]
 
 
 @then("the output names the fixture that cannot be found")
@@ -318,28 +332,36 @@ def output_names_missing_fixture(result: dict) -> None:
 
 # --- the PyQGIS sandbox gate -------------------------------------------------
 #
-# PyQGIS is not importable in the test interpreter, so these scenarios replace
-# the one boundary the suite cannot cross: ``_qgis_versions``. Every other path
-# -- argument handling, exit codes, subprocess plumbing, output rendering -- runs
-# as shipped.
+# PyQGIS is not consistently available in the test interpreter, so these
+# scenarios replace only its imports. Version detection, command handling,
+# subprocess plumbing, and output rendering all run as shipped.
 
 _PYQGIS_AVAILABLE = {
     "qgis": "4.2",
     "gdal": "x",
     "geos": "y",
     "proj": "z",
-    "python": "3.13",
+    "python": sys.version.split()[0],
 }
 
 
 @given("a harness that cannot import PyQGIS")
 def harness_without_pyqgis(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(qgis_cli, "_qgis_versions", lambda: None)
+    monkeypatch.setitem(sys.modules, "qgis", None)
 
 
 @given("a working PyQGIS harness")
 def harness_with_pyqgis(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(qgis_cli, "_qgis_versions", lambda: dict(_PYQGIS_AVAILABLE))
+    package = types.ModuleType("qgis")
+    package.__path__ = []
+    core = types.ModuleType("qgis.core")
+    core.Qgis = types.SimpleNamespace(QGIS_VERSION=_PYQGIS_AVAILABLE["qgis"])
+    core.GDAL_VERSION = _PYQGIS_AVAILABLE["gdal"]
+    core.GEOS_VERSION = _PYQGIS_AVAILABLE["geos"]
+    core.PROJ_VERSION = _PYQGIS_AVAILABLE["proj"]
+    package.core = core
+    monkeypatch.setitem(sys.modules, "qgis", package)
+    monkeypatch.setitem(sys.modules, "qgis.core", core)
 
 
 @given("a sandbox script path that does not exist", target_fixture="script")
@@ -348,9 +370,20 @@ def sandbox_script_missing(tmp_path: Path) -> Path:
 
 
 @given(parsers.parse('a sandbox script that prints "{text}"'), target_fixture="script")
-def sandbox_script_printing(tmp_path: Path, text: str) -> Path:
+def sandbox_script_printing(tmp_path: Path, text: str, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setenv("GEOAI_TEST_SECRET", "must-not-reach-the-script")
+    monkeypatch.setenv("PYTHONPATH", "/outside-the-sandbox")
     script = tmp_path / "ok.py"
-    script.write_text(f"print({text!r})\n", encoding="utf-8")
+    script.write_text(
+        "import os, sys\n"
+        f"print({text!r})\n"
+        "print('ISOLATED=', sys.flags.isolated, sep='')\n"
+        "print('QT=', os.environ.get('QT_QPA_PLATFORM'), sep='')\n"
+        "print('SECRET_PRESENT=', 'GEOAI_TEST_SECRET' in os.environ, sep='')\n"
+        "print('PYTHONPATH_PRESENT=', 'PYTHONPATH' in os.environ, sep='')\n"
+        "print('HOME_IS_CWD=', os.path.samefile(os.environ['HOME'], os.getcwd()), sep='')\n",
+        encoding="utf-8",
+    )
     return script
 
 
@@ -367,7 +400,7 @@ def sandbox_script_exiting(tmp_path: Path, code: int) -> Path:
 @given("a sandbox script that never finishes", target_fixture="script")
 def sandbox_script_slow(tmp_path: Path) -> Path:
     script = tmp_path / "slow.py"
-    script.write_text("print('never')\n", encoding="utf-8")
+    script.write_text("import time\ntime.sleep(60)\n", encoding="utf-8")
     return script
 
 
@@ -382,13 +415,7 @@ def run_that_script(cli: CliRunner, script: Path, tmp_path: Path) -> dict:
 
 
 @when("I run that script in the sandbox with a one second timeout", target_fixture="result")
-def run_that_script_with_timeout(
-    cli: CliRunner, script: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> dict:
-    def never_returns(*_args: object, **_kwargs: object) -> None:
-        raise subprocess.TimeoutExpired(cmd="python", timeout=1)
-
-    monkeypatch.setattr(qgis_cli.subprocess, "run", never_returns)
+def run_that_script_with_timeout(cli: CliRunner, script: Path, tmp_path: Path) -> dict:
     return run_cli(cli, f"qgis run {script} --artifacts-dir {tmp_path / 'art'} --timeout 1")
 
 
@@ -410,21 +437,46 @@ def command_exits_with_verdict(result: dict) -> None:
     assert result["exit_code"] == expected, result["output"]
 
 
+@then("the output reports the QGIS and library versions")
+def output_reports_qgis_versions(result: dict) -> None:
+    reported = " ".join(result["output"].split())
+    for name, version in _PYQGIS_AVAILABLE.items():
+        assert f"{name} {version}" in reported
+
+
 @then("the output names the sandbox environment to install")
 def output_names_sandbox_env(result: dict) -> None:
     reported = result["output"] + result["stderr"] + result["raised"]
     assert "PyQGIS unavailable" in reported
+    assert "PyQGIS is not importable from this interpreter." in reported
     assert "-e sandbox" in reported
 
 
 @then("the output says the script is missing")
-def output_says_script_missing(result: dict) -> None:
-    assert "missing script" in result["output"]
+def output_says_script_missing(result: dict, script: Path) -> None:
+    assert f"missing script: {script}" in " ".join(result["output"].split())
 
 
-@then(parsers.parse("the sandbox exits with code {code:d}"))
-def sandbox_exits_with_code(result: dict, code: int) -> None:
-    assert result["exit_code"] == code, result["output"]
+@then("no sandbox artifacts directory is created")
+def no_sandbox_artifacts_directory(tmp_path: Path) -> None:
+    assert not (tmp_path / "art").exists()
+
+
+@then("the sandbox artifacts directory exists")
+def sandbox_artifacts_directory_exists(tmp_path: Path) -> None:
+    assert (tmp_path / "art").is_dir()
+
+
+@then("the script runs isolated in the artifacts directory")
+def script_runs_isolated(result: dict) -> None:
+    for expected in (
+        "ISOLATED=1",
+        "QT=offscreen",
+        "SECRET_PRESENT=False",
+        "PYTHONPATH_PRESENT=False",
+        "HOME_IS_CWD=True",
+    ):
+        assert expected in result["output"], result["output"]
 
 
 @then("the output shows the script's error output")
@@ -534,6 +586,16 @@ def a_prototype_output_directory(tmp_path: Path) -> Path:
     return tmp_path / "out"
 
 
+@given("the hosted backend has no API key")
+def hosted_backend_has_no_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+
+@then("no output directory is created")
+def no_output_directory_created(output: Path) -> None:
+    assert not output.exists()
+
+
 @when(
     parsers.parse('I run a scripted prototype for task "{task_id}" in arm "{arm}"'),
     target_fixture="result",
@@ -560,6 +622,11 @@ def output_holds_summary(output: Path) -> None:
     assert (output / "summary.json").is_file()
 
 
+@then("the output warns that this is not a study result")
+def output_warns_about_prototype(result: dict) -> None:
+    assert "pipeline verification only, not a study result." in result["output"]
+
+
 @then("the output reports the size of the operation catalogue")
 def output_reports_catalogue_size(result: dict) -> None:
     assert "14 ops" in result["output"]
@@ -570,6 +637,12 @@ def output_names_operation(result: dict) -> None:
     assert "relate_de9im" in result["output"]
 
 
+@then("the output reports the tool count and the filtered Poland feature")
+def output_reports_mcp_tools_and_filter(result: dict) -> None:
+    for expected in ("list_tools", "14 tools", "filter_features POL", "1 feature", "Poland"):
+        assert expected in result["output"], result["output"]
+
+
 @then("the output reports the Poland–Czechia boundary relation")
 def output_reports_relation(result: dict) -> None:
     assert "relate_de9im POL×CZE" in result["output"]
@@ -577,8 +650,13 @@ def output_reports_relation(result: dict) -> None:
 
 
 @then("the output says no cells were found")
-def output_says_no_cells(result: dict) -> None:
-    assert "no cells" in result["output"]
+def output_says_no_cells(result: dict, output: Path) -> None:
+    assert f"no cells under {output}" in " ".join(result["output"].split())
+
+
+@then("the output says the summary is missing")
+def output_says_summary_missing(result: dict, output: Path) -> None:
+    assert f"missing {output / 'summary.json'}" in " ".join(result["output"].split())
 
 
 @then("the rescore reports that one of one cells passed the oracle")
@@ -592,6 +670,22 @@ def showing_prints_scores(cli: CliRunner, output: Path) -> None:
     shown = run_cli(cli, f"proto show {output}")
     assert shown["exit_code"] == 0, shown["output"]
     assert "Oracle scores" in shown["output"]
+
+
+@when("I corrupt and rescore the result", target_fixture="rescored")
+def corrupt_and_rescore(cli: CliRunner, output: Path) -> dict:
+    path = output / "analysis-de9im-001" / "arm-B" / "result.json"
+    result = json.loads(path.read_text(encoding="utf-8"))
+    result.update({"relation": "disjoint", "de9im": "FF*FF****"})
+    path.write_text(json.dumps(result), encoding="utf-8")
+    return run_cli(cli, f"proto score {output}")
+
+
+@then("the rescore reports that no cells passed the oracle")
+def rescore_reports_no_passes(rescored: dict) -> None:
+    assert rescored["exit_code"] == 0, rescored["output"]
+    assert "0/1 cells oracle-passed" in rescored["output"]
+    assert "✗" in rescored["output"]
 
 
 # --- bind the feature files --------------------------------------------------

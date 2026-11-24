@@ -10,8 +10,8 @@ import yaml
 
 import experiment.drivers as drivers
 from experiment import harness, prototype
-from experiment.adapters.task_repository import TaskLoadError
 from experiment.domain.task import Task
+from experiment.services import runs
 
 TASK_ROOT = harness.TASK_ROOT
 
@@ -63,17 +63,6 @@ def _task_path(task_id: str) -> Path:
     raise AssertionError(task_id)
 
 
-def test_discover_tasks_finds_three() -> None:
-    assert len(prototype.discover_tasks(TASK_ROOT)) == 3
-
-
-def test_load_task_rejects_non_task(tmp_path: Path) -> None:
-    bad = tmp_path / "bad.yaml"
-    bad.write_text("- not a mapping\n", encoding="utf-8")
-    with pytest.raises(TaskLoadError):
-        prototype.load_task(bad)
-
-
 def test_fixture_path_errors(tmp_path: Path) -> None:
     task_path = tmp_path / "t.yaml"
     task = _task_document(fixtures={"input": "missing.geojson"})
@@ -99,36 +88,6 @@ def test_run_python_sandboxed() -> None:
     completed = harness.run_python_sandboxed("print('hello')", Path("."))
     assert completed.returncode == 0
     assert completed.stdout.strip() == "hello"
-
-
-def test_score_cell_pass_and_fail(tmp_path: Path) -> None:
-    task_path = _task_path("analysis-de9im-001")
-    good = tmp_path / "good"
-    good.mkdir()
-    (good / "result.json").write_text(json.dumps({"relation": "touches", "de9im": "FF2F11212"}))
-    verdict = prototype.score_cell(task_path, good)
-    assert verdict["passed"] is True  # score.json is written by run_cell, not score_cell
-    assert verdict["checks"]
-    bad = tmp_path / "bad"
-    bad.mkdir()
-    (bad / "result.json").write_text(json.dumps({"relation": "disjoint", "de9im": "FF*FF****"}))
-    assert prototype.score_cell(task_path, bad)["passed"] is False
-
-
-def test_run_experiment_scripted_end_to_end(tmp_path: Path) -> None:
-    spec = prototype.RunSpec(
-        arms=("A", "B"), task_ids=None, driver="scripted", model="unused", host="http://127.0.0.1:1"
-    )
-    summary = prototype.run_experiment(TASK_ROOT, spec, tmp_path)
-    assert summary["total"] == 6
-    assert summary["passed"] == 6
-    payload = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
-    assert payload["cells"][0]["prototype"] is True
-
-    def _transcript_path(cell_meta: dict) -> Path:
-        return tmp_path / cell_meta["task"] / f"arm-{cell_meta['arm']}" / "transcript.jsonl"
-
-    assert all(_transcript_path(c).is_file() for c in payload["cells"])
 
 
 def _fixture(task_id: str) -> dict:
@@ -256,7 +215,7 @@ def test_cell_error_marks_status(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     def boom(*args, **kwargs):
         raise RuntimeError("driver exploded")
 
-    monkeypatch.setitem(prototype._DRIVER_DISPATCH, ("scripted", "A"), boom)
+    monkeypatch.setitem(runs._DRIVER_DISPATCH, ("scripted", "A"), boom)
     cell = _make_cell(tmp_path)
     req = _cell_request("analysis-de9im-001", "A", "scripted", cell)
     result = prototype.run_cell(req)
