@@ -31,6 +31,15 @@ Feature: Prototype runs and oracle scoring
     And the output contains "--driver must be one of scripted, ollama"
     And no output directory is created
 
+  Scenario: An unknown driver is refused on a colored terminal
+    Given a prototype output directory
+    And a terminal that requests colored output
+    When I run the command "proto run --driver bogus --output-dir {output}"
+    Then the command exits with code 2
+    And the output contains "--driver must be one of scripted, ollama"
+    And the output contains terminal styling
+    And no output directory is created
+
   Scenario: An unknown arm is refused
     Given a prototype output directory
     When I run the command "proto run --arm Q --output-dir {output}"
@@ -54,7 +63,7 @@ Feature: Prototype runs and oracle scoring
     And no output directory is created
 
   Scenario: Scoring an empty directory fails rather than reporting a pass
-    Given a prototype output directory
+    Given a prototype output directory with a long path
     When I run the command "proto score {output}"
     Then the command exits with code 1
     And the output says no cells were found
@@ -69,7 +78,7 @@ Feature: Prototype runs and oracle scoring
     Then the rescore reports that no cells passed the oracle
 
   Scenario: Showing a directory with no summary fails
-    Given a prototype output directory
+    Given a prototype output directory with a long path
     When I run the command "proto show {output}"
     Then the command exits with code 1
     And the output says the summary is missing

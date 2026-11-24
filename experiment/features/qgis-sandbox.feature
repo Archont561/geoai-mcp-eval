@@ -25,7 +25,7 @@ Feature: The PyQGIS sandbox gate
 
   Scenario: A script is refused when the file is not there
     Given a harness that cannot import PyQGIS
-    And a sandbox script path that does not exist
+    And a long sandbox script path that does not exist
     When I run that script in the sandbox
     Then the command exits with code 2
     And the output says the script is missing
