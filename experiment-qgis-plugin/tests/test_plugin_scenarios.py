@@ -13,6 +13,7 @@ scenario would fail with ``StepDefinitionNotFoundError``.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -477,9 +478,14 @@ def panel_is_idle(stopped: dict) -> None:
 @when("I restart the session from the panel and confirm", target_fixture="restarted")
 def restart_and_confirm(panel_state: dict) -> dict:
     previous = plugin._ACTIVE["session"]
+    assert previous is not None
     FakeMessageBox._answer = FakeMessageBox.StandardButton.Yes
     panel_state["dialog"]._parts["restart_button"].click()
-    return {**panel_state, "previous": previous}
+    return {
+        **panel_state,
+        "previous": previous,
+        "previous_evidence": _evidence_snapshot(previous.output_dir),
+    }
 
 
 @then("the previous take is marked abandoned and has no record")
@@ -718,6 +724,51 @@ def host_with_project_and_canvas(monkeypatch: pytest.MonkeyPatch) -> dict:
     return {"project": project, "canvas": canvas}
 
 
+@given("a QGIS host with a project, a map canvas and the session panel", target_fixture="host")
+def host_with_panel(qt, monkeypatch: pytest.MonkeyPatch) -> dict:
+    return host_with_project_and_canvas(monkeypatch)
+
+
+@given("a QGIS host with a removable map canvas", target_fixture="host")
+def host_with_removable_canvas(monkeypatch: pytest.MonkeyPatch) -> dict:
+    class RemovableCanvas(FakeCanvas):
+        deleted = False
+
+        def __getattribute__(self, name):
+            if name in ("extentsChanged", "scaleChanged") and self.deleted:
+                raise RuntimeError("wrapped canvas has been deleted")
+            return super().__getattribute__(name)
+
+    project = FakeProject("readProject")
+    canvas = RemovableCanvas()
+    install_host(monkeypatch, project=project, canvas=lambda: canvas)
+    return {"project": project, "canvas": canvas}
+
+
+@given("another component listens to project and canvas changes")
+def other_component_listens(host: dict) -> None:
+    received = []
+
+    def layer_listener(_layers) -> None:
+        received.append("layer")
+
+    def scale_listener(_scale) -> None:
+        received.append("scale")
+
+    host["project"].layersAdded.connect(layer_listener)
+    host["canvas"].scaleChanged.connect(scale_listener)
+    host["other_received"] = received
+    host["other_listeners"] = (layer_listener, scale_listener)
+
+
+@given("a canvas signal refuses to disconnect")
+def canvas_refuses_disconnect(host: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_to_disconnect(_slot) -> None:
+        raise RuntimeError("canvas scale disconnect refused")
+
+    monkeypatch.setattr(host["canvas"].scaleChanged, "disconnect", fail_to_disconnect)
+
+
 @given("a QGIS host whose project hooks fail partway through wiring", target_fixture="host")
 def host_with_partly_broken_project(monkeypatch: pytest.MonkeyPatch) -> dict:
     project = FakeProject("readProject")
@@ -727,6 +778,26 @@ def host_with_partly_broken_project(monkeypatch: pytest.MonkeyPatch) -> dict:
         raise RuntimeError("layer removal signal refused")
 
     monkeypatch.setattr(project.layersWillBeRemoved, "connect", fail_to_connect)
+    install_host(monkeypatch, project=project, canvas=lambda: canvas)
+    return {"project": project, "canvas": canvas}
+
+
+@given("a QGIS host with a failing project hook and the session panel", target_fixture="host")
+def host_with_partial_project_and_panel(qt, monkeypatch: pytest.MonkeyPatch) -> dict:
+    return host_with_partly_broken_project(monkeypatch)
+
+
+@given("a QGIS host whose canvas hooks fail after connecting", target_fixture="host")
+def host_with_partly_broken_canvas(monkeypatch: pytest.MonkeyPatch) -> dict:
+    project = FakeProject("readProject")
+    canvas = FakeCanvas()
+    connect = canvas.scaleChanged.connect
+
+    def fail_after_connect(slot) -> None:
+        connect(slot)
+        raise RuntimeError("canvas scale signal refused")
+
+    monkeypatch.setattr(canvas.scaleChanged, "connect", fail_after_connect)
     install_host(monkeypatch, project=project, canvas=lambda: canvas)
     return {"project": project, "canvas": canvas}
 
@@ -755,6 +826,118 @@ def session_active(loaded: PluginHandle, task_suite: Path) -> dict:
     return {"recorder": recorder, "output_dir": recorder.output_dir, "reply": reply}
 
 
+@given("the abandonment marker cannot be written")
+def abandonment_marker_unwritable(monkeypatch: pytest.MonkeyPatch) -> None:
+    write_text = Path.write_text
+
+    def fail_marker(path: Path, *args, **kwargs):
+        if path.name == "session-abandoned.json":
+            raise OSError("abandonment marker is unwritable")
+        return write_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_marker)
+
+
+@when("I try to abandon the session", target_fixture="abandon_error")
+def try_to_abandon_session(loaded: PluginHandle) -> Exception | None:
+    try:
+        loaded.call("abandon_session")
+    except OSError as exc:
+        return exc
+    return None
+
+
+@then("the abandonment failure is reported")
+def abandonment_failure_is_reported(abandon_error: Exception | None, running: dict) -> None:
+    assert isinstance(abandon_error, OSError)
+    assert "abandonment marker is unwritable" in str(abandon_error)
+    assert [event["event"] for event in read_events(running["output_dir"])] == [
+        "session_start",
+        "session_abandoned",
+    ]
+
+
+@given("the task fixture is unavailable")
+def task_fixture_unavailable(task_suite: Path) -> None:
+    (task_suite / "fixture.geojson").unlink()
+
+
+@when("I try to end the session", target_fixture="end_error")
+def try_to_end_session(loaded: PluginHandle) -> Exception | None:
+    try:
+        loaded.call("end_session")
+    except OSError as exc:
+        return exc
+    return None
+
+
+@then("the end failure is reported")
+def end_failure_is_reported(end_error: Exception | None) -> None:
+    assert isinstance(end_error, FileNotFoundError)
+    assert "fixture.geojson" in str(end_error)
+
+
+@when("I end the session despite the disconnection failure", target_fixture="disconnect_error")
+def end_with_disconnect_failure(loaded: PluginHandle) -> Exception | None:
+    try:
+        loaded.call("end_session")
+    except Exception as exc:
+        return exc
+    return None
+
+
+def _exception_messages(error: BaseException) -> list[str]:
+    if isinstance(error, BaseExceptionGroup):
+        return [message for child in error.exceptions for message in _exception_messages(child)]
+    return [str(error)]
+
+
+@then("the disconnection failure is reported")
+def disconnect_failure_is_reported(disconnect_error: Exception | None) -> None:
+    assert isinstance(disconnect_error, ExceptionGroup)
+    assert "canvas scale disconnect refused" in _exception_messages(disconnect_error)
+
+
+@when("I try to unload the plugin", target_fixture="unload_error")
+def try_to_unload(loaded: PluginHandle) -> Exception | None:
+    try:
+        loaded.unload()
+    except Exception as exc:
+        return exc
+    return None
+
+
+@then("the unload reports the abandonment failure")
+def unload_reports_abandonment_failure(unload_error: Exception | None, running: dict) -> None:
+    assert isinstance(unload_error, ExceptionGroup)
+    assert "abandonment marker is unwritable" in _exception_messages(unload_error)
+    assert running["recorder"].status == "incomplete"
+
+
+@then("the unload reports both failures")
+def unload_reports_both_failures(unload_error: Exception | None) -> None:
+    assert isinstance(unload_error, ExceptionGroup)
+    messages = _exception_messages(unload_error)
+    assert "abandonment marker is unwritable" in messages
+    assert "canvas scale disconnect refused" in messages
+
+
+@then("the remaining host hooks were disconnected")
+def remaining_hooks_were_disconnected(host: dict) -> None:
+    project, canvas = host["project"], host["canvas"]
+    assert len(canvas.scaleChanged.slots) == 1
+    assert all(
+        not signal.slots
+        for signal in (
+            project.layersAdded,
+            project.layersWillBeRemoved,
+            project.crsChanged,
+            project.readProject,
+            canvas.extentsChanged,
+        )
+    )
+
+
 @when("two layers are added, one is removed, the project CRS changes and the project is read")
 def drive_project_signals(host: dict) -> None:
     project = host["project"]
@@ -769,6 +952,63 @@ def drive_canvas_signals(host: dict) -> None:
     canvas = host["canvas"]
     canvas.extentsChanged.fire()
     canvas.scaleChanged.fire(50000.0)
+
+
+@when("the map canvas is destroyed")
+def destroy_map_canvas(host: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    canvas = host["canvas"]
+
+    def stale_signal_disconnect(_slot) -> None:
+        raise AssertionError("a destroyed canvas signal cannot safely be accessed")
+
+    for signal in (canvas.extentsChanged, canvas.scaleChanged):
+        signal.slots.clear()  # Qt disconnects a destroyed object's signals.
+        monkeypatch.setattr(signal, "disconnect", stale_signal_disconnect)
+    canvas.deleted = True
+
+
+@when("the project CRS changes")
+def drive_crs_change(host: dict) -> None:
+    host["project"].crsChanged.fire()
+
+
+@then("the surviving project hooks are disconnected")
+def surviving_project_hooks_are_disconnected(host: dict) -> None:
+    project = host["project"]
+    assert all(
+        not signal.slots
+        for signal in (
+            project.layersAdded,
+            project.layersWillBeRemoved,
+            project.crsChanged,
+            project.readProject,
+        )
+    )
+
+
+@when("every project and canvas signal fires")
+def drive_every_host_signal(host: dict) -> None:
+    project, canvas = host["project"], host["canvas"]
+    project.layersAdded.fire(["a", "b"])
+    project.layersWillBeRemoved.fire(["a"])
+    project.crsChanged.fire()
+    project.readProject.fire(object())
+    canvas.extentsChanged.fire()
+    canvas.scaleChanged.fire(50000.0)
+
+
+@when("project and canvas changes are queued", target_fixture="queued_changes")
+def queue_host_changes(host: dict) -> tuple:
+    return (
+        host["project"].layersAdded.queue(["a"]),
+        host["canvas"].scaleChanged.queue(50000.0),
+    )
+
+
+@when("the queued changes are delivered")
+def deliver_queued_changes(queued_changes: tuple) -> None:
+    for deliver in queued_changes:
+        deliver()
 
 
 @when("the project is read using its legacy signal")
@@ -832,6 +1072,16 @@ def project_observations_keep_source_and_order(running: dict) -> None:
     assert all(event["tool"] == "host:project" for event in events[1:])
 
 
+@then("the legacy project-read listener is disconnected")
+def legacy_project_read_disconnected(host: dict, running: dict) -> None:
+    assert not host["project"].projectRead.slots
+    assert [event["event"] for event in read_events(running["output_dir"])] == [
+        "session_start",
+        "project_read",
+        "session_end",
+    ]
+
+
 @then("the start message reports the missing project read hook")
 def start_message_reports_missing_hook(running: dict) -> None:
     assert "host hooks: project (partial)" in running["reply"]
@@ -868,6 +1118,93 @@ def log_records_changes_after_project_failure(running: dict) -> None:
     ]
 
 
+@then("the start message reports the partial canvas hook failure")
+def start_message_reports_partial_canvas_failure(running: dict) -> None:
+    assert "host hooks: project" in running["reply"]
+    assert "host hook failed: canvas: canvas scale signal refused" in running["reply"]
+
+
+@then("the completed event log keeps only the earlier project and canvas changes")
+def completed_log_keeps_connected_changes(running: dict) -> None:
+    assert [event["event"] for event in read_events(running["output_dir"])] == [
+        "session_start",
+        "layers_added",
+        "canvas_scale",
+        "session_end",
+    ]
+
+
+@then("the abandoned event log keeps only the earlier project and canvas changes")
+def abandoned_log_keeps_connected_changes(running: dict) -> None:
+    assert [event["event"] for event in read_events(running["output_dir"])] == [
+        "session_start",
+        "layers_added",
+        "canvas_scale",
+        "session_abandoned",
+    ]
+    assert not (running["output_dir"] / "human-reference-record.json").exists()
+
+
+@then("all host hooks are disconnected")
+def all_host_hooks_disconnected(host: dict) -> None:
+    project, canvas = host["project"], host["canvas"]
+    signals = (
+        project.layersAdded,
+        project.layersWillBeRemoved,
+        project.crsChanged,
+        project.readProject,
+        canvas.extentsChanged,
+        canvas.scaleChanged,
+    )
+    assert all(not signal.slots for signal in signals)
+
+
+@then("the panel reports the project hook failure")
+def panel_reports_project_hook_failure(panel_state: dict) -> None:
+    status = panel_state["dialog"]._parts["status_label"].text()
+    assert "host hook failed: project: layer removal signal refused" in status
+
+
+@then("the panel reports the disconnection failure")
+def panel_reports_disconnection_failure(stopped: dict) -> None:
+    status = stopped["dialog"]._parts["status_label"].text()
+    assert "end_session failed: " in status
+    assert "canvas scale disconnect refused" in status
+
+
+@then("the panel's session records the connected host changes")
+def panel_session_records_host_changes() -> None:
+    recorder = plugin._ACTIVE["session"]
+    assert recorder is not None
+    assert [event["event"] for event in read_events(recorder.output_dir)] == [
+        "session_start",
+        "layers_added",
+        "canvas_scale",
+    ]
+
+
+@then("the other component still receives both changes")
+def other_component_receives_changes(host: dict) -> None:
+    assert host["other_received"] == ["layer", "scale"]
+
+
+@then("no session callbacks remain connected")
+def no_session_callbacks_remain(host: dict) -> None:
+    project, canvas = host["project"], host["canvas"]
+    layer_listener, scale_listener = host["other_listeners"]
+    assert project.layersAdded.slots == [layer_listener]
+    assert canvas.scaleChanged.slots == [scale_listener]
+    assert all(
+        not signal.slots
+        for signal in (
+            project.layersWillBeRemoved,
+            project.crsChanged,
+            project.readProject,
+            canvas.extentsChanged,
+        )
+    )
+
+
 @then("the event log records the extent and the scale")
 def log_records_extent_and_scale(host: dict) -> None:
     events = read_events(host["running"]["output_dir"])
@@ -897,6 +1234,176 @@ def completed_log_keeps_host_observations(running: dict) -> None:
         "canvas_extent",
         "canvas_scale",
         "session_end",
+    ]
+
+
+@then("the finished event log contains only the session markers")
+def finished_log_contains_only_markers(running: dict) -> None:
+    assert [event["event"] for event in read_events(running["output_dir"])] == [
+        "session_start",
+        "session_end",
+    ]
+
+
+@then("the abandoned event log contains only the session markers")
+def abandoned_log_contains_only_markers(running: dict) -> None:
+    assert [event["event"] for event in read_events(running["output_dir"])] == [
+        "session_start",
+        "session_abandoned",
+    ]
+
+
+def _evidence_snapshot(output_dir: Path) -> dict[str, bytes]:
+    return {path.name: path.read_bytes() for path in output_dir.iterdir() if path.is_file()}
+
+
+@when("I capture the terminal evidence", target_fixture="terminal_evidence")
+def capture_terminal_evidence(running: dict) -> dict[str, bytes]:
+    return _evidence_snapshot(running["output_dir"])
+
+
+@then("the terminal evidence remains unchanged")
+def terminal_evidence_is_unchanged(running: dict, terminal_evidence: dict[str, bytes]) -> None:
+    assert _evidence_snapshot(running["output_dir"]) == terminal_evidence
+
+
+@when("I start a new session", target_fixture="new_take")
+def start_new_take(loaded: PluginHandle, task_suite: Path) -> Path:
+    reply = _start(loaded, DEMO_TASK_ID, task_suite)
+    assert reply.startswith("session started for task"), reply
+    recorder = plugin._ACTIVE["session"]
+    assert recorder is not None
+    return recorder.output_dir
+
+
+@then("the new session alone records every host change")
+def new_take_alone_records_changes(host: dict, running: dict, new_take: Path) -> None:
+    assert new_take != running["output_dir"]
+    assert [event["event"] for event in read_events(new_take)] == [
+        "session_start",
+        "layers_added",
+        "layers_removed",
+        "crs_changed",
+        "project_read",
+        "canvas_extent",
+        "canvas_scale",
+    ]
+    project, canvas = host["project"], host["canvas"]
+    signals = (
+        project.layersAdded,
+        project.layersWillBeRemoved,
+        project.crsChanged,
+        project.readProject,
+        canvas.extentsChanged,
+        canvas.scaleChanged,
+    )
+    assert all(len(signal.slots) == 1 for signal in signals)
+
+
+@when("I capture the panel's terminal evidence", target_fixture="panel_evidence")
+def capture_panel_evidence(stopped: dict) -> tuple[Path, dict[str, bytes]]:
+    last = plugin._LAST["session"]
+    assert last is not None, stopped["dialog"]._parts["status_label"].text()
+    return last.output_dir, _evidence_snapshot(last.output_dir)
+
+
+@then("the panel's terminal evidence remains unchanged")
+def panel_evidence_is_unchanged(panel_evidence: tuple[Path, dict[str, bytes]]) -> None:
+    output_dir, snapshot = panel_evidence
+    assert _evidence_snapshot(output_dir) == snapshot
+    assert [event["event"] for event in read_events(output_dir)] == [
+        "session_start",
+        "session_end",
+    ]
+
+
+@then("the previous take's evidence remains unchanged")
+def previous_evidence_is_unchanged(restarted: dict) -> None:
+    assert _evidence_snapshot(restarted["previous"].output_dir) == restarted["previous_evidence"]
+
+
+@then("the original session records the host changes")
+def original_session_records_changes(cancelled: dict) -> None:
+    assert [event["event"] for event in read_events(cancelled["previous"].output_dir)] == [
+        "session_start",
+        "layers_added",
+        "canvas_scale",
+    ]
+
+
+@then("the panel reports the abandonment failure")
+def panel_reports_abandon_failure(restarted: dict) -> None:
+    status = restarted["dialog"]._parts["status_label"].text()
+    assert "abandon_session failed: abandonment marker is unwritable" in status
+
+
+@then("the incomplete take has no record and no new session was started")
+def incomplete_take_is_not_promoted(restarted: dict) -> None:
+    previous = restarted["previous"]
+    assert previous.status == "incomplete"
+    assert not (previous.output_dir / "human-reference-record.json").exists()
+    assert list(previous.output_dir.parent.iterdir()) == [previous.output_dir]
+    assert plugin._ACTIVE["session"] is None
+
+
+@then("the restarted session records the host changes")
+def restarted_session_records_changes(restarted: dict) -> None:
+    current = plugin._ACTIVE["session"]
+    assert current is not None and current is not restarted["previous"]
+    assert [event["event"] for event in read_events(current.output_dir)] == [
+        "session_start",
+        "layers_added",
+        "canvas_scale",
+    ]
+
+
+@when("the plugin is unloaded and reloaded", target_fixture="reloaded")
+def unload_and_reload(loaded: PluginHandle, running: dict) -> dict:
+    loaded.unload()
+    snapshot = _evidence_snapshot(running["output_dir"])
+    replacement = PluginHandle()
+    try:
+        yield {"handle": replacement, "snapshot": snapshot}
+    finally:
+        replacement.unload()
+
+
+@when("I start another session and trigger project and canvas changes")
+def start_another_and_trigger_changes(reloaded: dict, host: dict, task_suite: Path) -> None:
+    reply = _start(reloaded["handle"], DEMO_TASK_ID, task_suite)
+    assert reply.startswith("session started for task"), reply
+    recorder = plugin._ACTIVE["session"]
+    assert recorder is not None
+    reloaded["output_dir"] = recorder.output_dir
+    host["project"].layersAdded.fire(["a"])
+    host["canvas"].scaleChanged.fire(50000.0)
+
+
+@then("the unloaded take is marked abandoned without a record")
+def unloaded_take_is_abandoned(running: dict) -> None:
+    output_dir = running["output_dir"]
+    marker = json.loads((output_dir / "session-abandoned.json").read_text(encoding="utf-8"))
+    assert marker["reason"] == "plugin unloaded"
+    assert marker["record_written"] is False
+    assert not (output_dir / "human-reference-record.json").exists()
+    assert [event["event"] for event in read_events(output_dir)] == [
+        "session_start",
+        "session_abandoned",
+    ]
+
+
+@then("the unloaded take's evidence remains unchanged")
+def unloaded_evidence_is_unchanged(running: dict, reloaded: dict) -> None:
+    assert _evidence_snapshot(running["output_dir"]) == reloaded["snapshot"]
+
+
+@then("only the new session records those host changes")
+def only_new_session_records_changes(running: dict, reloaded: dict) -> None:
+    assert reloaded["output_dir"] != running["output_dir"]
+    assert [event["event"] for event in read_events(reloaded["output_dir"])] == [
+        "session_start",
+        "layers_added",
+        "canvas_scale",
     ]
 
 

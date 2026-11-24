@@ -75,8 +75,8 @@ recorded anywhere else and `human_baseline.status` in the task YAML stays
 | `start_session` | `task_id` (default `prep-axis-order-001`), `base_dir` (default `$EXPERIMENT_TASK_DIR` or `experiment/tasks`), `participant_code` (optional). Validates the task id against the suite, hashes the task YAML and fixture, creates the gitignored per-session output dir `experiment/tasks/baselines/<task_id>/session-<started_at_utc>/`, starts the UTC timer, and connects best-effort host hooks (QGIS project layer add/remove, CRS change, project read; canvas extent/scale). The record's `network_disabled` stays `null`: the host cannot verify network isolation — disable the network yourself and record that in a `log_note`. |
 | `log_note` | `message` — records a note/deviation/interruption in the event log. |
 | `show_timer` | opens the non-modal **session panel** ("Human-baseline session", menu Plugins > Experiment Plugin): a tabbed window — see below. Opens idle when no session is active (press Start inside it); in a headless host without a GUI capability it answers with a message instead of raising. |
-| `abandon_session` | abandons the active session WITHOUT writing `human-reference-record.json`. The event log stays on disk and gains a `session_abandoned` marker event plus a `session-abandoned.json` next to it. Evidence is kept but never promoted to reference data; task YAML `human_baseline.status` is untouched. |
-| `end_session` | stops the timer, hashes top-level output files other than the event log and record, writes `human-reference-record.json` and appends a `session_end` event to `events.jsonl` — both in this session's own `session-<started_at_utc>/` directory (restarts never share an evidence file). See the host-hook limitation below. |
+| `abandon_session` | abandons the active session WITHOUT writing `human-reference-record.json`. The event log stays on disk and gains a `session_abandoned` marker event plus a `session-abandoned.json` next to it. Host hooks are disconnected; evidence is kept but never promoted to reference data, and task YAML `human_baseline.status` is untouched. |
+| `end_session` | stops the timer and host observations, hashes top-level output files other than the event log and record, appends `session_end` to `events.jsonl`, and publishes `human-reference-record.json` — both in this session's own `session-<started_at_utc>/` directory (restarts never share an evidence file). |
 | `hello` | original demo action, harmless. |
 
 ### Session panel (Timer / Logs)
@@ -126,18 +126,31 @@ experiment/tasks/baselines/<task_id>/session-<started_at_utc>` afterwards.
 Inside QGIS Desktop actions appear per their bindings; only `show_timer` is
 bound (Plugins > Experiment Plugin) today — the rest are unbound in the GUI
 for now; from the panel, Start / Stop / Restart reach them through the
-runtime like any bridge call. The host hooks connect lazily
-and degrade silently when the host provides no project or canvas (server
-hosts, standalone tests). The behavior event log (`events.jsonl`, one per
-session directory) is the raw evidence; the record is the summary. Cap: 2000
-events per session (extent events can flood).
+runtime like any bridge call. Host hooks connect lazily on a best-effort basis;
+`start_session` lists the hooks it connected and reports connection failures;
+the panel displays those failures alongside its start status. A host without a
+canvas can record without canvas observations. Each session owns
+its callbacks, including those attached before a connection failure. Stop,
+abandonment, restart, and plugin unload disconnect them; already-queued host
+callbacks leave the closed log unchanged. Other components' listeners remain
+connected. If disconnection raises an unexpected error, the plugin disables its
+callbacks, attempts the remaining disconnections, and reports the failure.
+
+Unloading or reloading the plugin while a session is active abandons that take
+with reason `plugin unloaded` and leaves no human-reference record. If
+abandonment itself fails, the take is incomplete, observations still stop, and
+the failure is reported. A panel restart stops before starting a new take if
+abandonment fails.
+
+The plugin stages the human-reference record and publishes it only after the
+`session_end` event is written. An end failure before the event log changes
+leaves the session recording; a failure after the log changes closes the take as
+incomplete without a reference record. The behavior event log (`events.jsonl`,
+one per session directory) is the raw evidence; the record is the summary. Cap:
+2000 events per session (extent events can flood).
 
 ## Known limitations
 
-- **Host hooks outlive sessions.** Project and canvas callbacks remain connected
-  after a session ends or is abandoned. Later host activity can append to earlier
-  logs, including after a restart. Resolve this before treating those logs as
-  closed evidence.
 - **Event summaries differ from study metrics.** The record counts observed
   events and notes as steps, and lists observation sources as tools. Determine
   human steps and tools from processing history and manual review separately.

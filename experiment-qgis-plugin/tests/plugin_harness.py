@@ -68,9 +68,24 @@ class FakeSignal:
     def connect(self, slot) -> None:
         self.slots.append(slot)
 
+    def disconnect(self, slot) -> None:
+        try:
+            self.slots.remove(slot)
+        except ValueError as exc:
+            raise TypeError("slot is not connected") from exc
+
     def fire(self, *args) -> None:
         for slot in list(self.slots):
             slot(*args)
+
+    def queue(self, *args) -> Callable[[], None]:
+        slots = tuple(self.slots)
+
+        def deliver() -> None:
+            for slot in slots:
+                slot(*args)
+
+        return deliver
 
     def __call__(self, *args) -> None:
         self.fire(*args)
@@ -337,7 +352,13 @@ def install_host(
                 raise RuntimeError("project instance unavailable")
             return project
 
+    class FakeQgsApplication:
+        @staticmethod
+        def instance():
+            return None
+
     core.QgsProject = FakeQgsProject
+    core.QgsApplication = FakeQgsApplication
 
     utils = types.ModuleType("qgis.utils")
     if iface_raises is not None:
@@ -347,6 +368,10 @@ def install_host(
         utils.iface = types.SimpleNamespace(mapCanvas=canvas_factory)
     monkeypatch.setitem(sys.modules, "qgis.core", core)
     monkeypatch.setitem(sys.modules, "qgis.utils", utils)
+    qgis_pkg = sys.modules.get("qgis")
+    if qgis_pkg is not None:
+        monkeypatch.setattr(qgis_pkg, "core", core, raising=False)
+        monkeypatch.setattr(qgis_pkg, "utils", utils, raising=False)
 
 
 def remove_host(monkeypatch: pytest.MonkeyPatch) -> None:
