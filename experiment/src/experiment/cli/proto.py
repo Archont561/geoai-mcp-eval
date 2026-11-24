@@ -40,6 +40,11 @@ BACKEND_OPTION = typer.Option(
 ARMS_OPTION = typer.Option("both", "--arm", help="both | A | B")
 TASK_OPTION = typer.Option("all", "--task", help="all | comma-separated task ids")
 OUTPUT_OPTION = typer.Option(None, "--output-dir", help="defaults to results/prototype-<utc stamp>")
+MAX_CELL_TOKENS_OPTION = typer.Option(
+    None,
+    "--max-cell-tokens",
+    help="abort a cell if reported total tokens exceed this positive integer cap",
+)
 RUN_DIR_ARG = typer.Argument(..., help="prototype output dir containing <task>/arm-<A|B> cells")
 SHOW_DIR_ARG = typer.Argument(..., help="prototype output dir containing summary.json")
 
@@ -108,10 +113,13 @@ def run(  # noqa: CC102
     output_dir: Path | None = OUTPUT_OPTION,
     root: Path = ROOT_OPTION,
     backend: str = BACKEND_OPTION,
+    max_cell_tokens: int | None = MAX_CELL_TOKENS_OPTION,
 ) -> None:
     """Run the 3 pilot tasks in arms A and/or B, then score with the oracle."""
     try:
-        spec = runs.parse_run_spec(driver, model, host, arm, task, backend)
+        spec = runs.parse_run_spec(
+            driver, model, host, arm, task, backend, max_cell_tokens=max_cell_tokens
+        )
     except runs.RunSpecError as exc:
         raise typer.BadParameter(str(exc)) from exc
     out = resolve_output_dir(output_dir)
@@ -127,7 +135,7 @@ def run(  # noqa: CC102
         progress.update(overall, description="cells done")
     _print_score_table(summary)
     console.print(_artifacts_panel(out))
-    if any(cell["status"] == "error" for cell in summary["cells"]):
+    if any(cell["status"] != "ok" for cell in summary["cells"]):
         raise typer.Exit(code=1)
 
 
@@ -137,7 +145,7 @@ def _artifacts_panel(out: Path) -> Panel:
             ("Artifacts: ", "bold"),
             (str(out), "magenta"),
             ("\nPer cell: transcript.jsonl · result.json|geojson · score.json\n", "dim"),
-            ("Merged: summary.json", "dim"),
+            ("Merged: summary.json · manifest.json", "dim"),
         ),
         title="where the outputs are",
         border_style="green",

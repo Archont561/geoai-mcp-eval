@@ -723,6 +723,135 @@ def rescore_reports_no_passes(rescored: dict) -> None:
     assert "✗" in rescored["output"]
 
 
+def _stub_arm_b_chat(monkeypatch: pytest.MonkeyPatch, usage: dict | None) -> None:
+    import experiment.drivers as drivers
+
+    code = "import json\nprint(json.dumps({'relation': 'touches', 'de9im': 'FF2F11212'}))\n"
+    payload: dict = {
+        "choices": [{"message": {"role": "assistant", "content": f"```python\n{code}```"}}]
+    }
+    if usage is not None:
+        payload["usage"] = usage
+
+    def fake_chat(*_args, **_kwargs) -> dict:
+        return payload
+
+    monkeypatch.setattr(drivers, "_chat_completions", fake_chat)
+
+
+@given(parsers.parse("a stubbed Ollama endpoint reporting {inp:d} input and {out:d} output tokens"))
+def stubbed_ollama_with_usage(monkeypatch: pytest.MonkeyPatch, inp: int, out: int) -> None:
+    _stub_arm_b_chat(
+        monkeypatch,
+        {"prompt_tokens": inp, "completion_tokens": out, "total_tokens": inp + out},
+    )
+
+
+@given("a stubbed Ollama endpoint reporting no token usage")
+def stubbed_ollama_without_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_arm_b_chat(monkeypatch, None)
+
+
+def _read_transcript(output: Path) -> list[dict]:
+    path = output / "analysis-de9im-001" / "arm-B" / "transcript.jsonl"
+    return [
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
+
+
+@then(
+    parsers.parse(
+        "the cell transcript records {inp:d} input and {out:d} output tokens with no usage warning"
+    )
+)
+def transcript_records_tokens(output: Path, inp: int, out: int) -> None:
+    entries = _read_transcript(output)
+    assistant = [e for e in entries if e.get("role") == "assistant"]
+    assert len(assistant) == 1
+    assert assistant[0]["usage"] == {
+        "input_tokens": inp,
+        "output_tokens": out,
+        "total_tokens": inp + out,
+    }
+    assert not any(e.get("event") == "usage_warning" for e in entries)
+    summaries = [e for e in entries if e.get("event") == "usage_summary"]
+    assert len(summaries) == 1
+    assert summaries[0]["usage"]["total_tokens"] == inp + out
+
+
+@then(
+    parsers.parse(
+        "summary.json and manifest.json record run token totals of "
+        "{inp:d} input, {out:d} output, and {tot:d} total"
+    )
+)
+def summary_and_manifest_record_totals(output: Path, inp: int, out: int, tot: int) -> None:
+    summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    for usage in (summary["usage"], manifest["totals"]["usage"]):
+        assert usage["input_tokens"] == inp
+        assert usage["output_tokens"] == out
+        assert usage["total_tokens"] == tot
+        assert usage["cells_with_usage"] == 1
+        assert usage["cells_missing_usage"] == 0
+
+
+@then("the cell transcript records null usage with an explicit warning")
+def transcript_records_null_usage_warning(output: Path) -> None:
+    entries = _read_transcript(output)
+    assistant = [e for e in entries if e.get("role") == "assistant"]
+    assert len(assistant) == 1
+    assert assistant[0]["usage"] is None
+    warnings = [e for e in entries if e.get("event") == "usage_warning"]
+    assert len(warnings) >= 1
+    assert "did not report token usage" in warnings[0]["warning"]
+
+
+@then(
+    parsers.parse(
+        "summary.json and manifest.json record null token totals with "
+        "{missing:d} missing-usage cell"
+    )
+)
+def summary_and_manifest_record_null_totals(output: Path, missing: int) -> None:
+    summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    for usage in (summary["usage"], manifest["totals"]["usage"]):
+        assert usage["input_tokens"] is None
+        assert usage["output_tokens"] is None
+        assert usage["total_tokens"] is None
+        assert usage["cells_missing_usage"] == missing
+        assert usage["warnings"]
+
+
+@then("the cell is aborted for token_cap_exceeded without executing its code")
+def cell_aborted_for_token_cap(output: Path) -> None:
+    cell_dir = output / "analysis-de9im-001" / "arm-B"
+    assert not (cell_dir / "result.json").exists()
+    entries = _read_transcript(output)
+    assert not any(e.get("role") == "tool_result" for e in entries)
+    aborts = [e for e in entries if e.get("event") == "token_cap_exceeded"]
+    assert len(aborts) == 1
+    assert aborts[0]["reason"] == "token_cap_exceeded"
+    score = json.loads((cell_dir / "score.json").read_text(encoding="utf-8"))
+    assert score["meta"]["status"] == "aborted"
+    assert score["meta"]["abort_reason"] == "token_cap_exceeded"
+
+
+@then(
+    parsers.parse(
+        "summary.json and manifest.json record {aborted:d} aborted cell and {tot:d} total tokens"
+    )
+)
+def summary_and_manifest_record_aborted(output: Path, aborted: int, tot: int) -> None:
+    summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    assert sum(1 for c in summary["cells"] if c["status"] == "aborted") == aborted
+    assert manifest["totals"]["aborted"] == aborted
+    assert summary["usage"]["total_tokens"] == tot
+    assert manifest["totals"]["usage"]["total_tokens"] == tot
+
+
 # --- bind the feature files --------------------------------------------------
 
 for _feature in (

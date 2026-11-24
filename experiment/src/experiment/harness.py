@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from experiment.backends import BackendProfile
     from experiment.domain.task import Task
+    from experiment.domain.usage import UsageAccumulator
 
 TASK_ROOT = Path(__file__).resolve().parents[2] / "tasks"
 RESULTS_ROOT = TASK_ROOT.parent.parent / "results"
@@ -55,6 +56,7 @@ class RunSpec:
     model: str
     host: str
     profile: BackendProfile | None = None
+    max_cell_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -70,6 +72,8 @@ class CellRequest:
     host: str
     run_id: str
     profile: BackendProfile | None = None
+    max_cell_tokens: int | None = None
+    usage: UsageAccumulator | None = None
 
 
 def fixture_path(task_path: Path, task: Task) -> Path:

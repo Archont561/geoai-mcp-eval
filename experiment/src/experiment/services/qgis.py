@@ -100,6 +100,8 @@ def _proj_version(qgis_core: object) -> str:
 
 def qgis_versions() -> dict[str, str] | None:
     """Return interpreter versions, or None when PyQGIS is unavailable."""
+    if "qgis" in sys.modules and sys.modules["qgis"] is None:
+        return None
     try:
         qgis_core = importlib.import_module("qgis.core")
     except ImportError:

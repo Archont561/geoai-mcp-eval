@@ -82,3 +82,34 @@ Feature: Prototype runs and oracle scoring
     When I run the command "proto show {output}"
     Then the command exits with code 1
     And the output says the summary is missing
+
+  Scenario: Usage reported by the endpoint is recorded in transcript, summary, and manifest
+    Given a prototype output directory
+    And a stubbed Ollama endpoint reporting 120 input and 35 output tokens
+    When I run the command "proto run --driver ollama --task analysis-de9im-001 --arm B --output-dir {output}"
+    Then the command exits successfully
+    And the cell transcript records 120 input and 35 output tokens with no usage warning
+    And summary.json and manifest.json record run token totals of 120 input, 35 output, and 155 total
+
+  Scenario: Missing endpoint usage is recorded as null with an explicit warning
+    Given a prototype output directory
+    And a stubbed Ollama endpoint reporting no token usage
+    When I run the command "proto run --driver ollama --task analysis-de9im-001 --arm B --output-dir {output}"
+    Then the command exits successfully
+    And the cell transcript records null usage with an explicit warning
+    And summary.json and manifest.json record null token totals with 1 missing-usage cell
+
+  Scenario: Exceeding --max-cell-tokens aborts the cell cleanly with a recorded reason
+    Given a prototype output directory
+    And a stubbed Ollama endpoint reporting 400 input and 100 output tokens
+    When I run the command "proto run --driver ollama --task analysis-de9im-001 --arm B --max-cell-tokens 100 --output-dir {output}"
+    Then the command exits with code 1
+    And the cell is aborted for token_cap_exceeded without executing its code
+    And summary.json and manifest.json record 1 aborted cell and 500 total tokens
+
+  Scenario: A non-positive --max-cell-tokens cap is refused before a run starts
+    Given a prototype output directory
+    When I run the command "proto run --max-cell-tokens 0 --output-dir {output}"
+    Then the command exits with code 2
+    And the output contains "--max-cell-tokens must be a positive integer"
+    And no output directory is created
