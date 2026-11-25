@@ -128,6 +128,27 @@ def test_env_inspection_commands_json_output(monkeypatch: pytest.MonkeyPatch) ->
         "versions": {"qgis": "4.2.3", "python": "3.13"},
     }
 
+
+def test_env_config_command_json_table_and_secret_safety(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secret = "sk-or-v1-must-never-appear-in-cli-output"
+    monkeypatch.setenv("OPENROUTER_API_KEY", secret)
+    json_res = runner.invoke(app, ["env", "config", "--json"])
+    assert json_res.exit_code == 0, json_res.output
+    assert secret not in json_res.output
+    parsed = json.loads(json_res.stdout)
+    assert "backends" in parsed and "experiment" in parsed
+    assert parsed["backends"]["free-open"]["api_key_env"] == "OPENROUTER_API_KEY"
+
+    table_res = runner.invoke(app, ["env", "config"])
+    assert table_res.exit_code == 0, table_res.output
+    assert secret not in table_res.output
+    assert "experiment" in table_res.output
+
+    missing_res = runner.invoke(app, ["env", "config", "--config", str(tmp_path / "missing.toml")])
+    assert missing_res.exit_code == 2
+
     monkeypatch.setattr(qgis_service, "qgis_versions", lambda: None)
     qgis_missing: Any = runner.invoke(app, ["env", "qgis", "check", "--json"])
     assert qgis_missing.exit_code == 3

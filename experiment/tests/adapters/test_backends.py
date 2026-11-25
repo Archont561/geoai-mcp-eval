@@ -14,7 +14,7 @@ from experiment.adapters import backends
 
 @pytest.fixture
 def demo_backends_toml(tmp_path: Path) -> Path:
-    path = tmp_path / "backends.toml"
+    path = tmp_path / "experiment.toml"
     path.write_text(
         '[backends.demo]\nbase_url = "http://127.0.0.1:11434/v1"\nmodel = "m"\nmax_tokens = 128\n',
         encoding="utf-8",
@@ -24,7 +24,7 @@ def demo_backends_toml(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def local_and_remote_toml(tmp_path: Path) -> Path:
-    path = tmp_path / "backends.toml"
+    path = tmp_path / "experiment.toml"
     path.write_text(
         '[backends.local]\nbase_url = "http://from-file/v1"\nmodel = "file-model"\n'
         '[backends.free-open]\nbase_url = "http://remote/v1"\nmodel = "m"\n'

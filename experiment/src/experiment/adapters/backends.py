@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import json
 import os
-import tomllib
 from pathlib import Path
 from typing import Any
 
 import requests
 from pydantic import ValidationError
 
+from experiment.adapters import config as config_adapter
 from experiment.adapters import ollama as ollama_adapter
-from experiment.adapters.paths import backends_path
+from experiment.adapters.paths import config_path
 from experiment.domain.backend import (
     DEFAULT_MODEL,
     LOCAL_BACKEND,
@@ -23,15 +23,15 @@ from experiment.domain.backend import (
 )
 from experiment.domain.prompts import ChatTurn, ToolCall
 
-DEFAULT_BACKENDS_PATH = backends_path()
+DEFAULT_CONFIG_PATH = config_path()
 DEFAULT_BASE_URL = ollama_adapter.DEFAULT_BASE_URL
 
 __all__ = [
     "BackendError",
     "BackendProfile",
     "BackendsFile",
-    "DEFAULT_BACKENDS_PATH",
     "DEFAULT_BASE_URL",
+    "DEFAULT_CONFIG_PATH",
     "DEFAULT_MODEL",
     "LOCAL_BACKEND",
     "build_session",
@@ -46,17 +46,11 @@ __all__ = [
 
 
 def load_profiles(path: Path | None = None) -> dict[str, BackendProfile]:
-    path = path or DEFAULT_BACKENDS_PATH
-    if not path.is_file():
-        raise BackendError("config", f"backends file not found: {path}")
-    try:
-        raw = tomllib.loads(path.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError as exc:
-        raise BackendError("config", f"{path}: {exc}") from exc
-    try:
-        return BackendsFile.model_validate(raw).backends
-    except ValidationError as exc:
-        raise BackendError("config", f"{path}: {exc}") from exc
+    """Load ``[backends.*]`` profiles from ``experiment.toml`` (or an explicit TOML file)."""
+    target = path or config_path()
+    if not target.is_file():
+        raise BackendError("config", f"config file not found: {target}")
+    return config_adapter.load_config(target, env={}).backends
 
 
 def _select_profile(name: str, profiles: dict[str, BackendProfile], path: Path) -> BackendProfile:
@@ -68,7 +62,7 @@ def _select_profile(name: str, profiles: dict[str, BackendProfile], path: Path) 
     if path.is_file():
         known = ", ".join(sorted(profiles)) or "none defined"
         raise BackendError("config", f"unknown backend {name!r}; known: {known}")
-    msg = f"backends file not found: {path} (needed for --backend {name!r})"
+    msg = f"config file not found: {path} (needed for --backend {name!r})"
     raise BackendError("config", msg)
 
 
@@ -80,10 +74,10 @@ def resolve_profile(
     path: Path | None = None,
 ) -> BackendProfile:
     """Precedence: flag > $OLLAMA_HOST (local only) > file profile > built-in default."""
-    path = path or DEFAULT_BACKENDS_PATH
+    target = path or config_path()
     name = backend or LOCAL_BACKEND
-    profiles = load_profiles(path) if path.is_file() else {}
-    chosen = _select_profile(name, profiles, path)
+    profiles = load_profiles(target) if target.is_file() else {}
+    chosen = _select_profile(name, profiles, target)
     env_host = os.environ.get("OLLAMA_HOST") if name == LOCAL_BACKEND else None
     data = chosen.model_dump(mode="json")
     data["base_url"] = normalize_host(host or env_host or str(chosen.base_url))

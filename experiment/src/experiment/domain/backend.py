@@ -92,7 +92,7 @@ class BackendError(Exception):
 
 
 class BackendProfile(BaseModel):
-    """One validated backend table from backends.toml."""
+    """One validated backend table from ``experiment.toml``."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -130,7 +130,7 @@ class BackendProfile(BaseModel):
 
 
 class BackendsFile(BaseModel):
-    """Root TOML container for ``experiment/backends.toml``."""
+    """Container for ``[backends.*]`` tables loaded from ``experiment.toml``."""
 
     model_config = ConfigDict(extra="forbid")
 

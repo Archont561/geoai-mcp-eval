@@ -15,6 +15,7 @@ from rich.text import Text
 from experiment.cli._render import print_score_table
 from experiment.domain.run import Arm
 from experiment.services import archive as archive_service
+from experiment.services import config as config_service
 from experiment.services import runs
 from experiment.services import tasks as tasks_service
 from experiment.services import workflow as workflow_service
@@ -22,10 +23,13 @@ from experiment.services.runs import TASK_ROOT, RunSpec, model_label, resolve_ou
 
 app = typer.Typer(help="Execute experiment trials per paradigm or run a quick smoke probe.")
 console = Console(highlight=False)
+_CFG = config_service.get_config()
 
 ROOT_OPTION = typer.Option(TASK_ROOT, "--root", help="Task suite root directory")
 DRIVER_OPTION = typer.Option(
-    "scripted", "--driver", help="scripted (deterministic canned plan) | ollama (live LLM)"
+    _CFG.experiment.default_driver.value,
+    "--driver",
+    help="scripted (deterministic canned plan) | ollama (live LLM)",
 )
 MODEL_OPTION = typer.Option(
     None, "--model", envvar="EXPERIMENT_MODEL", help="Override the backend profile model tag"
@@ -34,25 +38,33 @@ HOST_OPTION = typer.Option(
     None, "--host", envvar="EXPERIMENT_HOST", help="Override the backend base URL"
 )
 BACKEND_OPTION = typer.Option(
-    "local", "--backend", envvar="EXPERIMENT_BACKEND", help="Backend profile from backends.toml"
+    _CFG.experiment.default_backend,
+    "--backend",
+    envvar="EXPERIMENT_BACKEND",
+    help="Backend profile from experiment.toml",
 )
 TASK_OPTION = typer.Option("all", "--task", help="all | comma-separated task IDs")
 REPETITIONS_OPTION = typer.Option(
-    1, "--repetitions", envvar="EXPERIMENT_REPETITIONS", help="Repetitions per (task, arm) cell"
+    _CFG.experiment.default_repetitions,
+    "--repetitions",
+    envvar="EXPERIMENT_REPETITIONS",
+    help="Repetitions per (task, arm) cell",
 )
 OUTPUT_OPTION = typer.Option(None, "--output-dir", help="Output directory for run artifacts")
 MAX_CELL_TOKENS_OPTION = typer.Option(
-    None, "--max-cell-tokens", help="Abort cell if reported tokens exceed this positive integer"
+    _CFG.runner.max_cell_tokens,
+    "--max-cell-tokens",
+    help="Abort cell if reported tokens exceed this positive integer",
 )
 CACHE_OPTION = typer.Option(
-    True,
+    _CFG.experiment.use_llm_cache,
     "--cache/--no-cache",
     envvar="EXPERIMENT_USE_LLM_CACHE",
     help="Use or bypass the digest-keyed LLM completion cache",
 )
 CACHE_DIR_OPTION = typer.Option(None, "--cache-dir", help="Override LLM completion cache dir")
 ENFORCE_OPTION = typer.Option(
-    "semantic_repair",
+    _CFG.experiment.default_enforce.value,
     "--enforce",
     envvar="EXPERIMENT_ENFORCE",
     help="MCP enforcement level (none|declarative|syntactic|semantic_repair|transactional|N0..N4)",

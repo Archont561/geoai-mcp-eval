@@ -7,8 +7,11 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from experiment.adapters import backends
+from experiment.domain.config import ExperimentDefaults
 from experiment.domain.run import Arm, Driver, EnforcementLevel, parse_enforcement_level
 from experiment.services.runners.ports import RunSpec
+
+_EXP_DEFAULTS = ExperimentDefaults()
 
 __all__ = [
     "RunSpecError",
@@ -27,17 +30,17 @@ class RunSpecInput(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    driver: str = "scripted"
+    driver: str = _EXP_DEFAULTS.default_driver.value
     model: str | None = None
     host: str | None = None
     arm: str = "both"
     task: str = "all"
-    backend: str = "local"
+    backend: str = _EXP_DEFAULTS.default_backend
     max_cell_tokens: int | None = None
-    use_cache: bool = True
+    use_cache: bool = _EXP_DEFAULTS.use_llm_cache
     cache_dir: Path | None = None
-    enforce: str = "semantic_repair"
-    repetitions: int = 1
+    enforce: str = _EXP_DEFAULTS.default_enforce.value
+    repetitions: int = _EXP_DEFAULTS.default_repetitions
 
 
 def _parse_arms(raw: str) -> tuple[Arm, ...]:
