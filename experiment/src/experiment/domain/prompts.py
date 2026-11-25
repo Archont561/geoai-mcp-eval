@@ -10,8 +10,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict
 
 RESULT_JSON = "result.json"
 RESULT_GEOJSON = "result.geojson"
@@ -39,9 +40,10 @@ _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 _PYTHON_FENCE_RE = re.compile(r"```(?:python|py)?[ \t]*\r?\n(.*?)```", re.DOTALL | re.IGNORECASE)
 
 
-@dataclass(frozen=True)
-class ToolCall:
+class ToolCall(BaseModel):
     """One model-requested tool invocation, independent of wire schema."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     call_id: str
     name: str
@@ -49,18 +51,20 @@ class ToolCall:
     raw_arguments: str = ""
 
 
-@dataclass(frozen=True)
-class ChatTurn:
+class ChatTurn(BaseModel):
     """One assistant reply translated from the chat endpoint's wire format."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     content: str | None
     tool_calls: tuple[ToolCall, ...]
     raw_message: dict[str, Any]
 
 
-@dataclass(frozen=True)
-class SandboxExecution:
+class SandboxExecution(BaseModel):
     """Outcome of running one generated Python script in the Arm B sandbox."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     returncode: int
     stdout: str

@@ -8,8 +8,9 @@ estimated client-side.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from experiment.domain.run.measurement import TokenUsage
 
@@ -45,13 +46,14 @@ def _first_valid_int(raw: Mapping[str, Any], *keys: str) -> int | None:
     return None
 
 
-@dataclass(frozen=True)
-class UsageSnapshot:
+class UsageSnapshot(BaseModel):
     """Reported token counts for a single LLM completion."""
 
-    input_tokens: int | None
-    output_tokens: int | None
-    total_tokens: int | None
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
     warning: str | None = None
 
     @property
@@ -76,36 +78,41 @@ def extract_response_usage(reply: Mapping[str, Any]) -> UsageSnapshot:
     """Read reported usage from an OpenAI-compatible response without estimating."""
     raw = reply.get("usage")
     if not isinstance(raw, Mapping):
-        return UsageSnapshot(None, None, None, warning=WARNING_MISSING_USAGE)
+        return UsageSnapshot(
+            input_tokens=None, output_tokens=None, total_tokens=None, warning=WARNING_MISSING_USAGE
+        )
 
     inp = _first_valid_int(raw, "prompt_tokens", "input_tokens")
     out = _first_valid_int(raw, "completion_tokens", "output_tokens")
     total = _valid_int(raw.get("total_tokens"))
     if inp is None and out is None and total is None:
-        return UsageSnapshot(None, None, None, warning=WARNING_MISSING_USAGE)
+        return UsageSnapshot(
+            input_tokens=None, output_tokens=None, total_tokens=None, warning=WARNING_MISSING_USAGE
+        )
     if total is None and inp is not None and out is not None:
         total = inp + out
     warning = WARNING_PARTIAL_USAGE if None in (inp, out, total) else None
-    return UsageSnapshot(inp, out, total, warning=warning)
+    return UsageSnapshot(input_tokens=inp, output_tokens=out, total_tokens=total, warning=warning)
 
 
-@dataclass
-class UsageAccumulator:
+class UsageAccumulator(BaseModel):
     """Accumulates reported token usage across all completions in one cell."""
 
-    max_cell_tokens: int | None = None
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+    max_cell_tokens: int | None = Field(default=None, ge=1)
     llm_calls: int = 0
     calls_with_usage: int = 0
     calls_missing_usage: int = 0
-    _input_sum: int = 0
-    _output_sum: int = 0
-    _total_sum: int = 0
-    _input_complete: bool = True
-    _output_complete: bool = True
-    _total_complete: bool = True
-    _observed_total: int = 0
     cap_exceeded: bool = False
-    warnings: list[str] = field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    _input_sum: int = PrivateAttr(default=0)
+    _output_sum: int = PrivateAttr(default=0)
+    _total_sum: int = PrivateAttr(default=0)
+    _input_complete: bool = PrivateAttr(default=True)
+    _output_complete: bool = PrivateAttr(default=True)
+    _total_complete: bool = PrivateAttr(default=True)
+    _observed_total: int = PrivateAttr(default=0)
 
     def _add_warning(self, message: str | None) -> None:
         if message and message not in self.warnings:

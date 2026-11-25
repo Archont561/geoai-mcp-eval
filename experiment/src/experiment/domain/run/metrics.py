@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, NamedTuple
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from experiment.domain.run.measurement import CostAndProcessMetrics, TokenUsage
 from experiment.domain.run.trial import TranscriptEntry
 
 
-class _TranscriptTally(NamedTuple):
-    assistant_turns: int
-    tool_calls: int
-    schema_violations: int
-    repair_turns: int
+class _TranscriptTally(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    assistant_turns: int = Field(ge=0)
+    tool_calls: int = Field(ge=0)
+    schema_violations: int = Field(ge=0)
+    repair_turns: int = Field(ge=0)
 
 
 def _as_dict(entry: TranscriptEntry | Mapping[str, Any]) -> Mapping[str, Any]:
@@ -74,7 +78,12 @@ def _tally_transcript(records: Sequence[Mapping[str, Any]]) -> _TranscriptTally:
             schema_violations += 1
         if _is_failed_tool_entry(record):
             pending_repair = True
-    return _TranscriptTally(assistant_turns, tool_calls, schema_violations, repair_turns)
+    return _TranscriptTally(
+        assistant_turns=assistant_turns,
+        tool_calls=tool_calls,
+        schema_violations=schema_violations,
+        repair_turns=repair_turns,
+    )
 
 
 def extract_transcript_metrics(

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict
 
 from experiment.adapters import paths, run_store, subprocess_runner
 from experiment.adapters.run_archive import RunArchive
@@ -30,9 +31,10 @@ def _opt_str(raw: dict[str, Any], key: str) -> str | None:
     return str(value) if value is not None else None
 
 
-@dataclass(frozen=True)
-class WorkflowRunSummary:
+class WorkflowRunSummary(BaseModel):
     """Metadata for one GitHub Actions workflow dispatch run."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     database_id: int
     head_sha: str

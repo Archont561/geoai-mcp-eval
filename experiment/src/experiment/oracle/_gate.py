@@ -16,6 +16,7 @@ RunFingerprint = tuple[bool, tuple[tuple[str, bool, str], ...]]
 GatePass = tuple[dict[str, object], RunFingerprint | None, str | None]
 
 
+# Kept as dataclass (not BaseModel): holds an opaque evaluator callable.
 @dataclass(frozen=True)
 class _GateContext:
     task_path: Path
@@ -96,11 +97,19 @@ def run_determinism_gate(
     task_path = task_path.resolve()
     task_issue = _gate_task_issue(task_path)
     if task_issue is not None:
-        return DeterminismReport(False, 3, False, (), (task_issue,))
+        return DeterminismReport(
+            passed=False, required_runs=3, consistent=False, run_results=(), issues=(task_issue,)
+        )
     ctx = _GateContext(task_path=task_path, artifact_root=artifact_root, evaluator=evaluator)
     results, fingerprints, issues = _collect_gate_results(ctx)
     consistent = _gate_fingerprints_match(fingerprints, 3)
     if not consistent:
         issues.append("oracle verdicts are missing or inconsistent across the three runs")
     passed = consistent and all(result.get("status") == "passed" for result in results)
-    return DeterminismReport(passed, 3, consistent, tuple(results), tuple(issues))
+    return DeterminismReport(
+        passed=passed,
+        required_runs=3,
+        consistent=consistent,
+        run_results=tuple(results),
+        issues=tuple(issues),
+    )

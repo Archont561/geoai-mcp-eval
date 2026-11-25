@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from experiment.adapters import backends, paths, run_store
 from experiment.adapters import ollama as ollama_adapter
@@ -16,13 +17,14 @@ from experiment.services.runners.ports import CellRequest
 OLLAMA_API = ollama_adapter.DEFAULT_BASE_URL
 
 
-@dataclass(frozen=True)
-class WorkflowCellSpec:
+class WorkflowCellSpec(BaseModel):
     """Parameters for one workflow cell execution."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     arm: Literal["A", "B"]
     task_id: str
-    repetition: int = 1
+    repetition: int = Field(default=1, ge=1)
     stage: Literal["smoke", "pilot"] = "smoke"
     enforce: Literal["N1", "N2", "N3", "N4"] = "N3"
     model: str = "qwen2.5:3b"

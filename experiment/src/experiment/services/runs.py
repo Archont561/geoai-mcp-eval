@@ -8,10 +8,11 @@ results: outputs stay under --output-dir and retain their ``prototype`` label.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict
 
 from experiment.adapters import backends, run_store
 from experiment.adapters.harness_io import (
@@ -54,15 +55,17 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True)
-class _RunContext:
+class _RunContext(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     spec: RunSpec
     output_root: Path
     model_digest: str | None
 
 
-@dataclass(frozen=True)
-class _CellOutcome:
+class _CellOutcome(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     status: str
     error: str | None
     abort_reason: str | None
@@ -88,15 +91,29 @@ def _execute_driver(active_req: CellRequest) -> _CellOutcome:
     if driver_fn is None:
         error = f"unknown driver/arm {active_req.driver}/{active_req.arm}"
         append_transcript(active_req.cell, {"role": "harness", "content": f"cell error: {error}"})
-        return _CellOutcome("error", error, None, round(time.time() - started, 2))
+        return _CellOutcome(
+            status="error", error=error, abort_reason=None, wall_s=round(time.time() - started, 2)
+        )
     try:
         driver_fn(active_req)
-        return _CellOutcome("ok", None, None, round(time.time() - started, 2))
+        return _CellOutcome(
+            status="ok", error=None, abort_reason=None, wall_s=round(time.time() - started, 2)
+        )
     except TokenCapExceededError as exc:
-        return _CellOutcome("aborted", str(exc), exc.reason, round(time.time() - started, 2))
+        return _CellOutcome(
+            status="aborted",
+            error=str(exc),
+            abort_reason=exc.reason,
+            wall_s=round(time.time() - started, 2),
+        )
     except Exception as exc:
         append_transcript(active_req.cell, {"role": "harness", "content": f"cell error: {exc}"})
-        return _CellOutcome("error", str(exc), None, round(time.time() - started, 2))
+        return _CellOutcome(
+            status="error",
+            error=str(exc),
+            abort_reason=None,
+            wall_s=round(time.time() - started, 2),
+        )
 
 
 def _build_cell_meta(
@@ -142,7 +159,9 @@ def _trial_key_for_cell(req: CellRequest) -> TrialKey:
 
 def run_cell(req: CellRequest) -> dict[str, Any]:
     accumulator = req.usage or UsageAccumulator(max_cell_tokens=req.max_cell_tokens)
-    active_req = replace(req, usage=accumulator, cache_stats=req.cache_stats or CacheStats())
+    active_req = req.model_copy(
+        update={"usage": accumulator, "cache_stats": req.cache_stats or CacheStats()}
+    )
     outcome = _execute_driver(active_req)
     usage_summary = accumulator.to_summary()
     append_transcript(

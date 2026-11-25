@@ -8,10 +8,10 @@ tasks declared in ``experiment/pyproject.toml``.
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import NamedTuple
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from experiment.adapters import ollama as ollama_adapter
 from experiment.adapters import paths, run_store, subprocess_runner
@@ -205,19 +205,22 @@ def run_workflow_cell(spec: WorkflowCellSpec) -> Path:
         ollama_adapter.stop_ollama(owner)
 
 
-@dataclass(frozen=True)
-class HarvestConfig:
+class HarvestConfig(BaseModel):
     """Parameters for harvesting experiment cell outputs."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     harvest_dir: Path = Path("harvest")
     arms: tuple[str, ...] = ("A", "B")
-    repetitions: int = 2
+    repetitions: int = Field(default=2, ge=1)
     fail_on_missing: bool = True
     skip_oracle: bool = False
     run_id: str = ""
 
 
-class _Comparison(NamedTuple):
+class _Comparison(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     expected: set[tuple[str, str, int]]
     seen: set[tuple[str, str, int]]
     missing: list[tuple[str, str, int]]

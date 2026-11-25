@@ -10,18 +10,20 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field
 
-@dataclass(frozen=True)
-class CacheKeySpec:
+
+class CacheKeySpec(BaseModel):
     """All inputs that determine a deterministic LLM completion cache key."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     backend_id: str
     model_digest: str
     messages: Sequence[Mapping[str, Any]]
-    tools: Sequence[Mapping[str, Any]] | None
+    tools: Sequence[Mapping[str, Any]] | None = None
     temperature: float
     max_tokens: int
 
@@ -66,12 +68,13 @@ def is_cacheable_response(payload: Any) -> bool:
     return _has_choice_message(payload.get("choices"))
 
 
-@dataclass
-class CacheStats:
+class CacheStats(BaseModel):
     """Counts cache hits and misses across all completions in one cell."""
 
-    hits: int = 0
-    misses: int = 0
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+    hits: int = Field(default=0, ge=0)
+    misses: int = Field(default=0, ge=0)
 
     def record(self, *, hit: bool) -> None:
         if hit:

@@ -11,9 +11,10 @@ import hashlib
 import json
 import re
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
 
 UTF8 = "utf-8"
 JSON_INDENT = 2
@@ -21,13 +22,14 @@ CELL_DIR_PREFIX = "cell-"
 _CELL_DIR_RE = re.compile(r"^cell-([A-Za-z]+)-(.+)-r([1-9]\d*)$")
 
 
-@dataclass(frozen=True)
-class CellDir:
+class CellDir(BaseModel):
     """One discovered experiment cell directory under a run or harvest root."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     arm: str
     task_id: str
-    repetition: int
+    repetition: int = Field(ge=1)
     path: Path
 
 
@@ -191,7 +193,10 @@ def discover_cells(root: Path) -> list[CellDir]:
             parsed = parse_cell_dir_name(child.name)
             if parsed is not None:
                 arm, task_id, rep = parsed
-                found.setdefault((task_id, arm, rep), CellDir(arm, task_id, rep, child))
+                found.setdefault(
+                    (task_id, arm, rep),
+                    CellDir(arm=arm, task_id=task_id, repetition=rep, path=child),
+                )
     return [found[key] for key in sorted(found)]
 
 

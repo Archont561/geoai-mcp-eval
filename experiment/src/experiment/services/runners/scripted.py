@@ -65,6 +65,7 @@ def _write_json(cell: Path, name: str, payload: dict[str, Any]) -> None:
     run_store.write_json(cell / name, payload, sort_keys=False)
 
 
+# Kept as dataclass (not BaseModel): binds CellRequest with live ToolSession & _CallLog.
 @dataclass(frozen=True)
 class _PlanContext:
     req: CellRequest

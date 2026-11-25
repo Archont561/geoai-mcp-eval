@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 import httpx
 import ollama
 import requests
+from pydantic import BaseModel, ConfigDict, Field
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -31,15 +32,17 @@ class HttpTransportError(RuntimeError):
     """Network/transport failure talking to an LLM HTTP endpoint."""
 
 
-@dataclass(frozen=True)
-class RetryPolicy:
+class RetryPolicy(BaseModel):
     """Retry parameters for transient 429/5xx HTTP responses."""
 
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     timeout: tuple[float, float]
-    retries: int = 3
-    backoff_s: float = DEFAULT_RETRY_BACKOFF_S
+    retries: int = Field(default=3, ge=0)
+    backoff_s: float = Field(default=DEFAULT_RETRY_BACKOFF_S, ge=0.0)
 
 
+# Non-serializable live OS process + open file handle; intentionally a dataclass, not a BaseModel.
 @dataclass
 class OllamaProcess:
     """Managed ``ollama serve`` child process and its open log stream."""

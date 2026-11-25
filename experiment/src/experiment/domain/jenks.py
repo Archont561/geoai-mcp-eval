@@ -9,7 +9,8 @@ depend on it and neither depends on the other.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+
+from pydantic import BaseModel, ConfigDict
 
 
 def _prefix_sums(values: list[float]) -> tuple[list[float], list[float]]:
@@ -30,8 +31,9 @@ def _within_class_error(
     return max(0.0, squares - total * total / size)
 
 
-@dataclass(frozen=True)
-class _SplitSearch:
+class _SplitSearch(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     totals: list[float]
     squared_totals: list[float]
     best: list[list[float]]

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict
 from shapely.geometry import shape
 
 from experiment.adapters.task_repository import load_task as _load_task
@@ -14,8 +14,9 @@ from ._base import AssertionResult, OracleVerdict, geojson_features, read_json, 
 from ._jenks import jenks_assignments
 
 
-@dataclass(frozen=True)
-class _EvalContext:
+class _EvalContext(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     assertion: dict[str, object]
     task_root: Path
     output_path: Path
@@ -30,9 +31,9 @@ def _evaluate_feature_count(assertion: dict[str, object], output_path: Path) -> 
     features = geojson_features(output_path)
     expected = assertion.get("expected")
     return AssertionResult(
-        assertion_id,
-        len(features) == expected,
-        f"feature count {len(features)}; expected {expected}",
+        assertion_id=assertion_id,
+        passed=len(features) == expected,
+        message=f"feature count {len(features)}; expected {expected}",
     )
 
 
@@ -64,9 +65,9 @@ def _preserved_fields_issue(
         expected = source_properties.get(field)
         if output_properties.get(field) != expected:
             return AssertionResult(
-                assertion_id,
-                False,
-                f"output feature must preserve {field}={expected!r}",
+                assertion_id=assertion_id,
+                passed=False,
+                message=f"output feature must preserve {field}={expected!r}",
             )
     return None
 
@@ -76,11 +77,17 @@ def _point_geometry_issue(
 ) -> AssertionResult | None:
     geometry = output_feature.get("geometry")
     if not isinstance(geometry, dict) or geometry.get("type") != "Point":
-        return AssertionResult(assertion_id, False, "output geometry must be a GeoJSON Point")
+        return AssertionResult(
+            assertion_id=assertion_id,
+            passed=False,
+            message="output geometry must be a GeoJSON Point",
+        )
     coordinates = geometry.get("coordinates")
     if not isinstance(coordinates, list) or len(coordinates) != 2:
         return AssertionResult(
-            assertion_id, False, "output point must have [longitude, latitude] coordinates"
+            assertion_id=assertion_id,
+            passed=False,
+            message="output point must have [longitude, latitude] coordinates",
         )
     return None
 
@@ -93,7 +100,11 @@ def _point_feature_issue(
 ) -> AssertionResult | None:
     output_properties = output_feature.get("properties")
     if not isinstance(output_properties, dict):
-        return AssertionResult(assertion_id, False, "output feature must have a properties object")
+        return AssertionResult(
+            assertion_id=assertion_id,
+            passed=False,
+            message="output feature must have a properties object",
+        )
     source_properties = source_feature.get("properties", {})
     issue = _preserved_fields_issue(
         assertion_id, output_properties, source_properties, preserve_fields
@@ -109,9 +120,9 @@ def _point_output_issue(
 ) -> AssertionResult | None:
     if len(output_features) != 1:
         return AssertionResult(
-            assertion_id,
-            False,
-            f"expected one output point; found {len(output_features)} features",
+            assertion_id=assertion_id,
+            passed=False,
+            message=f"expected one output point; found {len(output_features)} features",
         )
     return _point_feature_issue(assertion_id, output_features[0], source_feature, preserve_fields)
 
@@ -133,11 +144,13 @@ def _evaluate_representative_point(ctx: _EvalContext) -> AssertionResult:
         and abs(float(coordinates[1]) - expected_point.y) <= tolerance
     )
     return AssertionResult(
-        assertion_id,
-        passed,
-        f"point is [{coordinates[0]}, {coordinates[1]}]; "
-        f"expected lon/lat [{expected_point.x}, {expected_point.y}] "
-        f"within {tolerance}°",
+        assertion_id=assertion_id,
+        passed=passed,
+        message=(
+            f"point is [{coordinates[0]}, {coordinates[1]}]; "
+            f"expected lon/lat [{expected_point.x}, {expected_point.y}] "
+            f"within {tolerance}°"
+        ),
     )
 
 
@@ -171,9 +184,9 @@ def _evaluate_de9im(ctx: _EvalContext) -> AssertionResult:
     expected_matrix = str(ctx.assertion["expected_matrix"])
     if matrix != expected_matrix:
         return AssertionResult(
-            assertion_id,
-            False,
-            f"fixture relation matrix is {matrix}; expected {expected_matrix}",
+            assertion_id=assertion_id,
+            passed=False,
+            message=f"fixture relation matrix is {matrix}; expected {expected_matrix}",
         )
     submitted = read_json(ctx.output_path)
     return _relation_result(assertion_id, submitted, matrix, actual_relation)
@@ -194,7 +207,7 @@ def _relation_result(
         f"de9im={submitted.get('de9im')!r}; expected relation={relation!r}, "
         f"de9im={matrix!r}"
     )
-    return AssertionResult(assertion_id, passed, message)
+    return AssertionResult(assertion_id=assertion_id, passed=passed, message=message)
 
 
 def _evaluate_jenks(ctx: _EvalContext) -> AssertionResult:
@@ -217,11 +230,13 @@ def _evaluate_jenks(ctx: _EvalContext) -> AssertionResult:
     values_match = all(submitted.get(key) == value for key, value in expected_payload.items())
     passed = has_only_expected_keys and values_match
     return AssertionResult(
-        assertion_id,
-        passed,
-        f"Jenks result has {len(breaks)} classes and {len(assignments)} assignments; "
-        f"breaks and assignments {'match' if passed else 'do not match'} "
-        "the fixture oracle",
+        assertion_id=assertion_id,
+        passed=passed,
+        message=(
+            f"Jenks result has {len(breaks)} classes and {len(assignments)} assignments; "
+            f"breaks and assignments {'match' if passed else 'do not match'} "
+            "the fixture oracle"
+        ),
     )
 
 
@@ -255,6 +270,12 @@ def evaluate_task(task_path: Path, artifact_root: Path) -> OracleVerdict:
             checks.append(_evaluate_assertion(assertion, task_root, artifact_root))
         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
             checks.append(
-                AssertionResult(assertion_id, False, f"oracle could not evaluate assertion: {exc}")
+                AssertionResult(
+                    assertion_id=assertion_id,
+                    passed=False,
+                    message=f"oracle could not evaluate assertion: {exc}",
+                )
             )
-    return OracleVerdict(bool(checks) and all(check.passed for check in checks), tuple(checks))
+    return OracleVerdict(
+        passed=bool(checks) and all(check.passed for check in checks), checks=tuple(checks)
+    )
