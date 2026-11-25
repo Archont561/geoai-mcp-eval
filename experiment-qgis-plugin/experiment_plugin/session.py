@@ -15,14 +15,13 @@ Both files live in the session's own directory; the record is written at end_ses
 
 from __future__ import annotations
 
-import json
-import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from experiment_plugin import __version__, _io, _tasks, _versions
+from experiment_plugin import __version__, _io, _session_io, _tasks, _versions
+from experiment_plugin._session_io import RECORD_VERSION, TEMPLATE_KEYS, template_skeleton
 from experiment_plugin._tasks import (
     BehaviorTracker,
     baseline_dir_for,
@@ -33,70 +32,37 @@ from experiment_plugin._tasks import (
     utc_now,
 )
 from experiment_plugin.metrics import (
-    METRICS_STATUS_NOT_STARTED,
     ManualActionGroup,
     ProcessingExecution,
     SessionMetricsState,
     normalize_timestamp,
     sanitize_parameters,
-    study_metrics_skeleton,
 )
 
 # Single source of truth is experiment_plugin.__version__. pyproject.toml carries the
 # same literal because qgis-sdk build reads [project] version statically (it rejects
 # PEP 621 dynamic with META002); test_version_is_single_sourced pins the two equal.
 RECORDER_VERSION = __version__
-RECORD_VERSION = 2
-TEMPLATE_KEYS = (
-    "record_version",
-    "status",
-    "task_id",
-    "task_file_sha256",
-    "fixture_path",
-    "fixture_sha256",
-    "participant_code",
-    "consent",
-    "session",
-    "study_metrics",
-    "outputs",
-    "oracle_report_path",
-    "oracle_passed",
-    "evidence_storage_reference",
-)
+
+__all__ = [
+    "RECORDER_VERSION",
+    "RECORD_VERSION",
+    "TEMPLATE_KEYS",
+    "HumanBaselineSession",
+    "abandon_session",
+    "discover_task_dir",
+    "host_identity",
+    "host_software_versions",
+    "render_log",
+    "sha256_file",
+    "start_session",
+    "template_skeleton",
+]
 
 
 def discover_task_dir(*, cwd: Path | None = None, anchor: Path | None = None) -> Path:
     """Locate experiment/tasks from cwd ancestors, then package ancestors."""
     return _tasks.discover_task_dir(cwd=cwd, anchor=anchor or Path(__file__))
-
-
-def template_skeleton() -> dict[str, Any]:
-    return {
-        "record_version": RECORD_VERSION,
-        "status": "not_started",
-        "task_id": None,
-        "task_file_sha256": None,
-        "fixture_path": None,
-        "fixture_sha256": None,
-        "participant_code": None,
-        "consent": {"obtained": None, "screen_recording": False},
-        "session": {
-            "started_at_utc": None,
-            "ended_at_utc": None,
-            "elapsed_minutes": None,
-            "steps": None,
-            "tools": None,
-            "metrics_status": METRICS_STATUS_NOT_STARTED,
-            "software_versions": {"qgis": None, "gdal": None, "geos": None, "proj": None},
-            "network_disabled": None,
-            "deviations_or_interruptions": [],
-        },
-        "study_metrics": study_metrics_skeleton(),
-        "outputs": [],
-        "oracle_report_path": None,
-        "oracle_passed": None,
-        "evidence_storage_reference": None,
-    }
 
 
 def host_software_versions() -> dict[str, str | None]:
@@ -203,28 +169,7 @@ class HumanBaselineSession:
     # -- finish -----------------------------------------------------------
 
     def _collect_outputs(self) -> list[dict[str, Any]]:
-        outputs: list[dict[str, Any]] = []
-        root_excluded = {
-            "events.jsonl",
-            "human-reference-record.json",
-            "session-abandoned.json",
-        }
-        candidates: list[tuple[str, Path]] = []
-        for dirpath, _dirnames, filenames in os.walk(self.output_dir, followlinks=False):
-            current_dir = Path(dirpath)
-            for name in filenames:
-                path = current_dir / name
-                if path.is_symlink() or not path.is_file():
-                    continue
-                rel = path.relative_to(self.output_dir).as_posix()
-                if rel in root_excluded:
-                    continue
-                if "/" not in rel and name.startswith(".human-reference-record-"):
-                    continue
-                candidates.append((rel, path))
-        for rel, path in sorted(candidates, key=lambda item: item[0]):
-            outputs.append({"path": rel, "sha256": sha256_file(path), "bytes": path.stat().st_size})
-        return outputs
+        return _session_io.collect_session_outputs(self.output_dir)
 
     def _session_section(
         self,
@@ -292,35 +237,14 @@ class HumanBaselineSession:
 
 
 def render_log(session: HumanBaselineSession) -> str:
-    """Human-readable rendering of a session's event log, for display and export.
-
-    Rendered line: ``<ts>  <event>  key=value key=value`` with keys sorted; no
-    values invented. A missing or unreadable events file yields a header that
-    says so instead of an exception.
-    """
-    lines = [
-        f"human-baseline session log — task {session.task_id}",
-        f"session dir: {session.output_dir}",
-        f"started: {session.started_at.isoformat()}   status: {session.status}",
-        "",
-    ]
-    events_path = session.tracker.events_path
-    try:
-        raw_lines = events_path.read_text(encoding="utf-8").splitlines()
-    except OSError as exc:
-        lines.append(f"(event log unavailable: {exc})")
-        return "\n".join(lines) + "\n"
-    for raw in raw_lines:
-        try:
-            record = json.loads(raw)
-        except json.JSONDecodeError:
-            lines.append(raw)
-            continue
-        ts = record.pop("ts", "?")
-        event = record.pop("event", "?")
-        fields = "  ".join(f"{k}={v}" for k, v in sorted(record.items()) if v is not None)
-        lines.append(f"{ts}  {event}  {fields}".rstrip())
-    return "\n".join(lines) + "\n"
+    """Human-readable rendering of a session's event log, for display and export."""
+    return _session_io.render_session_log(
+        task_id=session.task_id,
+        output_dir=session.output_dir,
+        started_at=session.started_at,
+        status=session.status,
+        events_path=session.tracker.events_path,
+    )
 
 
 def _abandoned_payload(
@@ -342,9 +266,8 @@ def _abandoned_payload(
 def abandon_session(session: HumanBaselineSession, reason: str = "user requested") -> Path:
     """Abandon a session without writing human-reference-record.json."""
     session.tracker.record("session_abandoned", reason=reason)
-    marker = session.output_dir / "session-abandoned.json"
     payload = _abandoned_payload(session, utc_now(), reason)
-    marker.write_text(_io.format_json(payload, trailing_newline=True), encoding="utf-8")
+    marker = _session_io.write_abandoned_marker(session.output_dir, payload)
     session.status = "abandoned"
     return marker
 
@@ -359,34 +282,10 @@ def start_session(
     base = resolve_task_dir(base_dir)
     task_yaml = find_task_yaml(base, task_id)
     fixture = task_fixture(task_yaml)
-    session = _new_session(task_id, task_yaml, fixture, participant_code, network_disabled)
-    session.tracker.record(
-        "session_start",
-        task_id=task_id,
-        task_file_sha256=sha256_file(task_yaml),
-        fixture_sha256=sha256_file(fixture),
-    )
-    return session
-
-
-def _new_session(
-    task_id: str,
-    task_yaml: Path,
-    fixture: Path,
-    participant_code: str | None,
-    network_disabled: bool | None,
-) -> HumanBaselineSession:
-    root = baseline_dir_for(task_yaml, task_id)
     started = utc_now()
-    stamp = started.strftime("%Y%m%dT%H%M%SZ")
-    output_dir = root / f"session-{stamp}"
-    attempt = 1
-    while output_dir.exists():  # same-second restarts: never clobber a sibling session
-        attempt += 1
-        output_dir = root / f"session-{stamp}-{attempt}"
-    output_dir.mkdir(parents=True)
+    output_dir = _session_io.allocate_session_dir(baseline_dir_for(task_yaml, task_id), started)
     tracker = BehaviorTracker(events_path=output_dir / "events.jsonl", started_at=started)
-    return HumanBaselineSession(
+    session = HumanBaselineSession(
         task_id=task_id,
         task_yaml=task_yaml,
         fixture=fixture,
@@ -396,3 +295,10 @@ def _new_session(
         participant_code=participant_code or None,
         network_disabled=network_disabled,
     )
+    session.tracker.record(
+        "session_start",
+        task_id=task_id,
+        task_file_sha256=sha256_file(task_yaml),
+        fixture_sha256=sha256_file(fixture),
+    )
+    return session

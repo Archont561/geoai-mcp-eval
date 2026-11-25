@@ -15,7 +15,6 @@ from typing import Any
 
 from experiment.adapters import backends, run_store
 from experiment.adapters.harness_io import (
-    DRIVERS,
     TASK_ROOT,
     append_transcript,
     cell_dir,
@@ -24,12 +23,7 @@ from experiment.adapters.harness_io import (
 )
 from experiment.adapters.task_repository import discover_task_files, load_task
 from experiment.domain.cache_key import CacheStats
-from experiment.domain.run import (
-    EnforcementLevel,
-    TrialKey,
-    arm_to_paradigm,
-    parse_enforcement_level,
-)
+from experiment.domain.run import EnforcementLevel, TrialKey, arm_to_paradigm
 from experiment.domain.task import Task
 from experiment.domain.usage import (
     TokenCapExceededError,
@@ -38,6 +32,7 @@ from experiment.domain.usage import (
 )
 from experiment.services.measurement import TrialMeasurementOptions, measure_trial
 from experiment.services.reports import CellSummary, RunSummary
+from experiment.services.run_spec import RunSpecError, RunSpecInput, parse_enforce, parse_run_spec
 from experiment.services.runners import ollama as drivers
 from experiment.services.runners import scripted
 from experiment.services.runners.ports import CellRequest, RunSpec
@@ -59,26 +54,6 @@ __all__ = [
 ]
 
 
-class RunSpecError(ValueError):
-    """A run cannot start with the requested driver, arm, or backend."""
-
-
-@dataclass(frozen=True)
-class RunSpecInput:
-    """Raw CLI/caller inputs validated into a :class:`RunSpec`."""
-
-    driver: str = "scripted"
-    model: str | None = None
-    host: str | None = None
-    arm: str = "both"
-    task: str = "all"
-    backend: str = "local"
-    max_cell_tokens: int | None = None
-    use_cache: bool = True
-    cache_dir: Path | None = None
-    enforce: str = "semantic_repair"
-
-
 @dataclass(frozen=True)
 class _RunContext:
     spec: RunSpec
@@ -92,65 +67,6 @@ class _CellOutcome:
     error: str | None
     abort_reason: str | None
     wall_s: float
-
-
-def _parse_arms(raw: str) -> tuple[str, ...]:
-    mapping = {"both": ("A", "B"), "a": ("A",), "b": ("B",)}
-    key = raw.strip().lower()
-    if key not in mapping:
-        raise RunSpecError(f"--arm must be one of both|A|B, got {raw!r}")
-    return mapping[key]
-
-
-def _parse_tasks(raw: str) -> tuple[str, ...] | None:
-    if raw.strip().lower() == "all":
-        return None
-    return tuple(part.strip() for part in raw.split(",") if part.strip())
-
-
-def _resolve_backend_profile(
-    driver: str, backend: str, host: str | None, model: str | None
-) -> backends.BackendProfile:
-    try:
-        profile = backends.resolve_profile(backend, host=host, model=model)
-        if driver == "ollama":
-            backends.require_api_key(profile)
-    except backends.BackendError as exc:
-        raise RunSpecError(str(exc)) from exc
-    return profile
-
-
-def _parse_enforce(raw: str) -> EnforcementLevel:
-    try:
-        return parse_enforcement_level(raw)
-    except ValueError as exc:
-        raise RunSpecError(str(exc)) from exc
-
-
-def _validate_run_inputs(driver: str, max_cell_tokens: int | None) -> None:
-    if driver not in DRIVERS:
-        raise RunSpecError(f"--driver must be one of {', '.join(DRIVERS)}")
-    if max_cell_tokens is not None and max_cell_tokens < 1:
-        raise RunSpecError("--max-cell-tokens must be a positive integer")
-
-
-def parse_run_spec(raw: RunSpecInput) -> RunSpec:
-    """Resolve the backend and validate a requested run before creating output."""
-    _validate_run_inputs(raw.driver, raw.max_cell_tokens)
-    profile = _resolve_backend_profile(raw.driver, raw.backend, raw.host, raw.model)
-    return RunSpec(
-        driver=raw.driver,
-        model=profile.model,
-        host=str(profile.base_url),
-        arms=_parse_arms(raw.arm),
-        task_ids=_parse_tasks(raw.task),
-        profile=profile,
-        max_cell_tokens=raw.max_cell_tokens,
-        backend_id=raw.backend,
-        use_cache=raw.use_cache,
-        cache_dir=raw.cache_dir,
-        enforce=_parse_enforce(raw.enforce),
-    )
 
 
 def discover_tasks(root: Path) -> list[Path]:
@@ -213,7 +129,7 @@ def _build_cell_meta(
 def _trial_key_for_cell(req: CellRequest) -> TrialKey:
     paradigm = arm_to_paradigm(req.arm)
     enforcement: EnforcementLevel = (
-        _parse_enforce(req.enforce) if paradigm == "typed_mcp" else "none"
+        parse_enforce(req.enforce) if paradigm == "typed_mcp" else "none"
     )
     return TrialKey(
         task_id=req.task.id,

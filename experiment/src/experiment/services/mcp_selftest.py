@@ -2,9 +2,22 @@
 
 from __future__ import annotations
 
+from experiment import gis_ops
 from experiment.adapters import run_store
 from experiment.adapters.harness_io import TASK_ROOT
 from experiment.adapters.mcp import client as mcp_client
+
+
+def _first_doc_line(doc: str | None) -> str:
+    if not doc:
+        return ""
+    lines = doc.strip().splitlines()
+    return lines[0] if lines else ""
+
+
+def list_operations() -> tuple[tuple[str, str], ...]:
+    """Return ``(name, first_doc_line)`` pairs for the Arm A GIS MCP catalogue."""
+    return tuple((name, _first_doc_line(func.__doc__)) for name, func in gis_ops.OPS.items())
 
 
 async def selftest_rows() -> list[tuple[str, str, str]]:

@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import zipfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from experiment.adapters._archive_artifacts import (
+    build_artifact_refs,
+    collect_dir_files,
+    parse_transcript_entry,
+    sha256_bytes,
+)
 from experiment.domain.run import (
     ArtifactKind,
     ArtifactRef,
@@ -24,107 +29,23 @@ SUMMARY_MEMBER = "summary.md"
 SCHEMA_MEMBER = "schema/experiment-run-v1.json"
 TRIALS_PREFIX = "trials"
 _FIXED_ZIP_TIME = (2026, 1, 1, 0, 0, 0)
-_TRANSCRIPT_KNOWN_FIELDS = frozenset(TranscriptEntry.model_fields) - {"extra_fields"}
+
+__all__ = [
+    "RUN_INDEX_MEMBER",
+    "SCHEMA_MEMBER",
+    "SUMMARY_MEMBER",
+    "TRIALS_PREFIX",
+    "UTF8",
+    "ArchiveIntegrityError",
+    "LazyTrialHandle",
+    "RunArchive",
+    "build_artifact_refs",
+    "collect_dir_files",
+]
 
 
 class ArchiveIntegrityError(ValueError):
     """Raised when an archive member is missing or fails SHA-256 verification."""
-
-
-def _sha256_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-_EXACT_KINDS: dict[str, ArtifactKind] = {
-    "transcript.jsonl": "transcript",
-    "result.json": "deliverable",
-    "result.geojson": "deliverable",
-}
-_SUFFIX_KINDS: tuple[tuple[str, ArtifactKind], ...] = (
-    (".gpkg", "deliverable"),
-    (".log", "log"),
-    (".py", "script"),
-)
-_SUFFIX_MEDIA_TYPES: tuple[tuple[str, str], ...] = (
-    (".geojson", "application/geo+json"),
-    (".json", "application/json"),
-    (".jsonl", "application/x-ndjson"),
-    (".log", "text/plain"),
-    (".txt", "text/plain"),
-    (".md", "text/plain"),
-    (".py", "text/x-python"),
-)
-
-
-def _infer_artifact_kind(rel_path: str) -> ArtifactKind:
-    name = rel_path.rsplit("/", 1)[-1].lower()
-    if name in _EXACT_KINDS:
-        return _EXACT_KINDS[name]
-    if name.startswith("oracle") and name.endswith(".json"):
-        return "oracle_passes"
-    for suffix, kind in _SUFFIX_KINDS:
-        if name.endswith(suffix):
-            return kind
-    return "other"
-
-
-def _infer_media_type(rel_path: str) -> str | None:
-    lower = rel_path.lower()
-    for suffix, media_type in _SUFFIX_MEDIA_TYPES:
-        if lower.endswith(suffix):
-            return media_type
-    return None
-
-
-def build_artifact_refs(
-    files: Mapping[str, bytes],
-    kinds: Mapping[str, ArtifactKind] | None = None,
-) -> list[ArtifactRef]:
-    """Build sorted ArtifactRef entries with exact SHA-256 hashes from raw bytes."""
-    overrides = kinds or {}
-    refs: list[ArtifactRef] = []
-    for rel_path in sorted(files):
-        data = files[rel_path]
-        kind = overrides.get(rel_path) or _infer_artifact_kind(rel_path)
-        refs.append(
-            ArtifactRef(
-                path=rel_path,
-                sha256=_sha256_bytes(data),
-                bytes=len(data),
-                kind=kind,
-                media_type=_infer_media_type(rel_path),
-            )
-        )
-    return refs
-
-
-def collect_dir_files(root: Path) -> dict[str, bytes]:
-    """Read every file under ``root`` into a sorted POSIX-relative bytes mapping."""
-    result: dict[str, bytes] = {}
-    for path in sorted(root.rglob("*")):
-        if path.is_file():
-            rel = path.relative_to(root).as_posix()
-            result[rel] = path.read_bytes()
-    return result
-
-
-def _normalize_content(value: Any) -> str | None:
-    if value is None or isinstance(value, str):
-        return value
-    return json.dumps(value, sort_keys=True)
-
-
-def _parse_transcript_entry(raw: Mapping[str, Any]) -> TranscriptEntry:
-    known: dict[str, Any] = {}
-    extra: dict[str, Any] = {}
-    for key, value in raw.items():
-        if key in _TRANSCRIPT_KNOWN_FIELDS:
-            known[key] = _normalize_content(value) if key == "content" else value
-        else:
-            extra[key] = value
-    if "role" not in known:
-        known["role"] = "unknown"
-    return TranscriptEntry(**known, extra_fields=extra)
 
 
 def _trial_member_name(trial_id: str, rel_path: str) -> str:
@@ -196,7 +117,7 @@ class LazyTrialHandle:
             else:
                 lines = [line for line in self.read_text(ref.path).splitlines() if line.strip()]
                 self._parsed_cache["transcript"] = [
-                    _parse_transcript_entry(json.loads(line)) for line in lines
+                    parse_transcript_entry(json.loads(line)) for line in lines
                 ]
         return self._parsed_cache["transcript"]
 
@@ -227,7 +148,7 @@ def _verify_and_write_trials(
                     f"missing bytes for declared artifact {trial_id}/{ref.path}"
                 )
             data = provided[ref.path]
-            actual = _sha256_bytes(data)
+            actual = sha256_bytes(data)
             if actual != ref.sha256:
                 raise ArchiveIntegrityError(
                     f"SHA-256 mismatch while writing {trial_id}/{ref.path}: "
@@ -272,7 +193,7 @@ class RunArchive:
             data = self._zip.read(member)
         except KeyError as exc:
             raise ArchiveIntegrityError(f"missing zip member {member!r}") from exc
-        actual = _sha256_bytes(data)
+        actual = sha256_bytes(data)
         if actual != ref.sha256:
             raise ArchiveIntegrityError(
                 f"SHA-256 mismatch for {member!r}: expected {ref.sha256}, got {actual}"

@@ -315,7 +315,7 @@ def inspect_archive(archive_path: Path) -> ArchiveOverview:
 
 def render_summary(target: Path, run_id: str = "") -> str:
     """Render Markdown summary from a ``RunArchive`` zip or a harvest directory."""
-    if target.is_file() and target.suffix == ".zip":
+    if run_store.is_file(target) and target.suffix == ".zip":
         with RunArchive.open(target) as archive:
             cached = archive.summary_markdown()
             if cached is not None:

@@ -23,6 +23,21 @@ def ensure_dir(path: Path) -> Path:
     return path
 
 
+def exists(path: Path) -> bool:
+    """Return True when ``path`` exists on disk."""
+    return path.exists()
+
+
+def is_file(path: Path) -> bool:
+    """Return True when ``path`` refers to a regular file."""
+    return path.is_file()
+
+
+def is_dir(path: Path) -> bool:
+    """Return True when ``path`` refers to an existing directory."""
+    return path.is_dir()
+
+
 def read_text(path: Path) -> str:
     """Read UTF-8 text from ``path``."""
     return path.read_text(encoding=UTF8)

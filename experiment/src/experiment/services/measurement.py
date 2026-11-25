@@ -48,7 +48,7 @@ def determinism_report_to_audit(report: DeterminismReport) -> DeterminismAudit:
 
 def _read_transcript_records(cell_dir: Path) -> list[dict[str, Any]]:
     path = cell_dir / "transcript.jsonl"
-    if not path.is_file():
+    if not run_store.is_file(path):
         return []
     records: list[dict[str, Any]] = []
     for line in run_store.read_text(path).splitlines():

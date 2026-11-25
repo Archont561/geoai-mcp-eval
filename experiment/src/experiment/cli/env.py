@@ -13,7 +13,6 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from experiment import gis_ops
 from experiment.services import backend_check as backend_check_service
 from experiment.services import mcp_selftest as mcp_selftest_service
 from experiment.services import qgis as qgis_service
@@ -138,16 +137,16 @@ def backend_check(  # noqa: CC102
 @app.command("mcp-ops")
 def mcp_ops() -> None:
     """List the Arm A typed GIS operation catalogue."""
+    ops = mcp_selftest_service.list_operations()
     table = Table(title="Prototype GIS MCP operations", header_style="bold cyan")
     table.add_column("tool", style="green")
     table.add_column("summary")
-    for name, func in gis_ops.OPS.items():
-        first_line = (func.__doc__ or "").strip().splitlines()[0]
-        table.add_row(name, first_line)
+    for name, summary in ops:
+        table.add_row(name, summary)
     console.print(table)
     console.print(
         Text(
-            f"{len(gis_ops.OPS)} ops — prototype catalogue, not frozen.",
+            f"{len(ops)} ops — prototype catalogue, not frozen.",
             style="dim",
         )
     )

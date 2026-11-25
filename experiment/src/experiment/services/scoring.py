@@ -92,7 +92,7 @@ def _summary_from_archive(archive_path: Path) -> RunSummary:
 
 def rescore_run(run_dir: Path, task_root: Path | None = None) -> RunSummary | None:
     """Build a display summary from a run directory or zip archive, or return None."""
-    if run_dir.is_file() and run_dir.suffix == ".zip":
+    if run_store.is_file(run_dir) and run_dir.suffix == ".zip":
         return _summary_from_archive(run_dir)
     suite_root = task_root if task_root is not None else TASK_ROOT
     task_by_id = {load_task(path).id: path for path in discover_task_files(suite_root)}
@@ -117,10 +117,10 @@ def rescore_run(run_dir: Path, task_root: Path | None = None) -> RunSummary | No
 
 def load_summary(run_dir: Path) -> RunSummary:
     """Read an existing summary from a directory or ``RunArchive`` zip."""
-    if run_dir.is_file() and run_dir.suffix == ".zip":
+    if run_store.is_file(run_dir) and run_dir.suffix == ".zip":
         return _summary_from_archive(run_dir)
     path = run_dir / "summary.json"
-    if not path.is_file():
+    if not run_store.is_file(path):
         raise SummaryNotFoundError(path)
     raw = run_store.read_json_mapping(path)
     if raw is None:
