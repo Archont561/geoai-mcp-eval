@@ -11,10 +11,12 @@ from unittest.mock import MagicMock
 
 import httpx
 import pytest
+import respx
 from github import GithubException
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
+from pytest_mock import MockerFixture
 
 from experiment.adapters import paths
 from experiment.adapters.run_archive import RunArchive
@@ -279,3 +281,45 @@ def test_github_run_client_default_cache_dir_and_extra_field_rejection() -> None
             url="https://example.invalid/42",
             extra=1,  # type: ignore[call-arg]
         )
+
+
+def test_github_run_client_streams_302_redirect_via_respx(
+    tmp_path: Path,
+    packed_pilot_zip: Path,
+    mocker: MockerFixture,
+    respx_mock: respx.MockRouter,
+) -> None:
+    """Exercise real ``httpx.Client`` against ``respx`` to verify cross-host auth stripping."""
+    run = mocker.MagicMock(name="workflow_run")
+    artifact = mocker.MagicMock(name="artifact")
+    artifact.name = "experiment-run-777"
+    artifact.expired = False
+    artifact.archive_download_url = (
+        "https://api.github.com/repos/Archont561/geoai-mcp-eval/actions/artifacts/777/zip"
+    )
+    run.get_artifacts.return_value = [artifact]
+    gh = mocker.MagicMock(name="github")
+    gh.get_repo.return_value.get_workflow_run.return_value = run
+
+    outer_bytes = _wrap_in_outer_artifact_zip(packed_pilot_zip, "experiment-run-777.zip")
+    api_route = respx_mock.get(artifact.archive_download_url).mock(
+        return_value=httpx.Response(
+            302, headers={"Location": "https://blob.example.invalid/sas/777.zip"}
+        )
+    )
+    blob_route = respx_mock.get("https://blob.example.invalid/sas/777.zip").mock(
+        return_value=httpx.Response(200, content=outer_bytes)
+    )
+
+    client = GitHubRunClient(
+        repo="Archont561/geoai-mcp-eval",
+        token="ghp_respx_secret",
+        cache_dir=tmp_path / "cache",
+        transport=GitHubTransport(github_client=gh),
+    )
+    with client.load_run(777) as dataset:
+        assert len(dataset.measurements_df()) == 6
+    assert api_route.called
+    assert blob_route.called
+    assert api_route.calls.last.request.headers["authorization"] == "Bearer ghp_respx_secret"
+    assert "authorization" not in blob_route.calls.last.request.headers

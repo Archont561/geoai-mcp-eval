@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
-from hypothesis import given
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from hypothesis_jsonschema import from_schema
 from pydantic import ValidationError
 
 from experiment.domain.task import (
@@ -19,6 +21,19 @@ from experiment.domain.task import (
 )
 
 TASKS_DIR = Path(__file__).resolve().parents[2] / "tasks"
+TASK_SCHEMA_V1: dict[str, Any] = json.loads(
+    (TASKS_DIR / "schema-v1.json").read_text(encoding="utf-8")
+)
+
+
+@settings(
+    max_examples=20,
+    suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much],
+)
+@given(payload=from_schema(TASK_SCHEMA_V1))
+def test_every_schema_v1_payload_roundtrips_through_task_model(payload: dict[str, Any]) -> None:
+    task = Task.model_validate(payload)
+    assert Task.model_validate_json(task.model_dump_json()) == task
 
 
 def test_model_and_schema_agree_on_every_required_key() -> None:

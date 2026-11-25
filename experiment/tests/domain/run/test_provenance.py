@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
+from dirty_equals import IsPartialDict
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
@@ -21,6 +24,16 @@ def test_provenance_models_roundtrip_arbitrary_pins(
         environment=EnvironmentPin(repo_sha=repo_sha, python=python_ver, qgis=qgis_ver),
         model=ModelPin(backend_id="local", tag=tag, digest=f"sha256:{repo_sha}"),
     )
+    assert prov.model_dump(mode="json") == IsPartialDict(
+        environment=IsPartialDict(repo_sha=repo_sha, python=python_ver, qgis=qgis_ver),
+        model=IsPartialDict(backend_id="local", tag=tag),
+    )
+    assert RunProvenance.model_validate_json(prov.model_dump_json()) == prov
+
+
+def test_provenance_factory_builds_valid_provenance(run_provenance_factory: Any) -> None:
+    prov = run_provenance_factory.build()
+    assert isinstance(prov, RunProvenance)
     assert RunProvenance.model_validate_json(prov.model_dump_json()) == prov
 
 

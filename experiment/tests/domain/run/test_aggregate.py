@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
+from dirty_equals import IsDatetime, IsPartialDict
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from hypothesis_jsonschema import from_schema
 from pydantic import ValidationError
 
 from experiment.domain.run import (
@@ -27,6 +30,27 @@ from experiment.domain.run import (
     TrialMeasurement,
     TrialRecord,
 )
+
+RUN_JSON_SCHEMA: dict[str, Any] = ExperimentRun.model_json_schema()
+
+
+@settings(
+    max_examples=15,
+    suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much],
+)
+@given(payload=from_schema(RUN_JSON_SCHEMA))
+def test_experiment_run_model_json_schema_fuzz_roundtrip(payload: dict[str, Any]) -> None:
+    # Align map keys with cross-field model invariants (trials[k].trial_id == k).
+    aligned = dict(payload)
+    aligned["trials"] = {}
+    aligned["measurements"] = {}
+    run = ExperimentRun.model_validate(aligned)
+    dumped = run.model_dump(mode="json")
+    assert dumped == IsPartialDict(
+        run_id=run.run_id,
+        created_at=IsDatetime(iso_string=True),
+    )
+    assert ExperimentRun.model_validate_json(run.model_dump_json()) == run
 
 
 def test_experiment_run_merge_combines_parallel_fragments_deterministically(
