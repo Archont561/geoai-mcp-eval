@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from experiment.adapters import backends
@@ -226,14 +227,14 @@ def _run_arm_a(ctx: _CellContext) -> None:
     _deliver_json(ctx, (last_turn.content if last_turn is not None else "") or "")
 
 
-def _execute_arm_b_reply(ctx: _CellContext, content: str) -> None:
+def _execute_arm_b_reply(ctx: _CellContext, content: str, fixture_src: Path) -> None:
     code = extract_python_code_block(content)
     if code is None:
         ctx.ports.workspace.append_transcript(
             ctx.req.cell, {MSG_ROLE: "harness", MSG_CONTENT: "no python block found"}
         )
         return
-    completed = ctx.ports.sandbox.execute(code, ctx.req.cell)
+    completed = ctx.ports.sandbox.execute(code, fixture_src=fixture_src)
     ctx.ports.workspace.append_transcript(
         ctx.req.cell,
         {
@@ -248,15 +249,18 @@ def _execute_arm_b_reply(ctx: _CellContext, content: str) -> None:
         ctx.ports.workspace.write_deliverable(ctx.req.cell, ctx.req.task, payload)
 
 
-def _run_arm_b(ctx: _CellContext) -> None:
-    req = ctx.req
-    fixture_text = json.dumps(ctx.ports.workspace.load_fixture(req.task_path, req.task))
-    ctx.ports.workspace.stage_fixture(req.task_path, req.task, req.cell)
-    user = (
-        f"{req.task.prompt}\n\nFixture head (input.geojson, {len(fixture_text)} bytes):\n"
+def _arm_b_user_prompt(ctx: _CellContext) -> str:
+    fixture_text = json.dumps(ctx.ports.workspace.load_fixture(ctx.req.task_path, ctx.req.task))
+    return (
+        f"{ctx.req.task.prompt}\n\nFixture head (input.geojson, {len(fixture_text)} bytes):\n"
         f"{fixture_text[:_TOOL_RESULT_CAP]}"
     )
-    messages = _initial_messages(ctx, ARM_B_SYSTEM_PROMPT, user)
+
+
+def _run_arm_b(ctx: _CellContext) -> None:
+    req = ctx.req
+    fixture_src = ctx.ports.workspace.resolve_fixture(req.task_path, req.task)
+    messages = _initial_messages(ctx, ARM_B_SYSTEM_PROMPT, _arm_b_user_prompt(ctx))
     reply, turn, cache_hit = _cached_complete(ctx, messages, None)
     snapshot = _record_completion_usage(req, reply)
     content = turn.content or ""
@@ -270,7 +274,7 @@ def _run_arm_b(ctx: _CellContext) -> None:
         entry["usage_warning"] = snapshot.warning
     ctx.ports.workspace.append_transcript(req.cell, entry)
     _emit_usage_events(ctx, snapshot)
-    _execute_arm_b_reply(ctx, content)
+    _execute_arm_b_reply(ctx, content, fixture_src)
 
 
 def ollama_arm_a(req: CellRequest, *, ports: HarnessPorts | None = None) -> None:

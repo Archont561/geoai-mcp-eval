@@ -19,8 +19,8 @@ from experiment.adapters.harness_io import (
     append_transcript,
     extract_iso,
     fixture_fc,
+    fixture_path,
     run_python_sandboxed,
-    stage_fixture_input,
     write_deliverable,
 )
 from experiment.adapters.mcp.client import McpToolSession
@@ -219,14 +219,14 @@ def _record_tool_result(cell: Path, completed) -> None:
 
 
 def scripted_arm_b(req: CellRequest) -> None:
-    """Canned plan: write fixture as input.geojson, run canned code, capture stdout."""
+    """Canned plan: stage fixture in a fresh temp dir, run canned code, capture stdout."""
     task, task_path, cell = req.task, req.task_path, req.cell
     code = _ARM_B_CODE.get(task.id)
     if code is None:
         raise ValueError(f"no scripted plan for task {task.id}")
-    stage_fixture_input(task_path, task, cell)
+    fixture_src = fixture_path(task_path, task)
     append_transcript(req.cell, {"role": "assistant", "content": f"```python\n{code.strip()}\n```"})
-    completed = run_python_sandboxed(code, cell)
+    completed = run_python_sandboxed(code, fixture_src=fixture_src)
     _record_tool_result(cell, completed)
     if completed.returncode != 0:
         raise RuntimeError(

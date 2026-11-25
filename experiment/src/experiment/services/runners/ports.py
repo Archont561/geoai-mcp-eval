@@ -100,20 +100,26 @@ ToolSessionFactory = Callable[[], AbstractContextManager[ToolSession]]
 
 
 class CodeSandbox(Protocol):
-    """Port for executing one Arm B Python script in an isolated workspace."""
+    """Port for executing one Arm B Python script in an isolated temporary directory."""
 
-    def execute(self, code: str, cell: Path, timeout_s: int = 120) -> SandboxExecution:
-        """Execute generated Python code inside ``cell`` and capture output."""
+    def execute(
+        self,
+        code: str,
+        *,
+        fixture_src: Path | None = None,
+        timeout_s: int = 120,
+    ) -> SandboxExecution:
+        """Execute generated Python code in a fresh temp dir with ``input.geojson``."""
 
 
 class CellWorkspace(Protocol):
-    """Port for fixture staging, transcript logging, and deliverable persistence."""
+    """Port for fixture access, transcript logging, and deliverable persistence."""
+
+    def resolve_fixture(self, task_path: Path, task: Task) -> Path:
+        """Return the resolved path to the task's GeoJSON fixture file."""
 
     def load_fixture(self, task_path: Path, task: Task) -> dict[str, Any]:
         """Load the task's GeoJSON fixture mapping."""
-
-    def stage_fixture(self, task_path: Path, task: Task, cell: Path) -> Path:
-        """Copy the task's fixture into the cell working directory."""
 
     def append_transcript(self, cell: Path, record: dict[str, Any]) -> None:
         """Append one timestamped event record to the cell transcript."""

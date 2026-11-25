@@ -85,10 +85,25 @@ def test_deliverable_name() -> None:
         assert harness_io.deliverable_name(task) == expected
 
 
-def test_run_python_sandboxed() -> None:
-    completed = harness_io.run_python_sandboxed("print('hello')", Path("."))
-    assert completed.returncode == 0
-    assert completed.stdout.strip() == "hello"
+def test_run_python_sandboxed(tmp_path: Path) -> None:
+    src = tmp_path / "source.geojson"
+    src.write_text('{"type": "FeatureCollection", "features": []}', encoding="utf-8")
+    script = (
+        "import json, os\n"
+        "data = json.load(open('input.geojson'))\n"
+        "open('scratch.tmp', 'w').write('x')\n"
+        "out = {'cwd': os.getcwd(), 'files': sorted(os.listdir('.')), 'type': data['type']}\n"
+        "print(json.dumps(out))\n"
+    )
+    completed = harness_io.run_python_sandboxed(script, fixture_src=src)
+    assert completed.returncode == 0, completed.stderr
+    info = json.loads(completed.stdout)
+    assert info["type"] == "FeatureCollection"
+    assert info["files"] == ["input.geojson", "scratch.tmp"]
+    sandbox_path = Path(info["cwd"])
+    assert sandbox_path.name.startswith("geoai-sandbox-")
+    assert not sandbox_path.exists()  # temp dir + scratch files cleaned up
+    assert src.exists()  # original fixture untouched
 
 
 def _fixture(task_id: str) -> dict:
@@ -196,12 +211,19 @@ def test_ollama_arm_a_tool_error_is_captured(
 
 
 def test_ollama_arm_b_executes_code(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    code = "import json\nprint(json.dumps({'relation': 'touches', 'de9im': 'FF2F11212'}))\n"
+    code = (
+        "import json, os\n"
+        "assert os.listdir('.') == ['input.geojson']\n"
+        "fx = json.load(open('input.geojson'))\n"
+        "assert fx['type'] == 'FeatureCollection'\n"
+        "print(json.dumps({'relation': 'touches', 'de9im': 'FF2F11212'}))\n"
+    )
     _install_fake_chat(monkeypatch, lambda: _content_response(f"```python\n{code}```"))
     cell = _make_cell(tmp_path)
     req = _cell_request("analysis-de9im-001", "B", "ollama", cell)
     result = runs.run_cell(req)
     assert result["oracle_passed"] is True
+    assert not (cell / "input.geojson").exists()  # staged in temp sandbox, not cell/
 
 
 def test_ollama_arm_b_bad_code_block_fails_softly(

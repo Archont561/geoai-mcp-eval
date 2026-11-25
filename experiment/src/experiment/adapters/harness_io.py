@@ -1,9 +1,13 @@
-"""Cell I/O adapter: paths, fixture staging, transcripts, deliverables, and Python sandbox."""
+"""Cell I/O adapter: paths, ephemeral temp-dir Python sandbox, transcripts, deliverables."""
 
 from __future__ import annotations
 
 import os
+import shutil
 import sys
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -27,6 +31,7 @@ UTF8 = run_store.UTF8
 JSON_INDENT = run_store.JSON_INDENT
 
 ARM_PREFIX = "arm-"
+SANDBOX_FIXTURE_NAME = "input.geojson"
 
 DRIVERS = ("scripted", "ollama")
 ARMS = ("A", "B")
@@ -57,13 +62,6 @@ def cell_dir(output_root: Path, task_id: str, arm: str) -> Path:
     return run_store.ensure_dir(output_root / task_id / f"{ARM_PREFIX}{arm}")
 
 
-def stage_fixture_input(task_path: Path, task: Task, cell: Path) -> Path:
-    """Copy the task's fixture into ``cell/input.geojson`` for sandboxed Arm B runs."""
-    target = cell / "input.geojson"
-    target.write_bytes(fixture_path(task_path, task).read_bytes())
-    return target
-
-
 def append_transcript(cell: Path, record: dict[str, Any]) -> None:
     run_store.append_jsonl(
         cell / "transcript.jsonl", {"ts": datetime.now(UTC).isoformat(), **record}
@@ -81,13 +79,13 @@ def write_deliverable(cell: Path, task: Task, payload: Any) -> Path:
     return run_store.write_json(cell / deliverable_name(task), payload, sort_keys=False)
 
 
-def scrubbed_env(cell: Path, *, qt_platform: str | None = None) -> dict[str, str]:
+def scrubbed_env(workdir: Path, *, qt_platform: str | None = None) -> dict[str, str]:
     """Minimal environment for sandboxed subprocesses."""
     env = {
         "PATH": os.pathsep.join(
             [str(Path(sys.executable).parent), "/usr/local/bin", "/usr/bin", "/bin"]
         ),
-        "HOME": str(cell.resolve()),
+        "HOME": str(workdir.resolve()),
         "PYTHONDONTWRITEBYTECODE": "1",
         "LC_ALL": "C.UTF-8",
     }
@@ -96,15 +94,30 @@ def scrubbed_env(cell: Path, *, qt_platform: str | None = None) -> dict[str, str
     return env
 
 
+@contextmanager
+def isolated_sandbox_dir(fixture_src: Path | None = None) -> Iterator[Path]:
+    """Yield a fresh temporary directory containing only a copy of ``input.geojson``."""
+    with tempfile.TemporaryDirectory(prefix="geoai-sandbox-") as tmp:
+        sandbox = Path(tmp)
+        if fixture_src is not None:
+            shutil.copy2(fixture_src, sandbox / SANDBOX_FIXTURE_NAME)
+        yield sandbox
+
+
 def run_python_sandboxed(
-    code: str, cell: Path, timeout_s: int = 120
+    code: str,
+    *,
+    fixture_src: Path | None = None,
+    timeout_s: int = 120,
 ) -> subprocess_runner.CommandResult:
-    return subprocess_runner.run_command(
-        [sys.executable, "-I", "-c", code],
-        cwd=cell,
-        env=scrubbed_env(cell),
-        timeout=timeout_s,
-    )
+    """Execute ``code`` in a fresh temporary directory with ``input.geojson`` staged."""
+    with isolated_sandbox_dir(fixture_src) as sandbox_dir:
+        return subprocess_runner.run_command(
+            [sys.executable, "-I", "-c", code],
+            cwd=sandbox_dir,
+            env=scrubbed_env(sandbox_dir),
+            timeout=timeout_s,
+        )
 
 
 def fixture_fc(task_path: Path, task: Task) -> dict[str, Any]:
@@ -118,11 +131,11 @@ def extract_iso(features: list[dict[str, Any]]) -> list[str]:
 class FilesystemCellWorkspace:
     """Concrete ``CellWorkspace`` backed by the local cell directory."""
 
+    def resolve_fixture(self, task_path: Path, task: Task) -> Path:
+        return fixture_path(task_path, task)
+
     def load_fixture(self, task_path: Path, task: Task) -> dict[str, Any]:
         return fixture_fc(task_path, task)
-
-    def stage_fixture(self, task_path: Path, task: Task, cell: Path) -> Path:
-        return stage_fixture_input(task_path, task, cell)
 
     def append_transcript(self, cell: Path, record: dict[str, Any]) -> None:
         append_transcript(cell, record)
@@ -132,10 +145,16 @@ class FilesystemCellWorkspace:
 
 
 class SubprocessCodeSandbox:
-    """Concrete ``CodeSandbox`` executing Python in an isolated scrubbed subprocess."""
+    """Concrete ``CodeSandbox`` running Python in an ephemeral ``TemporaryDirectory``."""
 
-    def execute(self, code: str, cell: Path, timeout_s: int = 120) -> SandboxExecution:
-        completed = run_python_sandboxed(code, cell, timeout_s=timeout_s)
+    def execute(
+        self,
+        code: str,
+        *,
+        fixture_src: Path | None = None,
+        timeout_s: int = 120,
+    ) -> SandboxExecution:
+        completed = run_python_sandboxed(code, fixture_src=fixture_src, timeout_s=timeout_s)
         return SandboxExecution(
             returncode=completed.returncode,
             stdout=completed.stdout,
