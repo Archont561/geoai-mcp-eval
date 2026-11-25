@@ -73,26 +73,31 @@ class _FakeToolSession:
 class _FakeSandbox:
     def __init__(self, result: SandboxExecution) -> None:
         self._result = result
-        self.executed: list[str] = []
+        self.executed: list[tuple[str, Path | None]] = []
 
-    def execute(self, code: str, cell: Path, timeout_s: int = 120) -> SandboxExecution:
-        self.executed.append(code)
+    def execute(
+        self,
+        code: str,
+        *,
+        fixture_src: Path | None = None,
+        timeout_s: int = 120,
+    ) -> SandboxExecution:
+        self.executed.append((code, fixture_src))
         return self._result
 
 
 class _FakeWorkspace:
-    def __init__(self, fixture: dict[str, Any]) -> None:
+    def __init__(self, fixture: dict[str, Any], fixture_path: Path | None = None) -> None:
         self._fixture = fixture
-        self.staged = False
+        self._fixture_path = fixture_path or Path("/fake/fixture.geojson")
         self.transcript: list[dict[str, Any]] = []
         self.deliverables: list[Any] = []
 
+    def resolve_fixture(self, task_path: Path, task: Task) -> Path:
+        return self._fixture_path
+
     def load_fixture(self, task_path: Path, task: Task) -> dict[str, Any]:
         return self._fixture
-
-    def stage_fixture(self, task_path: Path, task: Task, cell: Path) -> Path:
-        self.staged = True
-        return cell / "input.geojson"
 
     def append_transcript(self, cell: Path, record: dict[str, Any]) -> None:
         self.transcript.append(record)
@@ -253,8 +258,7 @@ def test_arm_b_runs_purely_through_injected_ports_and_cache(tmp_path: Path) -> N
     )
     req1 = _real_request(tmp_path, "B", model_digest="sha256:pin")
     ollama_arm_b(req1, ports=ports)
-    assert workspace.staged is True
-    assert sandbox.executed == ["print('{\"ok\": 1}')\n"]
+    assert sandbox.executed == [("print('{\"ok\": 1}')\n", Path("/fake/fixture.geojson"))]
     assert workspace.deliverables == [{"ok": 1}]
     assert len(chat.calls) == 1
 
