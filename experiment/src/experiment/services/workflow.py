@@ -1,7 +1,7 @@
 """Experiment pipeline services (preflight, model pin, cell smoke/pilot, harvest).
 
 Pure service layer (no CLI/presentation framework imports, no direct transport
-or subprocess I/O) backing ``experiment workflow ...`` and Tasknest manifest
+or subprocess I/O) backing ``experiment env|run|archive`` and Tasknest manifest
 tasks declared in ``experiment/pyproject.toml``.
 """
 
@@ -17,6 +17,8 @@ from experiment.adapters import ollama as ollama_adapter
 from experiment.adapters import paths, run_store, subprocess_runner
 from experiment.adapters.github_workflow import GitHubWorkflowAdapter
 from experiment.adapters.task_repository import discover_task_ids
+from experiment.services import scoring as scoring_service
+from experiment.services import tasks as tasks_service
 from experiment.services import workflow_pilot
 from experiment.services.workflow_pilot import WorkflowCellSpec
 
@@ -32,8 +34,9 @@ def resolve_run_id(run_id: str) -> str:
     return GitHubWorkflowAdapter().resolve_run_id(run_id)
 
 
-def experiment_env(repo_root: Path) -> dict[str, str]:
-    return paths.experiment_env(repo_root)
+def _task_suite_root(repo_root: Path) -> Path:
+    suite = paths.tasks_root(repo_root)
+    return suite if suite.is_dir() else paths.tasks_root()
 
 
 def _pilot_task_ids(repo_root: Path) -> tuple[str, ...]:
@@ -51,13 +54,10 @@ def run_preflight(run_id: str = "") -> tuple[str, dict[str, str], Path]:
     rid = resolve_run_id(run_id)
     run_dir = run_store.ensure_dir(paths.results_root(repo_root) / rid)
 
-    rc = subprocess_runner.run_passthrough(
-        [sys.executable, "-m", "experiment", "tasks", "validate"],
-        cwd=repo_root,
-        env=experiment_env(repo_root),
-    )
-    if rc != 0:
-        raise RuntimeError(f"pilot suite validation failed (exit {rc})")
+    report = tasks_service.validate_suite(_task_suite_root(repo_root))
+    if not report.passed:
+        details = "; ".join(str(issue) for issue in report.issues)
+        raise RuntimeError(f"pilot suite validation failed: {details}")
 
     lock = repo_root / "pixi.lock"
     pins = {
@@ -148,13 +148,9 @@ def _run_pilot_cell(
 
 
 def _run_smoke_probe(repo_root: Path, cell_dir: Path, base: dict[str, object]) -> None:
-    rc = subprocess_runner.run_passthrough(
-        [sys.executable, "-m", "experiment", "run", "smoke"],
-        cwd=repo_root,
-        env=experiment_env(repo_root),
-    )
-    if rc != 0:
-        raise RuntimeError(f"smoke hello check failed (exit {rc})")
+    discovered = tasks_service.list_tasks(_task_suite_root(repo_root))
+    if not discovered:
+        raise RuntimeError("smoke probe failed: no tasks discovered in suite")
     record_meta = {
         **base,
         "status": "mock-smoke",
@@ -267,22 +263,13 @@ def _evaluate_cell(
     cell_dir = run_store.find_cell_dir(harvest, arm, task, rep)
     if cell_dir is None:
         return "no-cell-dir"
-    cmd = [
-        sys.executable,
-        "-m",
-        "experiment",
-        "score",
-        "determinism",
-        task,
-        "--artifacts-dir",
-        str(cell_dir),
-    ]
     try:
-        result = subprocess_runner.run_command(cmd, cwd=repo_root, env=experiment_env(repo_root))
-    except OSError as exc:
+        task_path, _ = tasks_service.get_task(task, _task_suite_root(repo_root))
+        report = scoring_service.run_determinism_gate(task_path, cell_dir)
+    except (tasks_service.TaskNotFoundError, OSError, ValueError) as exc:
         return f"error({exc})"
-    run_store.write_text(out_dir / f"{task}-{arm}-rep{rep}.json", result.stdout or result.stderr)
-    return "pass" if result.ok else f"fail(exit={result.returncode})"
+    run_store.write_json(out_dir / f"{task}-{arm}-rep{rep}.json", report.to_dict())
+    return "pass" if report.passed else "fail"
 
 
 def _compare_cells(

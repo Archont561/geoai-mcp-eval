@@ -1,7 +1,7 @@
 ---
 id: GEO-021
 title: Harden Clean Architecture boundaries, Clean Code split, and CLI ergonomics
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-25T00:00:00Z'
 labels:
@@ -42,8 +42,8 @@ Follow-up architectural and ergonomics hardening from the post-`m-5` Clean Archi
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `adapters/ollama.py:create_session()` is removed; SSH tunnel checks (`adapters/ssh_tunnel.py`) and HTTP model/completion probes live in `adapters/` behind typed `Protocol` ports consumed by `services/backend_check.py`, and CLI exit codes live in `cli/env.py`.
-- [ ] #2 `services/workflow.py` calls `services.tasks.validate_suite()` directly (no self-invoking `python -m experiment` subprocess) and updates stale `experiment workflow` docstrings.
+- [x] #1 `adapters/ollama.py:create_session()` is removed; SSH tunnel checks (`adapters/ssh_tunnel.py`) and HTTP model/completion probes live in `adapters/` behind typed `Protocol` ports consumed by `services/backend_check.py`, and CLI exit codes live in `cli/env.py`.
+- [x] #2 `services/workflow.py` calls `services.tasks.validate_suite()` directly (no self-invoking `python -m experiment` subprocess) and updates stale `experiment workflow` docstrings.
 - [ ] #3 Pure task-suite semantic validation rules (`REQUIRED_PILOT_TRAPS`, oracle assertion types, `ValidationIssue`, `ValidationReport`) live in `domain/task_validation.py`, and `ENFORCEMENT_LEVELS` / `parse_enforcement_level()` live in `domain/run/_common.py` with zero duplicated parsers.
 - [ ] #4 Typed frozen DTOs replace untyped `dict[str, Any]` handoffs across `services/{runs,scoring,archive,workflow_summary}.py` and remove all `# type: ignore` suppressions in `experiment/src/experiment/services/`.
 - [ ] #5 `[tool.importlinter]` contracts in `pyproject.toml` forbid `cli -> gis_ops`, forbid direct `qgis`/`PyQt` imports in `experiment_plugin.{metrics,review,session}`, and keep `services/` free of direct `os.environ` / filesystem probes (PyQGIS version probing moved to an adapter).

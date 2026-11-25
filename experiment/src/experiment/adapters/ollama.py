@@ -53,11 +53,6 @@ class OllamaProcess:
             self.log_handle.close()
 
 
-def create_session() -> requests.Session:
-    """Build a plain requests Session for callers outside the adapter layer."""
-    return requests.Session()
-
-
 def build_retry_session(
     retries: int,
     *,
@@ -239,7 +234,7 @@ def list_model_digest(
     base_url: str = DEFAULT_BASE_URL,
 ) -> str:
     """Resolve ``model`` digest via ``/api/tags``, falling back to ``ollama list`` CLI."""
-    with create_session() as session:
+    with requests.Session() as session:
         digest = resolve_model_digest(session, base_url, model)
     if digest:
         return digest
