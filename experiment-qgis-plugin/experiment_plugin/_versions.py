@@ -1,4 +1,10 @@
-"""Host software version probing and non-identifying runtime identity."""
+"""Host software version probing and non-identifying runtime identity.
+
+Because ``experiment_plugin`` is packaged as a standalone QGIS plugin ZIP without
+importing ``experiment``, this module mirrors the PyQGIS/GDAL/GEOS/PROJ probing
+logic in ``experiment.adapters.qgis_env``; ``experiment/tests/test_qgis_service.py``
+asserts behavioral parity between both implementations.
+"""
 
 from __future__ import annotations
 

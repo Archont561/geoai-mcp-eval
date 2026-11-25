@@ -36,12 +36,12 @@ def resolve_run_id(run_id: str) -> str:
 
 def _task_suite_root(repo_root: Path) -> Path:
     suite = paths.tasks_root(repo_root)
-    return suite if suite.is_dir() else paths.tasks_root()
+    return suite if run_store.is_dir(suite) else paths.tasks_root()
 
 
 def _pilot_task_ids(repo_root: Path) -> tuple[str, ...]:
     suite = paths.tasks_root(repo_root)
-    if suite.is_dir():
+    if run_store.is_dir(suite):
         discovered = discover_task_ids(suite)
         if discovered:
             return discovered
@@ -62,7 +62,7 @@ def run_preflight(run_id: str = "") -> tuple[str, dict[str, str], Path]:
     lock = repo_root / "pixi.lock"
     pins = {
         "repo_sha": subprocess_runner.soft_version(["git", "rev-parse", "HEAD"], repo_root),
-        "pixi_lock_sha256": run_store.sha256_file(lock) if lock.exists() else "missing",
+        "pixi_lock_sha256": run_store.sha256_file(lock) if run_store.exists(lock) else "missing",
         "python": subprocess_runner.soft_version([sys.executable, "--version"], repo_root),
         "ollama": subprocess_runner.soft_version(["ollama", "--version"], repo_root),
         "qgis": subprocess_runner.soft_version(["qgis", "--version"], repo_root),

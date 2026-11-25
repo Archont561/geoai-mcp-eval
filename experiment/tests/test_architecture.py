@@ -118,6 +118,21 @@ def _assert_shipped_contract_bites(
         probe.unlink()
 
 
+def _assert_plugin_contract_bites(
+    project: Path, module_name: str, source: str, contract: str, violation: str
+) -> None:
+    target = project / "experiment_plugin" / f"{module_name}.py"
+    original = target.read_text(encoding="utf-8")
+    target.write_text(f"{source}\n{original}", encoding="utf-8")
+    try:
+        result = _lint(project, project)
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert f"{contract} BROKEN" in result.stdout
+        assert violation in result.stdout
+    finally:
+        target.write_text(original, encoding="utf-8")
+
+
 def test_the_shipped_contracts_pass_and_reject_violations(tmp_path: Path) -> None:
     """Exercise the real configuration on the real graph and mutated copies."""
     result = _lint(
@@ -130,11 +145,17 @@ def test_the_shipped_contracts_pass_and_reject_violations(tmp_path: Path) -> Non
     cli_io = "CLI never performs transport or subprocess I/O directly"
     cli_adapters = "CLI calls services rather than importing adapters directly"
     analysis_cache = "Analysis never imports or reads the LLM completion cache"
-    for name in (layers, no_frameworks, svc_io, cli_io, cli_adapters, analysis_cache):
+    plugin_core = "QGIS plugin core has no QGIS, Qt, or qgis_sdk imports"
+    for name in (layers, no_frameworks, svc_io, cli_io, cli_adapters, analysis_cache, plugin_core):
         assert f"{name} KEPT" in result.stdout
     shutil.copytree(
         REPO_ROOT / "experiment" / "src" / "experiment",
         tmp_path / "experiment",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    shutil.copytree(
+        REPO_ROOT / "experiment-qgis-plugin" / "experiment_plugin",
+        tmp_path / "experiment_plugin",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
     shutil.copyfile(REPO_ROOT / "pyproject.toml", tmp_path / "pyproject.toml")
@@ -177,6 +198,12 @@ def test_the_shipped_contracts_pass_and_reject_violations(tmp_path: Path) -> Non
         ),
         (
             "services",
+            "import os\n",
+            svc_io,
+            "experiment.services is not allowed to import os",
+        ),
+        (
+            "services",
             "import requests\n",
             svc_io,
             "experiment.services is not allowed to import requests",
@@ -200,6 +227,12 @@ def test_the_shipped_contracts_pass_and_reject_violations(tmp_path: Path) -> Non
             "experiment.cli is not allowed to import experiment.adapters",
         ),
         (
+            "cli",
+            "from experiment import gis_ops\n",
+            cli_adapters,
+            "experiment.cli is not allowed to import experiment.gis_ops",
+        ),
+        (
             "analysis",
             "from experiment.adapters import llm_cache\n",
             analysis_cache,
@@ -213,6 +246,13 @@ def test_the_shipped_contracts_pass_and_reject_violations(tmp_path: Path) -> Non
         ),
     ):
         _assert_shipped_contract_bites(tmp_path, package, source, contract, violation)
+    _assert_plugin_contract_bites(
+        tmp_path,
+        "metrics",
+        "import qgis",
+        plugin_core,
+        "experiment_plugin.metrics is not allowed to import qgis",
+    )
 
 
 def test_no_migrated_legacy_flat_modules_remain() -> None:
