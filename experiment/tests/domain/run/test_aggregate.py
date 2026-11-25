@@ -5,10 +5,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from experiment.domain.run import (
-    ArtifactRef,
     AssertionResult,
     BehavioralAnnotations,
     CostAndProcessMetrics,
@@ -21,53 +22,14 @@ from experiment.domain.run import (
     RunProvenance,
     TokenUsage,
     Treatment,
-    TrialKey,
     TrialMeasurement,
     TrialRecord,
 )
 
-VALID_SHA = "a" * 64
 
-
-def _sample_trial(
-    *,
-    task_id: str = "analysis-de9im-001",
-    paradigm: str = "typed_mcp",
-    enforcement: str = "semantic_repair",
-    rep: int = 1,
-    status: str = "ok",
-) -> TrialRecord:
-    key = TrialKey(
-        task_id=task_id,
-        paradigm=paradigm,  # type: ignore[arg-type]
-        enforcement_level=enforcement,  # type: ignore[arg-type]
-        repetition=rep,
-    )
-    treatment = Treatment(
-        paradigm=paradigm,  # type: ignore[arg-type]
-        enforcement_level=enforcement,  # type: ignore[arg-type]
-        catalogue_hash=VALID_SHA if paradigm == "typed_mcp" else None,
-    )
-    return TrialRecord(
-        key=key,
-        treatment=treatment,
-        driver="ollama",
-        model_tag="qwen2.5:3b",
-        model_digest="sha256:abc",
-        status=status,  # type: ignore[arg-type]
-        artifacts=[
-            ArtifactRef(
-                path="result.json",
-                sha256=VALID_SHA,
-                bytes=128,
-                kind="deliverable",
-                media_type="application/json",
-            )
-        ],
-    )
-
-
-def test_experiment_run_merge_combines_parallel_fragments_deterministically() -> None:
+def test_experiment_run_merge_combines_parallel_fragments_deterministically(
+    sample_trial: TrialRecord,
+) -> None:
     t0 = datetime(2026, 11, 24, 19, 0, tzinfo=UTC)
     t1 = datetime(2026, 11, 24, 19, 1, tzinfo=UTC)
     t2 = datetime(2026, 11, 24, 19, 2, tzinfo=UTC)
@@ -95,7 +57,7 @@ def test_experiment_run_merge_combines_parallel_fragments_deterministically() ->
             )
         ),
     )
-    trial_a = _sample_trial(paradigm="typed_mcp", enforcement="semantic_repair", rep=1)
+    trial_a = sample_trial
     meas_a = TrialMeasurement.from_assertions(
         key=trial_a.key,
         assertions=[
@@ -118,7 +80,13 @@ def test_experiment_run_merge_combines_parallel_fragments_deterministically() ->
         trials={trial_a.trial_id: trial_a},
         measurements={meas_a.trial_id: meas_a},
     )
-    trial_b = _sample_trial(paradigm="codegen", enforcement="none", rep=1)
+    key_b = sample_trial.key.model_copy(update={"paradigm": "codegen", "enforcement_level": "none"})
+    trial_b = sample_trial.model_copy(
+        update={
+            "key": key_b,
+            "treatment": Treatment(paradigm="codegen", enforcement_level="none"),
+        }
+    )
     cell_b = ExperimentRun(
         run_id="run-42",
         stage="pilot",
@@ -146,9 +114,31 @@ def test_experiment_run_merge_combines_parallel_fragments_deterministically() ->
     assert "measurements" in schema["properties"]
 
 
-def test_experiment_run_merge_rejects_conflicts_and_never_imputes_missing() -> None:
-    trial_a = _sample_trial(status="ok")
-    trial_a_conflict = _sample_trial(status="error")
+@given(reps=st.lists(st.integers(min_value=1, max_value=20), min_size=1, max_size=6, unique=True))
+@settings(max_examples=30, suppress_health_check=[HealthCheck.function_scoped_fixture])
+def test_experiment_run_merge_is_order_independent_and_idempotent(
+    sample_trial: TrialRecord, reps: list[int]
+) -> None:
+    fragments = []
+    for rep in reps:
+        trial = sample_trial.model_copy(
+            update={"key": sample_trial.key.model_copy(update={"repetition": rep})}
+        )
+        fragments.append(
+            ExperimentRun(run_id="run-prop", stage="pilot", trials={trial.trial_id: trial})
+        )
+    forward = ExperimentRun.merge(fragments)
+    backward = ExperimentRun.merge(list(reversed(fragments)))
+    assert forward == backward
+    assert ExperimentRun.merge([forward, forward]) == forward
+    assert len(forward.trials) == len(reps)
+
+
+def test_experiment_run_merge_rejects_conflicts_and_never_imputes_missing(
+    sample_trial: TrialRecord,
+) -> None:
+    trial_a = sample_trial
+    trial_a_conflict = sample_trial.model_copy(update={"status": "error"})
 
     with pytest.raises(RunMergeError, match="at least one"):
         ExperimentRun.merge([])
@@ -187,26 +177,35 @@ def test_experiment_run_merge_rejects_conflicts_and_never_imputes_missing() -> N
     assert list(audited.trials) == [trial_a.trial_id]
 
 
-def test_instrument_audit_determinism_summary() -> None:
+@given(
+    expected=st.lists(
+        st.text(alphabet="abc123", min_size=1, max_size=6), min_size=1, max_size=8, unique=True
+    ),
+    verdicts=st.lists(st.booleans(), min_size=1, max_size=8),
+)
+def test_instrument_audit_complete_and_determinism_invariants(
+    expected: list[str], verdicts: list[bool]
+) -> None:
+    verdict_map = dict(zip(expected, verdicts, strict=False))
     audit = InstrumentAudit.evaluate(
-        expected=["t1", "t2"],
-        logged=["t1", "t2"],
-        determinism_verdicts={"t1": True, "t2": False},
+        expected=expected, logged=expected, determinism_verdicts=verdict_map
     )
     assert audit.complete is True
-    assert audit.determinism_passed is False
+    assert audit.missing_trials == []
+    assert audit.determinism_passed is all(verdict_map.values())
 
 
-def test_experiment_run_index_validation_and_model_conflict() -> None:
-    trial = _sample_trial()
-    assert trial.all_cache_hits is False
-    cached = trial.model_copy(update={"cache_hits": 2, "cache_misses": 0})
+def test_experiment_run_index_validation_and_model_conflict(
+    sample_trial: TrialRecord,
+) -> None:
+    assert sample_trial.all_cache_hits is False
+    cached = sample_trial.model_copy(update={"cache_hits": 2, "cache_misses": 0})
     assert cached.all_cache_hits is True
 
     with pytest.raises(ValidationError, match="trial index key"):
-        ExperimentRun(run_id="r", trials={"wrong/key": trial})
+        ExperimentRun(run_id="r", trials={"wrong/key": sample_trial})
 
-    meas = TrialMeasurement.from_assertions(key=trial.key, assertions=[])
+    meas = TrialMeasurement.from_assertions(key=sample_trial.key, assertions=[])
     with pytest.raises(ValidationError, match="measurement index key"):
         ExperimentRun(run_id="r", measurements={"wrong/key": meas})
 
@@ -216,7 +215,7 @@ def test_experiment_run_index_validation_and_model_conflict() -> None:
         ExperimentRun.merge([r1, r2])
 
     meas_conflict = TrialMeasurement.from_assertions(
-        key=trial.key,
+        key=sample_trial.key,
         assertions=[AssertionResult(assertion_id="x", passed=True)],
     )
     m1 = ExperimentRun(run_id="r", measurements={meas.trial_id: meas})

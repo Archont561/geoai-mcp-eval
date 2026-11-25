@@ -3,9 +3,29 @@
 from __future__ import annotations
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from experiment.domain.jenks import _SplitSearch, fisher_jenks_breaks
+
+FINITE_VALS = st.floats(min_value=-1e5, max_value=1e5, allow_nan=False, allow_infinity=False)
+
+
+@given(
+    values=st.lists(FINITE_VALS, min_size=1, max_size=40),
+    data=st.data(),
+)
+def test_fisher_jenks_breaks_sorted_subset_with_max_endpoint(
+    values: list[float], data: st.DataObject
+) -> None:
+    unique_count = len(set(values))
+    k = data.draw(st.integers(min_value=1, max_value=min(5, unique_count)))
+    breaks = fisher_jenks_breaks(values, k)
+    assert len(breaks) == k
+    assert breaks == sorted(breaks)
+    assert breaks[-1] == max(values)
+    assert set(breaks) <= set(values)
 
 
 def test_fisher_jenks_known_fixture_and_invalid_inputs() -> None:

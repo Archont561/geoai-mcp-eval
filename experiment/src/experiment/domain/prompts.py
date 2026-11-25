@@ -76,14 +76,13 @@ def prompt_sha256(prompt: str) -> str:
     return hashlib.sha256(prompt.encode("utf-8")).hexdigest()
 
 
+def _trailing_brace_candidates(text: str) -> list[str]:
+    return [text[idx:] for idx, ch in enumerate(text) if ch == "{"]
+
+
 def extract_json_block(text: str) -> Any | None:
     """Extract the last valid JSON object from fenced code blocks or trailing braces."""
-    candidates = _JSON_FENCE_RE.findall(text)
-    if not candidates:
-        brace = text.rfind("{")
-        if brace == -1:
-            return None
-        candidates = [text[brace:]]
+    candidates = _JSON_FENCE_RE.findall(text) or _trailing_brace_candidates(text)
     for raw in reversed(candidates):
         try:
             return json.loads(raw)

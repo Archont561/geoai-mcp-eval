@@ -1,29 +1,22 @@
-"""Unit tests for the host-facing internals of the experiment plugin.
-
-No display, no real QGIS: the QGIS host objects are faked with small doubles
-(signals record slots, `crs()`/`fileName()`/`mapCanvas()` return sentinels),
-and the lazy `qgis.core`/`qgis.utils` imports inside the functions are fed by
-`monkeypatch.setitem(sys.modules, ...)`. The full host path is additionally
-covered by the manual xvfb end-to-end run (see repo history / session notes);
-these tests pin the logic itself.
-"""
+"""Unit tests for the host-facing internals of the experiment plugin."""
 
 from __future__ import annotations
 
 import sys
 import types
+from importlib import import_module
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
+from plugin_harness import install_fake_qt
 
 from experiment_plugin import plugin, session
 
 
-def test_fake_qt_isolates_preloaded_qgis_host_modules(monkeypatch) -> None:
-    from importlib import import_module
-
-    from plugin_harness import install_fake_qt
-
+def test_fake_qt_isolates_preloaded_qgis_host_modules(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("qgis.core", "qgis.gui", "qgis.utils"):
         monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
     install_fake_qt(monkeypatch)
@@ -32,11 +25,8 @@ def test_fake_qt_isolates_preloaded_qgis_host_modules(monkeypatch) -> None:
             import_module(name)
 
 
-# --- fixtures --------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
-def _clean_active_session(monkeypatch):
+def _clean_active_session() -> None:
     plugin._ACTIVE["session"] = None
     plugin._LAST["session"] = None
     yield
@@ -44,145 +34,58 @@ def _clean_active_session(monkeypatch):
     plugin._LAST["session"] = None
 
 
-@pytest.fixture()
-def task_suite(tmp_path, monkeypatch):
+@pytest.fixture
+def task_suite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (tmp_path / "demo-task-001.yaml").write_text(
         "id: demo-task-001\nfixtures:\n  input: fixture.geojson\n", encoding="utf-8"
     )
     (tmp_path / "fixture.geojson").write_text("{}", encoding="utf-8")
     (tmp_path / "broken.yaml").write_text("{not: [valid", encoding="utf-8")
-    # The panel starts sessions through the action, whose default base_dir is
-    # $EXPERIMENT_TASK_DIR; point it at the suite so panel-started sessions find the task.
     monkeypatch.setenv("EXPERIMENT_TASK_DIR", str(tmp_path))
     return tmp_path
 
 
-@pytest.fixture()
-def fake_project():
-    """Fake QgsProject for project-hook tests (readProject variant, QGIS 4)."""
-
-    class FakeSignal:
-        def __init__(self) -> None:
-            self.slots: list = []
-
-        def connect(self, slot) -> None:
-            self.slots.append(slot)
-
-        def fire(self, *args) -> None:
-            for slot in self.slots:
-                slot(*args)
-
-        def __call__(self, *args):  # PyQt bound signals are callable; mirror that
-            self.fire(*args)
-
-    class FakeCRS:
-        @staticmethod
-        def authid() -> str:
-            return "EPSG:2180"
-
-    class FakeProject:
-        def __init__(self, read_signal_name: str | None = "readProject") -> None:
-            self.layersAdded = FakeSignal()
-            self.layersWillBeRemoved = FakeSignal()
-            self.crsChanged = FakeSignal()
-            if read_signal_name:
-                setattr(self, read_signal_name, FakeSignal())
-            self.fileName = lambda: "/tmp/fake-project.qgs"
-
-        def crs(self):
-            return FakeCRS()
-
-    return FakeProject
+@pytest.fixture
+def fake_project() -> MagicMock:
+    """``MagicMock`` QgsProject missing ``readProject`` (exercises partial-hook warning)."""
+    project = MagicMock(name="QgsProjectInstance")
+    del project.readProject
+    del project.projectRead
+    project.fileName.return_value = "/tmp/fake-project.qgs"
+    project.crs.return_value.authid.return_value = "EPSG:2180"
+    return project
 
 
-@pytest.fixture()
-def fake_canvas():
-    class FakeSignal:
-        def __init__(self) -> None:
-            self.slots: list = []
-
-        def connect(self, slot) -> None:
-            self.slots.append(slot)
-
-        def fire(self, *args) -> None:
-            for slot in self.slots:
-                slot(*args)
-
-        def __call__(self, *args):  # PyQt bound signals are callable; mirror that
-            self.fire(*args)
-
-    class FakeExtent:
-        def xMinimum(self):
-            return 0.0
-
-        def yMinimum(self):
-            return 1.0
-
-        def xMaximum(self):
-            return 100.0
-
-        def yMaximum(self):
-            return 51.0
-
-    class FakeCanvas:
-        def __init__(self) -> None:
-            self.extentsChanged = FakeSignal()
-            self.scaleChanged = FakeSignal()
-
-        def extent(self):
-            return FakeExtent()
-
-    return FakeCanvas
+@pytest.fixture
+def fake_canvas() -> MagicMock:
+    """``MagicMock`` QgsMapCanvas with extent coordinates and signal attributes."""
+    canvas = MagicMock(name="QgsMapCanvas")
+    extent = MagicMock(name="QgsRectangle")
+    extent.xMinimum.return_value = 0.0
+    extent.yMinimum.return_value = 1.0
+    extent.xMaximum.return_value = 100.0
+    extent.yMaximum.return_value = 51.0
+    canvas.extent.return_value = extent
+    return canvas
 
 
-def _fake_qgis_modules(
-    monkeypatch, project=None, iface=None, iface_raises: Exception | None = None
-):
-    core = types.ModuleType("qgis.core")
-
-    class FakeQgsProject:
-        @staticmethod
-        def instance():
-            if project is None:
-                raise RuntimeError("project instance unavailable")
-            return project
-
-    core.QgsProject = FakeQgsProject
-
-    utils = types.ModuleType("qgis.utils")
-    if iface_raises is not None:
-
-        class _Iface:
-            @property
-            def iface(self):
-                raise iface_raises
-
-        utils.__getattr__ = lambda name: (_ for _ in ()).throw(iface_raises)
-    else:
-        utils.iface = iface
-    monkeypatch.setitem(sys.modules, "qgis.core", core)
-    monkeypatch.setitem(sys.modules, "qgis.utils", utils)
-
-
-def _start(task_suite) -> object:
-    plugin._ACTIVE["session"] = None
-    return plugin.start_session(None, task_id="demo-task-001", base_dir=str(task_suite))
-
-
-# --- _task_dir / _active_session_error / _log_capped ------------------------
-
-
-def test_task_dir_prefers_explicit_base_dir(task_suite, monkeypatch) -> None:
+def test_task_dir_prefers_explicit_base_dir(
+    task_suite: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("EXPERIMENT_TASK_DIR", "/nowhere/else")
     assert plugin._task_dir("/explicit/dir") == "/explicit/dir"
 
 
-def test_task_dir_uses_env_var_when_unset(task_suite, monkeypatch) -> None:
+def test_task_dir_uses_env_var_when_unset(
+    task_suite: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("EXPERIMENT_TASK_DIR", "/from/env")
     assert plugin._task_dir("") == "/from/env"
 
 
-def test_task_dir_defaults_to_discovered_experiment_tasks(tmp_path: Path, monkeypatch) -> None:
+def test_task_dir_defaults_to_discovered_experiment_tasks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.delenv("EXPERIMENT_TASK_DIR", raising=False)
     monkeypatch.chdir(tmp_path)
     resolved = Path(plugin._task_dir(""))
@@ -195,7 +98,7 @@ def test_active_session_error_none_when_idle() -> None:
     assert plugin._active_session_error() is None
 
 
-def test_active_session_error_reports_started_task(task_suite) -> None:
+def test_active_session_error_reports_started_task(task_suite: Path) -> None:
     plugin.start_session(None, task_id="demo-task-001", base_dir=str(task_suite))
     error = plugin._active_session_error()
     assert error is not None
@@ -204,61 +107,48 @@ def test_active_session_error_reports_started_task(task_suite) -> None:
 
 
 def test_log_capped_logs_below_cap() -> None:
-    logged = []
-
-    class _Tracker:
-        event_count = plugin.MAX_EVENTS - 1
-
-    class _Session:
-        tracker = _Tracker()
-
-        def log(self, event, source=None, **fields):
-            logged.append((event, source, fields))
-
-    plugin._log_capped(_Session(), "evt", "host:project", key="value")
-    assert logged == [("evt", "host:project", {"key": "value"})]
+    mock_session = MagicMock()
+    mock_session.tracker.event_count = plugin.MAX_EVENTS - 1
+    plugin._log_capped(mock_session, "evt", "host:project", key="value")
+    mock_session.log.assert_called_once_with("evt", source="host:project", key="value")
 
 
 def test_log_capped_swallows_at_cap() -> None:
-    logged = []
-
-    class _Tracker:
-        event_count = plugin.MAX_EVENTS
-
-    class _Session:
-        tracker = _Tracker()
-
-        def log(self, event, source=None, **fields):
-            logged.append((event, source, fields))
-
-    plugin._log_capped(_Session(), "evt", "host:project")
-    assert logged == []
-
-
-# --- project / canvas hooks --------------------------------------------------
+    mock_session = MagicMock()
+    mock_session.tracker.event_count = plugin.MAX_EVENTS
+    plugin._log_capped(mock_session, "evt", "host:project")
+    mock_session.log.assert_not_called()
 
 
 def test_connect_host_hooks_project_layer_partial(
-    monkeypatch, task_suite, fake_project, fake_canvas
+    task_suite: Path,
+    fake_qgis_modules: MagicMock,
+    fake_project: MagicMock,
+    fake_canvas: MagicMock,
 ) -> None:
     sess = session.start_session("demo-task-001", task_suite)
-    project = fake_project(None)  # forces the project_read warning path
-    iface = types.SimpleNamespace(mapCanvas=lambda c=fake_canvas: c())
-    _fake_qgis_modules(monkeypatch, project=project, iface=iface)
+    fake_qgis_modules.QgsProject.instance.side_effect = None
+    fake_qgis_modules.QgsProject.instance.return_value = fake_project
+    iface = MagicMock(name="QgisInterface")
+    iface.mapCanvas.return_value = fake_canvas
+    fake_qgis_modules.utils.iface = iface
+
     connected, failures = plugin._connect_host_hooks(sess)
     assert connected == ["project (partial)", "canvas"]
     assert failures and "project_read" in failures[0]
 
 
-def test_connect_host_hooks_project_import_failure(monkeypatch, task_suite) -> None:
+def test_connect_host_hooks_project_import_failure(
+    task_suite: Path,
+    fake_qgis_modules: MagicMock,
+) -> None:
     sess = session.start_session("demo-task-001", task_suite)
-    _fake_qgis_modules(monkeypatch, project=None, iface=None)
     connected, failures = plugin._connect_host_hooks(sess)
     assert connected == []
     assert failures and failures[0].startswith("project:")
 
 
-def test_start_message_lists_hooks_and_failures(task_suite) -> None:
+def test_start_message_lists_hooks_and_failures(task_suite: Path) -> None:
     sess = session.start_session("demo-task-001", task_suite)
     message = plugin._start_message(sess, ["canvas"], ["project_read: missing"])
     assert "host hooks: canvas" in message
@@ -266,42 +156,41 @@ def test_start_message_lists_hooks_and_failures(task_suite) -> None:
     assert session.sha256_file(sess.task_yaml) in message
 
 
-# --- action surface (hello/start/log/end) ------------------------------------
-
-
-def test_find_task_yaml_reports_parse_errors(tmp_path) -> None:
+def test_find_task_yaml_reports_parse_errors(tmp_path: Path) -> None:
     (tmp_path / "broken.yaml").write_text("{not: [valid", encoding="utf-8")
     with pytest.raises(FileNotFoundError) as excinfo:
         session.find_task_yaml(tmp_path, "demo-task-001")
     assert "parse errors" in str(excinfo.value)
 
 
-def test_host_software_versions_without_qgis(monkeypatch) -> None:
+def test_host_software_versions_without_qgis(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("QGIS_VERSION", "9.9.9")
-    monkeypatch.setitem(sys.modules, "qgis.core", None)  # `import qgis.core` -> ImportError
+    monkeypatch.setitem(sys.modules, "qgis.core", None)
     versions = session.host_software_versions()
     assert versions["qgis"] == "9.9.9"
 
 
-def test_session_log_tracks_observation_sources_not_study_tools(tmp_path) -> None:
+def test_session_log_tracks_observation_sources_not_study_tools(tmp_path: Path) -> None:
     (tmp_path / "t.yaml").write_text(
         "id: demo-task-001\nfixtures:\n  input: f.geojson\n", encoding="utf-8"
     )
     (tmp_path / "f.geojson").write_text("{}", encoding="utf-8")
     sess = session.start_session("demo-task-001", tmp_path)
-    sess.log("bare_event")  # no source: exercises the `source is None` branch
-    sess.log("noted", source="note")  # first time: appended
-    sess.log("noted_again", source="note")  # already seen: not duplicated
+    sess.log("bare_event")
+    sess.log("noted", source="note")
+    sess.log("noted_again", source="note")
     assert sess.metrics.observation_sources == ["note"]
     assert sess.metrics.raw_event_count == 3
     assert sess.metrics.processing_tools() is None
 
 
-# --- panel formatting -------------------------------------------------------
-
-
-def test_format_elapsed_pads_and_clamps() -> None:
-    assert plugin._format_elapsed(0) == "00:00:00"
-    assert plugin._format_elapsed(65) == "00:01:05"
-    assert plugin._format_elapsed(3600 * 26 + 61) == "26:01:01"
-    assert plugin._format_elapsed(-5) == "00:00:00"
+@given(seconds=st.integers(min_value=-1000, max_value=200_000))
+def test_format_elapsed_pads_and_clamps(seconds: int) -> None:
+    formatted = plugin._format_elapsed(seconds)
+    parts = formatted.split(":")
+    assert len(parts) == 3
+    hours, minutes, secs = (int(p) for p in parts)
+    assert len(parts[1]) == 2 and len(parts[2]) == 2
+    assert 0 <= minutes < 60 and 0 <= secs < 60
+    clamped = max(0, seconds)
+    assert hours * 3600 + minutes * 60 + secs == clamped

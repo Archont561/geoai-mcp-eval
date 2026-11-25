@@ -4,138 +4,111 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
-import yaml
 
-from experiment.adapters import _ollama_chat, backends, harness_io, task_repository
+from experiment.adapters import _ollama_chat, backends, harness_io
 from experiment.adapters.llm_cache import CompletionCache
+from experiment.domain.task import Task
 from experiment.services import runs
 from experiment.services.runners.ports import CellRequest
 
 TASK_ROOT = harness_io.TASK_ROOT
 
 
-def _task_path(task_id: str) -> Path:
-    for path in TASK_ROOT.glob("*.yaml"):
-        if yaml.safe_load(path.read_text(encoding="utf-8"))["id"] == task_id:
-            return path
-    raise AssertionError(task_id)
-
-
-def test_cell_error_marks_status(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    def boom(*_args, **_kwargs):
-        raise RuntimeError("driver exploded")
-
+def test_cell_error_marks_status(
+    monkeypatch: pytest.MonkeyPatch, sample_cell_request: CellRequest
+) -> None:
+    boom = MagicMock(side_effect=RuntimeError("driver exploded"))
     monkeypatch.setitem(runs._DRIVER_DISPATCH, ("scripted", "A"), boom)
-    cell = tmp_path / "cell"
-    cell.mkdir()
-    task_path = _task_path("analysis-de9im-001")
-    req = CellRequest(
-        task_path=task_path,
-        task=task_repository.load_task(task_path),
-        arm="A",
-        driver="scripted",
-        cell=cell,
-        model="fake",
-        host="http://x",
-        run_id="test",
-    )
+    req = sample_cell_request.model_copy(update={"driver": "scripted"})
     result = runs.run_cell(req)
     assert result["status"] == "error"
     assert result["oracle_passed"] is False
 
 
 def test_cell_cache_hit_miss_digest_change_and_no_cache(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    de9im_task_path: Path,
+    de9im_task: Task,
 ) -> None:
-    task_path = _task_path("analysis-de9im-001")
-    task = task_repository.load_task(task_path)
     cache_dir = tmp_path / "llm-cache"
     code = "import json\nprint(json.dumps({'relation': 'touches', 'de9im': 'FF2F11212'}))\n"
-    calls = {"n": 0}
-
-    def fake_chat(*_args, **_kwargs) -> dict:
-        calls["n"] += 1
-        return {
+    fake_chat = MagicMock(
+        return_value={
             "choices": [{"message": {"role": "assistant", "content": f"```python\n{code}```"}}],
             "usage": {"prompt_tokens": 40, "completion_tokens": 10, "total_tokens": 50},
         }
-
+    )
     monkeypatch.setattr(_ollama_chat, "chat_completions_sdk", fake_chat)
     profile = backends.fallback_profile("http://127.0.0.1:11434/v1", "qwen2.5:3b")
 
-    def run_once(name: str, *, digest: str | None, use_cache: bool) -> dict:
-        cell = tmp_path / name
-        cell.mkdir()
-        req = runs.CellRequest(
-            task_path=task_path,
-            task=task,
-            arm="B",
-            driver="ollama",
-            cell=cell,
-            model=profile.model,
-            host=str(profile.base_url),
-            run_id=name,
-            profile=profile,
-            backend_id="local",
-            model_digest=digest,
-            use_cache=use_cache,
-            cache_dir=cache_dir,
-        )
-        return runs.run_cell(req)
-
-    first = run_once("c1", digest="sha256:digest-v1", use_cache=True)
-    assert first["cache_hit"] is False
-    assert first["cache_hits"] == 0
-    assert first["cache_misses"] == 1
-    assert calls["n"] == 1
-
-    second = run_once("c2", digest="sha256:digest-v1", use_cache=True)
-    assert second["cache_hit"] is True
-    assert second["cache_hits"] == 1
-    assert second["cache_misses"] == 0
-    assert calls["n"] == 1
-
-    third = run_once("c3", digest="sha256:digest-v2", use_cache=True)
-    assert third["cache_hit"] is False
-    assert calls["n"] == 2
-
-    fourth = run_once("c4", digest="sha256:digest-v1", use_cache=False)
-    assert fourth["cache_hit"] is False
-    assert calls["n"] == 3
-
-    fifth = run_once("c5", digest=None, use_cache=True)
-    sixth = run_once("c6", digest=None, use_cache=True)
-    assert fifth["cache_hit"] is False
-    assert sixth["cache_hit"] is False
-    assert calls["n"] == 5
-
-
-def test_http_errors_are_never_cached(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    task_path = _task_path("analysis-de9im-001")
-    task = task_repository.load_task(task_path)
-    cache_dir = tmp_path / "llm-cache"
-
-    def fail_chat(*_args, **_kwargs) -> dict:
-        raise backends.BackendError("http-500", "server error")
-
-    monkeypatch.setattr(_ollama_chat, "chat_completions_sdk", fail_chat)
-    cell = tmp_path / "err"
-    cell.mkdir()
-    req = runs.CellRequest(
-        task_path=task_path,
-        task=task,
+    base_req = CellRequest(
+        task_path=de9im_task_path,
+        task=de9im_task,
         arm="B",
         driver="ollama",
-        cell=cell,
-        model="qwen2.5:3b",
-        host="http://127.0.0.1:11434/v1",
-        run_id="err",
+        cell=tmp_path / "c1",
+        model=profile.model,
+        host=str(profile.base_url),
+        run_id="c1",
+        profile=profile,
         backend_id="local",
         model_digest="sha256:digest-v1",
         use_cache=True,
         cache_dir=cache_dir,
+    )
+
+    for name, digest, use_cache, exp_hit, exp_hits, exp_misses, exp_calls in [
+        ("c1", "sha256:digest-v1", True, False, 0, 1, 1),
+        ("c2", "sha256:digest-v1", True, True, 1, 0, 1),
+        ("c3", "sha256:digest-v2", True, False, 0, 1, 2),
+        ("c4", "sha256:digest-v1", False, False, 0, 1, 3),
+        ("c5", None, True, False, 0, 1, 4),
+        ("c6", None, True, False, 0, 1, 5),
+    ]:
+        cell = tmp_path / name
+        cell.mkdir()
+        res = runs.run_cell(
+            base_req.model_copy(
+                update={
+                    "cell": cell,
+                    "run_id": name,
+                    "model_digest": digest,
+                    "use_cache": use_cache,
+                }
+            )
+        )
+        assert res["cache_hit"] is exp_hit
+        assert res["cache_hits"] == exp_hits
+        assert res["cache_misses"] == exp_misses
+        assert fake_chat.call_count == exp_calls
+
+
+def test_http_errors_are_never_cached(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    sample_cell_request: CellRequest,
+) -> None:
+    cache_dir = tmp_path / "llm-cache"
+    monkeypatch.setattr(
+        _ollama_chat,
+        "chat_completions_sdk",
+        MagicMock(side_effect=backends.BackendError("http-500", "server error")),
+    )
+    req = sample_cell_request.model_copy(
+        update={
+            "arm": "B",
+            "model": "qwen2.5:3b",
+            "host": "http://127.0.0.1:11434/v1",
+            "run_id": "err",
+            "backend_id": "local",
+            "model_digest": "sha256:digest-v1",
+            "use_cache": True,
+            "cache_dir": cache_dir,
+        }
     )
     res = runs.run_cell(req)
     assert res["status"] == "error"

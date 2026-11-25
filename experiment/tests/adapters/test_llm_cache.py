@@ -4,7 +4,25 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
+
 from experiment.adapters.llm_cache import CompletionCache
+
+
+@given(
+    key=st.text(alphabet="0123456789abcdef", min_size=4, max_size=32),
+    content=st.text(max_size=80),
+)
+@settings(max_examples=25, suppress_health_check=[HealthCheck.function_scoped_fixture])
+def test_completion_cache_roundtrips_arbitrary_valid_replies(
+    tmp_path: Path, key: str, content: str
+) -> None:
+    cache_dir = tmp_path / "prop-cache"
+    cache = CompletionCache(cache_dir)
+    payload = {"choices": [{"message": {"role": "assistant", "content": content}}]}
+    assert cache.put(key, payload) is True
+    assert CompletionCache(cache_dir).get(key) == payload
 
 
 def test_completion_cache_persists_successes_and_rejects_error_payloads(tmp_path: Path) -> None:

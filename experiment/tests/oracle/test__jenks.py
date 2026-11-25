@@ -6,8 +6,38 @@ import json
 from pathlib import Path
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 from experiment.oracle._jenks import jenks_assignments
+
+
+@given(
+    values=st.lists(
+        st.floats(min_value=-1e4, max_value=1e4, allow_nan=False, allow_infinity=False),
+        min_size=2,
+        max_size=15,
+    ),
+    data=st.data(),
+)
+@settings(max_examples=25, suppress_health_check=[HealthCheck.function_scoped_fixture])
+def test_jenks_assignments_maps_every_feature_to_ordered_class(
+    tmp_path: Path, values: list[float], data: st.DataObject
+) -> None:
+    unique_count = len(set(values))
+    k = data.draw(st.integers(min_value=1, max_value=min(4, unique_count)))
+    features = [
+        {"type": "Feature", "properties": {"id": f"f{i}", "val": v}, "geometry": None}
+        for i, v in enumerate(values)
+    ]
+    fixture = tmp_path / "gen.geojson"
+    fixture.write_text(
+        json.dumps({"type": "FeatureCollection", "features": features}), encoding="utf-8"
+    )
+    breaks, assignments = jenks_assignments(fixture, "id", "val", k)
+    assert len(breaks) == k
+    assert set(assignments) == {f"f{i}" for i in range(len(values))}
+    assert all(1 <= cls <= k for cls in assignments.values())
 
 
 def test_jenks_assignments_classifies_geojson_fixture_and_rejects_bad_rows(

@@ -3,71 +3,50 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import yaml
 
 from experiment.oracle import AssertionResult, OracleVerdict, run_determinism_gate
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-TASK_ROOT = REPO_ROOT / "experiment" / "tasks"
 AXIS_TASK = "prep-axis-order-001"
 
 
-def _task_path(task_id: str) -> Path:
-    return TASK_ROOT / f"{task_id}.yaml"
-
-
-def test_determinism_gate_rejects_inconsistent_and_missing_verdicts(tmp_path: Path) -> None:
-    path = _task_path(AXIS_TASK)
-    sequence = iter(
-        [
-            OracleVerdict(
-                passed=True,
-                checks=(AssertionResult(assertion_id="check", passed=True, message="pass"),),
-            ),
-            OracleVerdict(
-                passed=False,
-                checks=(AssertionResult(assertion_id="check", passed=False, message="fail"),),
-            ),
-            OracleVerdict(
-                passed=True,
-                checks=(AssertionResult(assertion_id="check", passed=True, message="pass"),),
-            ),
-        ]
+def test_determinism_gate_rejects_inconsistent_and_missing_verdicts(
+    tmp_path: Path, pilot_task_paths: dict[str, Path]
+) -> None:
+    path = pilot_task_paths[AXIS_TASK]
+    pass_verdict = OracleVerdict(
+        passed=True,
+        checks=(AssertionResult(assertion_id="check", passed=True, message="pass"),),
     )
-    inconsistent = run_determinism_gate(path, tmp_path, lambda *_: next(sequence))
+    fail_verdict = OracleVerdict(
+        passed=False,
+        checks=(AssertionResult(assertion_id="check", passed=False, message="fail"),),
+    )
+
+    inconsistent_eval = MagicMock(side_effect=[pass_verdict, fail_verdict, pass_verdict])
+    inconsistent = run_determinism_gate(path, tmp_path, inconsistent_eval)
     assert not inconsistent.passed
     assert not inconsistent.consistent
 
-    missing_sequence = iter(
-        [
-            OracleVerdict(
-                passed=True,
-                checks=(AssertionResult(assertion_id="check", passed=True, message="pass"),),
-            ),
-            None,
-            OracleVerdict(
-                passed=True,
-                checks=(AssertionResult(assertion_id="check", passed=True, message="pass"),),
-            ),
-        ]
-    )
-    missing = run_determinism_gate(path, tmp_path, lambda *_: next(missing_sequence))
+    missing_eval = MagicMock(side_effect=[pass_verdict, None, pass_verdict])
+    missing = run_determinism_gate(path, tmp_path, missing_eval)
     assert not missing.passed
     assert not missing.consistent
     assert any("missing" in issue for issue in missing.issues)
 
 
-def test_determinism_gate_records_exception_and_rejects_bad_run_count(tmp_path: Path) -> None:
-    def explode(*_args: object) -> OracleVerdict:
-        raise RuntimeError("simulated oracle failure")
-
-    report = run_determinism_gate(_task_path(AXIS_TASK), tmp_path, explode)
+def test_determinism_gate_records_exception_and_rejects_bad_run_count(
+    tmp_path: Path, pilot_task_paths: dict[str, Path]
+) -> None:
+    path = pilot_task_paths[AXIS_TASK]
+    exploding_eval = MagicMock(side_effect=RuntimeError("simulated oracle failure"))
+    report = run_determinism_gate(path, tmp_path, exploding_eval)
     assert not report.passed
     assert any("simulated oracle failure" in issue for issue in report.issues)
 
-    task_yaml = _task_path(AXIS_TASK)
-    task = yaml.safe_load(task_yaml.read_text(encoding="utf-8"))
+    task = yaml.safe_load(path.read_text(encoding="utf-8"))
     task["oracle"]["determinism_runs"] = 2
     bad_task_path = tmp_path / "bad-runs.yaml"
     bad_task_path.write_text(yaml.safe_dump(task), encoding="utf-8")
