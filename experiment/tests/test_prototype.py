@@ -106,6 +106,36 @@ def test_run_python_sandboxed(tmp_path: Path) -> None:
     assert src.exists()  # original fixture untouched
 
 
+def test_scrubbed_env_forwards_proj_gdal_and_strips_secrets(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "secret-token")
+    env = harness_io.scrubbed_env(tmp_path)
+    assert "OPENROUTER_API_KEY" not in env
+    assert env["PROJ_NETWORK"] == "OFF"
+    if (Path(harness_io.sys.prefix) / "share" / "proj").is_dir():
+        assert Path(env["PROJ_DATA"]).is_dir()
+    if (Path(harness_io.sys.prefix) / "share" / "gdal").is_dir():
+        assert Path(env["GDAL_DATA"]).is_dir()
+
+
+def test_run_python_sandboxed_geopandas_and_pyproj_have_clean_stderr() -> None:
+    pytest.importorskip("geopandas")
+    pytest.importorskip("pyproj")
+    fx = TASK_ROOT / "fixtures" / "analysis" / "poland-czechia.geojson"
+    script = (
+        "import geopandas as gpd\n"
+        "from pyproj import CRS\n"
+        "gdf = gpd.read_file('input.geojson').to_crs('EPSG:2180')\n"
+        "assert CRS.from_epsg(4326).to_epsg() == 4326\n"
+        "print(len(gdf), gdf.crs.to_epsg())\n"
+    )
+    completed = harness_io.run_python_sandboxed(script, fixture_src=fx)
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "2 2180"
+    assert "PROJ" not in completed.stderr
+
+
 def _fixture(task_id: str) -> dict:
     task = task_repository.load_task(_task_path(task_id))
     return json.loads(

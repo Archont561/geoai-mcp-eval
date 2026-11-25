@@ -79,8 +79,31 @@ def write_deliverable(cell: Path, task: Task, payload: Any) -> Path:
     return run_store.write_json(cell / deliverable_name(task), payload, sort_keys=False)
 
 
+def _resolve_existing_dir(env_keys: tuple[str, ...], fallback: Path) -> str | None:
+    for key in env_keys:
+        raw = os.environ.get(key)
+        if raw and Path(raw).is_dir():
+            return raw
+    return str(fallback) if fallback.is_dir() else None
+
+
+def _geospatial_data_env() -> dict[str, str]:
+    prefix = Path(sys.prefix)
+    env: dict[str, str] = {"PROJ_NETWORK": "OFF"}
+    candidates = (
+        ("PROJ_DATA", ("PROJ_DATA", "PROJ_LIB"), prefix / "share" / "proj"),
+        ("GDAL_DATA", ("GDAL_DATA",), prefix / "share" / "gdal"),
+        ("GDAL_DRIVER_PATH", ("GDAL_DRIVER_PATH",), prefix / "lib" / "gdalplugins"),
+    )
+    for target_key, env_keys, fallback in candidates:
+        resolved = _resolve_existing_dir(env_keys, fallback)
+        if resolved is not None:
+            env[target_key] = resolved
+    return env
+
+
 def scrubbed_env(workdir: Path, *, qt_platform: str | None = None) -> dict[str, str]:
-    """Minimal environment for sandboxed subprocesses."""
+    """Minimal environment for sandboxed subprocesses (read-only PROJ/GDAL data allowed)."""
     env = {
         "PATH": os.pathsep.join(
             [str(Path(sys.executable).parent), "/usr/local/bin", "/usr/bin", "/bin"]
@@ -88,6 +111,7 @@ def scrubbed_env(workdir: Path, *, qt_platform: str | None = None) -> dict[str, 
         "HOME": str(workdir.resolve()),
         "PYTHONDONTWRITEBYTECODE": "1",
         "LC_ALL": "C.UTF-8",
+        **_geospatial_data_env(),
     }
     if qt_platform is not None:
         env["QT_QPA_PLATFORM"] = qt_platform

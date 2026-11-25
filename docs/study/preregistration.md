@@ -223,3 +223,28 @@ reference in the same run: TSR `0/6`, MPS `0.0000`, silent-invalid `2/6` on
    `stderr` inside the sandboxed Python subprocess; no harness patch accompanies
    this ratification. Any future sandbox environment change before `v1.0-prereg`
    must be documented in a separate dated pre-freeze addendum.
+
+## Addendum — arm B sandbox isolation & PROJ/GDAL data paths (pre-freeze, 2026-11-25)
+
+Before tagging `v1.0-prereg`, two environment-level harness fixes were applied
+to Arm B's Python execution sandbox (`experiment/src/experiment/adapters/harness_io.py`):
+
+1. **Ephemeral temporary working directory (`4f56747`):** Each Arm B script
+   now executes inside a fresh `tempfile.TemporaryDirectory(prefix="geoai-sandbox-")`
+   containing only a copy of the task fixture staged at relative path
+   `input.geojson`, rather than executing inside the cell's output directory.
+   The temporary directory and any scratch files are deleted automatically on
+   exit, isolating generated scripts from `transcript.jsonl`, `score.json`, and
+   `manifest.json`.
+2. **Read-only `PROJ`/`GDAL` data paths in `scrubbed_env()`:** In the
+   2026-11-24 study-pin pilot (`#45505826575`), stripping `PROJ_DATA` caused
+   every `geopandas`/`pyproj` script to log
+   `ERROR 1: PROJ: proj_create_from_database: Open of .../share/proj failed`
+   while Arm A's MCP server inherited working `PROJ`/`GDAL` paths. To preserve
+   interface fairness without exposing host secrets or network access,
+   `scrubbed_env()` now forwards only an explicit read-only allowlist resolved
+   from the active interpreter prefix (`PROJ_DATA`, `GDAL_DATA`,
+   `GDAL_DRIVER_PATH`) and pins `PROJ_NETWORK=OFF`.
+
+Neither Arm A nor Arm B system prompts changed (`ARM_B_SYSTEM_PROMPT` SHA-256
+remains `5c44378126c5b889a159b7524ea83bf0d365f45854ee2559b38230851ac1c985`).
