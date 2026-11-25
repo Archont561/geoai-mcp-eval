@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -91,7 +92,8 @@ def test_non_positive_repetitions_rejected(tmp_path: Path) -> None:
         ["run", "mcp", "--repetitions", "0", "--output-dir", str(tmp_path / "out")],
     )
     assert res.exit_code != 0
-    assert "--repetitions must be a positive integer" in res.output
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", res.output)
+    assert "--repetitions must be a positive integer" in plain
 
 
 def test_env_var_precedence_and_cache_flag_alignment(
