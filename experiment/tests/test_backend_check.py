@@ -8,13 +8,20 @@ from typing import Any
 
 import pytest
 
-from experiment.services.backend_check import (
+from experiment.adapters import backends
+from experiment.adapters import ollama as ollama_adapter
+from experiment.adapters.backend_probe import HttpBackendProbe
+from experiment.adapters.ssh_tunnel import SshTunnelAdapter
+from experiment.cli.env import (
     EXIT_AUTH_CLIENT,
     EXIT_COMPLETION_REJECTED,
     EXIT_MODEL_ABSENT,
     EXIT_SSH_UNREACHABLE,
     EXIT_TOKEN_LIMIT,
     EXIT_TUNNEL_DEAD,
+    backend_check_exit_code,
+)
+from experiment.services.backend_check import (
     BackendCheckConfig,
     BackendCheckError,
     run_backend_check,
@@ -92,7 +99,21 @@ def _cfg(tmp_path: Path, **overrides: Any) -> BackendCheckConfig:
     return BackendCheckConfig(**defaults)
 
 
+def _http_probe(cfg: BackendCheckConfig, session: _StubSession) -> HttpBackendProbe:
+    profile = backends.resolve_profile(cfg.backend, host=cfg.host, model=cfg.model)
+    return HttpBackendProbe(profile, session=session, sleep=lambda _s: None)
+
+
+def _ok_tunnel() -> SshTunnelAdapter:
+    return SshTunnelAdapter(run_cmd=_ok_cmd)
+
+
+def test_ollama_adapter_no_longer_exposes_create_session() -> None:
+    assert not hasattr(ollama_adapter, "create_session")
+
+
 def test_ready_exits_with_pinned_digest_only_after_tiny_completion(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
     session = _StubSession(
         get_map={
             "/v1/models": [_StubResponse(200, {"data": [{"id": "qwen2.5:3b"}]})],
@@ -115,9 +136,9 @@ def test_ready_exits_with_pinned_digest_only_after_tiny_completion(tmp_path: Pat
         ],
     )
     result = run_backend_check(
-        _cfg(tmp_path),
-        run_cmd=_ok_cmd,
-        session=session,  # type: ignore[arg-type]
+        cfg,
+        tunnel_probe=_ok_tunnel(),
+        backend_probe=_http_probe(cfg, session),
         sleep=lambda _s: None,
     )
     assert result.status == "READY"
@@ -133,9 +154,13 @@ def test_ssh_unreachable_produces_distinct_error(tmp_path: Path) -> None:
         return SimpleNamespace(returncode=255, stdout="", stderr="ssh: Could not resolve hostname")
 
     with pytest.raises(BackendCheckError) as exc_info:
-        run_backend_check(_cfg(tmp_path), run_cmd=fail_ssh, sleep=lambda _s: None)
+        run_backend_check(
+            _cfg(tmp_path),
+            tunnel_probe=SshTunnelAdapter(run_cmd=fail_ssh),
+            sleep=lambda _s: None,
+        )
     assert exc_info.value.kind == "ssh-unreachable"
-    assert exc_info.value.exit_code == EXIT_SSH_UNREACHABLE
+    assert backend_check_exit_code(exc_info.value.kind) == EXIT_SSH_UNREACHABLE
     assert "gpu-box" in str(exc_info.value)
 
 
@@ -146,20 +171,25 @@ def test_dead_controlmaster_tunnel_produces_distinct_error(tmp_path: Path) -> No
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     with pytest.raises(BackendCheckError) as exc_info:
-        run_backend_check(_cfg(tmp_path), run_cmd=dead_tunnel, sleep=lambda _s: None)
+        run_backend_check(
+            _cfg(tmp_path),
+            tunnel_probe=SshTunnelAdapter(run_cmd=dead_tunnel),
+            sleep=lambda _s: None,
+        )
     assert exc_info.value.kind == "tunnel-dead"
-    assert exc_info.value.exit_code == EXIT_TUNNEL_DEAD
+    assert backend_check_exit_code(exc_info.value.kind) == EXIT_TUNNEL_DEAD
 
 
 def test_missing_control_socket_reports_tunnel_dead(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path, control_path=tmp_path / "does-not-exist.sock")
     with pytest.raises(BackendCheckError) as exc_info:
-        run_backend_check(cfg, run_cmd=_ok_cmd, sleep=lambda _s: None)
+        run_backend_check(cfg, tunnel_probe=_ok_tunnel(), sleep=lambda _s: None)
     assert exc_info.value.kind == "tunnel-dead"
-    assert exc_info.value.exit_code == EXIT_TUNNEL_DEAD
+    assert backend_check_exit_code(exc_info.value.kind) == EXIT_TUNNEL_DEAD
 
 
 def test_absent_model_or_digest_mismatch_fails_distinctly(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path, poll_timeout_s=0.01)
     session = _StubSession(
         get_map={
             "/v1/models": [_StubResponse(200, {"data": [{"id": "other:1b"}]})],
@@ -171,34 +201,36 @@ def test_absent_model_or_digest_mismatch_fails_distinctly(tmp_path: Path) -> Non
     )
     with pytest.raises(BackendCheckError) as exc_info:
         run_backend_check(
-            _cfg(tmp_path, poll_timeout_s=0.01),
-            run_cmd=_ok_cmd,
-            session=session,  # type: ignore[arg-type]
+            cfg,
+            tunnel_probe=_ok_tunnel(),
+            backend_probe=_http_probe(cfg, session),
             sleep=lambda _s: None,
         )
     assert exc_info.value.kind == "model-absent"
-    assert exc_info.value.exit_code == EXIT_MODEL_ABSENT
+    assert backend_check_exit_code(exc_info.value.kind) == EXIT_MODEL_ABSENT
     assert session.post_calls == []
 
 
 def test_no_silent_retry_on_auth_or_4xx(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
     session = _StubSession(
         get_map={"/v1/models": [_StubResponse(401, text="invalid api key")]},
     )
     with pytest.raises(BackendCheckError) as exc_info:
         run_backend_check(
-            _cfg(tmp_path),
-            run_cmd=_ok_cmd,
-            session=session,  # type: ignore[arg-type]
+            cfg,
+            tunnel_probe=_ok_tunnel(),
+            backend_probe=_http_probe(cfg, session),
             sleep=lambda _s: None,
         )
     assert exc_info.value.kind == "auth-error"
-    assert exc_info.value.exit_code == EXIT_AUTH_CLIENT
+    assert backend_check_exit_code(exc_info.value.kind) == EXIT_AUTH_CLIENT
     # Strictly one request — zero silent retries on 401!
     assert len(session.get_calls) == 1
 
 
 def test_retries_only_on_429_or_5xx_then_succeeds(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
     session = _StubSession(
         get_map={
             "/v1/models": [
@@ -225,9 +257,9 @@ def test_retries_only_on_429_or_5xx_then_succeeds(tmp_path: Path) -> None:
         ],
     )
     result = run_backend_check(
-        _cfg(tmp_path),
-        run_cmd=_ok_cmd,
-        session=session,  # type: ignore[arg-type]
+        cfg,
+        tunnel_probe=_ok_tunnel(),
+        backend_probe=_http_probe(cfg, session),
         sleep=lambda _s: None,
     )
     assert result.status == "READY"
@@ -235,6 +267,7 @@ def test_retries_only_on_429_or_5xx_then_succeeds(tmp_path: Path) -> None:
 
 
 def test_token_limit_rejection_is_distinct_and_not_retried_on_400(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
     session = _StubSession(
         get_map={
             "/v1/models": [_StubResponse(200, {"data": [{"id": "qwen2.5:3b"}]})],
@@ -251,17 +284,18 @@ def test_token_limit_rejection_is_distinct_and_not_retried_on_400(tmp_path: Path
     )
     with pytest.raises(BackendCheckError) as exc_info:
         run_backend_check(
-            _cfg(tmp_path),
-            run_cmd=_ok_cmd,
-            session=session,  # type: ignore[arg-type]
+            cfg,
+            tunnel_probe=_ok_tunnel(),
+            backend_probe=_http_probe(cfg, session),
             sleep=lambda _s: None,
         )
     assert exc_info.value.kind == "token-limit"
-    assert exc_info.value.exit_code == EXIT_TOKEN_LIMIT
+    assert backend_check_exit_code(exc_info.value.kind) == EXIT_TOKEN_LIMIT
     assert len(session.post_calls) == 1
 
 
 def test_completion_rejected_on_empty_choices(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
     session = _StubSession(
         get_map={
             "/v1/models": [_StubResponse(200, {"data": [{"id": "qwen2.5:3b"}]})],
@@ -276,13 +310,13 @@ def test_completion_rejected_on_empty_choices(tmp_path: Path) -> None:
     )
     with pytest.raises(BackendCheckError) as exc_info:
         run_backend_check(
-            _cfg(tmp_path),
-            run_cmd=_ok_cmd,
-            session=session,  # type: ignore[arg-type]
+            cfg,
+            tunnel_probe=_ok_tunnel(),
+            backend_probe=_http_probe(cfg, session),
             sleep=lambda _s: None,
         )
     assert exc_info.value.kind == "completion-rejected"
-    assert exc_info.value.exit_code == EXIT_COMPLETION_REJECTED
+    assert backend_check_exit_code(exc_info.value.kind) == EXIT_COMPLETION_REJECTED
 
 
 def test_cli_backend_check_prints_ready_and_propagates_exit_code(
@@ -310,11 +344,46 @@ def test_cli_backend_check_prints_ready_and_propagates_exit_code(
     assert "READY" in ok.output and "sha256:pinned123" in ok.output
 
     def boom(_cfg: Any) -> Any:
-        raise BackendCheckError("tunnel-dead", EXIT_TUNNEL_DEAD, "socket closed", "restart ssh")
+        raise BackendCheckError("tunnel-dead", "socket closed", "restart ssh")
 
     monkeypatch.setattr(backend_check, "run_backend_check", boom)
     err = cli_runner.invoke(app, ["env", "backend-check", "--ssh-host", "gpu-box"])
     assert err.exit_code == EXIT_TUNNEL_DEAD
+
+
+def test_backend_check_pure_ports_without_http_or_subprocess(tmp_path: Path) -> None:
+    class _FakeTunnel:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str | None, Path | None]] = []
+
+        def verify(self, ssh_host: str | None, control_path: Path | None) -> None:
+            self.calls.append((ssh_host, control_path))
+
+    class _FakeProbe:
+        def __init__(self) -> None:
+            self.max_tokens_seen: int | None = None
+            self.closed = False
+
+        def list_model_ids(self) -> set[str]:
+            return {"qwen2.5:3b"}
+
+        def resolve_model_digest(self) -> str | None:
+            return "sha256:pinned123"
+
+        def verify_tiny_completion(self, *, max_tokens: int) -> None:
+            self.max_tokens_seen = max_tokens
+
+        def close(self) -> None:
+            self.closed = True
+
+    tunnel = _FakeTunnel()
+    probe = _FakeProbe()
+    cfg = _cfg(tmp_path)
+    result = run_backend_check(cfg, tunnel_probe=tunnel, backend_probe=probe, sleep=lambda _s: None)
+    assert result.status == "READY"
+    assert tunnel.calls == [("gpu-box", cfg.control_path)]
+    assert probe.max_tokens_seen == cfg.max_tokens
+    assert probe.closed is False  # caller-supplied probe is not closed by service
 
 
 def test_backend_check_edge_errors(tmp_path: Path) -> None:
@@ -322,26 +391,29 @@ def test_backend_check_edge_errors(tmp_path: Path) -> None:
 
     # Missing ssh_host
     with pytest.raises(BackendCheckError) as e1:
-        run_backend_check(_cfg(tmp_path, ssh_host=None), run_cmd=_ok_cmd, sleep=lambda _s: None)
-    assert e1.value.exit_code == EXIT_SSH_UNREACHABLE
+        run_backend_check(
+            _cfg(tmp_path, ssh_host=None), tunnel_probe=_ok_tunnel(), sleep=lambda _s: None
+        )
+    assert backend_check_exit_code(e1.value.kind) == EXIT_SSH_UNREACHABLE
 
     # Unknown backend profile
     with pytest.raises(BackendCheckError) as e2:
-        run_backend_check(_cfg(tmp_path, backend="no-such-backend"), run_cmd=_ok_cmd)
-    assert e2.value.exit_code == EXIT_AUTH_CLIENT
+        run_backend_check(_cfg(tmp_path, backend="no-such-backend"), tunnel_probe=_ok_tunnel())
+    assert backend_check_exit_code(e2.value.kind) == EXIT_AUTH_CLIENT
 
     # Transport connection error -> tunnel-dead
+    cfg = _cfg(tmp_path)
     conn_session = _StubSession(
         get_map={"/v1/models": [requests.exceptions.ConnectionError("refused")]}
     )
     with pytest.raises(BackendCheckError) as e3:
         run_backend_check(
-            _cfg(tmp_path),
-            run_cmd=_ok_cmd,
-            session=conn_session,  # type: ignore[arg-type]
+            cfg,
+            tunnel_probe=_ok_tunnel(),
+            backend_probe=_http_probe(cfg, conn_session),
             sleep=lambda _s: None,
         )
-    assert e3.value.exit_code == EXIT_TUNNEL_DEAD
+    assert backend_check_exit_code(e3.value.kind) == EXIT_TUNNEL_DEAD
 
     # Exhausted 429 on completion -> token-limit after retries + 1 attempts
     ok_models = {
@@ -353,34 +425,34 @@ def test_backend_check_edge_errors(tmp_path: Path) -> None:
     rl_session = _StubSession(get_map=ok_models, post_list=[_StubResponse(429, text="quota")])
     with pytest.raises(BackendCheckError) as e4:
         run_backend_check(
-            _cfg(tmp_path),
-            run_cmd=_ok_cmd,
-            session=rl_session,  # type: ignore[arg-type]
+            cfg,
+            tunnel_probe=_ok_tunnel(),
+            backend_probe=_http_probe(cfg, rl_session),
             sleep=lambda _s: None,
         )
-    assert e4.value.exit_code == EXIT_TOKEN_LIMIT
+    assert backend_check_exit_code(e4.value.kind) == EXIT_TOKEN_LIMIT
     assert len(rl_session.post_calls) == 4  # 1 initial + 3 retries
 
     # 401 on completion -> auth-error, 1 attempt only
     auth_session = _StubSession(get_map=ok_models, post_list=[_StubResponse(401, text="denied")])
     with pytest.raises(BackendCheckError) as e5:
         run_backend_check(
-            _cfg(tmp_path),
-            run_cmd=_ok_cmd,
-            session=auth_session,  # type: ignore[arg-type]
+            cfg,
+            tunnel_probe=_ok_tunnel(),
+            backend_probe=_http_probe(cfg, auth_session),
             sleep=lambda _s: None,
         )
-    assert e5.value.exit_code == EXIT_AUTH_CLIENT
+    assert backend_check_exit_code(e5.value.kind) == EXIT_AUTH_CLIENT
     assert len(auth_session.post_calls) == 1
 
     # 500 on completion -> completion-rejected after retries
     err_session = _StubSession(get_map=ok_models, post_list=[_StubResponse(500, text="crash")])
     with pytest.raises(BackendCheckError) as e6:
         run_backend_check(
-            _cfg(tmp_path),
-            run_cmd=_ok_cmd,
-            session=err_session,  # type: ignore[arg-type]
+            cfg,
+            tunnel_probe=_ok_tunnel(),
+            backend_probe=_http_probe(cfg, err_session),
             sleep=lambda _s: None,
         )
-    assert e6.value.exit_code == EXIT_COMPLETION_REJECTED
+    assert backend_check_exit_code(e6.value.kind) == EXIT_COMPLETION_REJECTED
     assert len(err_session.post_calls) == 4

@@ -51,26 +51,47 @@ def test_tasknest_autodiscovers_experiment_tasks_from_manifest() -> None:
 def test_workflow_preflight_writes_env_pins(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from experiment.adapters.task_suite import ValidationIssue, ValidationReport
+    from experiment.services import tasks as tasks_service
+
     (tmp_path / "pixi.lock").write_text("lock-bytes", encoding="utf-8")
     monkeypatch.setattr(workflow, "find_repo_root", lambda: tmp_path)
     calls: list[list[str]] = []
+    validated_roots: list[Path] = []
 
-    def fake_passthrough(cmd: list[str], **_kwargs: Any) -> int:
-        calls.append(list(cmd))
-        return 0
+    real_validate = tasks_service.validate_suite
+
+    def fail_passthrough(cmd: list[str], **_kwargs: Any) -> int:
+        raise AssertionError(f"preflight must not spawn CLI subprocess: {cmd}")
+
+    def spy_validate(root: Path) -> ValidationReport:
+        validated_roots.append(root)
+        return real_validate(root)
 
     def fake_version(cmd: list[str], _cwd: Path) -> str:
         calls.append(list(cmd))
         return "v1.0.0"
 
-    monkeypatch.setattr(subprocess_runner, "run_passthrough", fake_passthrough)
+    monkeypatch.setattr(subprocess_runner, "run_passthrough", fail_passthrough)
+    monkeypatch.setattr(workflow.tasks_service, "validate_suite", spy_validate)
     monkeypatch.setattr(subprocess_runner, "soft_version", fake_version)
     res = runner.invoke(app, ["env", "preflight", "--run-id", "rid-1"])
     assert res.exit_code == 0, res.output
     pins = (tmp_path / "results" / "rid-1" / "env-pins.txt").read_text(encoding="utf-8")
     assert "repo_sha=v1.0.0" in pins
     assert "pixi_lock_sha256=" in pins
-    assert any("validate" in cmd for cmd in calls)
+    assert len(validated_roots) == 1
+
+    # Validation failure surfaces issues cleanly without spawning a subprocess
+    bad_report = ValidationReport(
+        task_count=0,
+        traps_found=frozenset(),
+        issues=(ValidationIssue(path="suite", message="missing trap"),),
+    )
+    monkeypatch.setattr(workflow.tasks_service, "validate_suite", lambda _root: bad_report)
+    fail_res = runner.invoke(app, ["env", "preflight", "--run-id", "rid-bad"])
+    assert fail_res.exit_code != 0
+    assert "missing trap" in fail_res.output
 
 
 def test_workflow_model_records_digest_and_smoke(
@@ -153,7 +174,10 @@ def test_workflow_run_executes_pilot_and_smoke(
     assert pilot_manifest["model_digest"] == "sha256:abc123"
     assert (cell_p / "transcript.jsonl").is_file()
 
-    monkeypatch.setattr(subprocess_runner, "run_passthrough", lambda _cmd, **_kw: 0)
+    def fail_passthrough(cmd: list[str], **_kw: Any) -> int:
+        raise AssertionError(f"smoke probe must not spawn CLI subprocess: {cmd}")
+
+    monkeypatch.setattr(subprocess_runner, "run_passthrough", fail_passthrough)
     smoke_res = runner.invoke(
         app,
         [
@@ -384,3 +408,37 @@ def test_archive_pack_still_writes_zip_and_summary_on_incomplete_harvest(
     assert res.exit_code != 0
     assert out_zip.is_file()
     assert "INCOMPLETE" in step_summary.read_text(encoding="utf-8")
+
+
+def test_workflow_harvest_runs_determinism_gate_in_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(workflow, "find_repo_root", lambda: tmp_path)
+
+    def fail_subprocess(cmd: list[str], **_kw: Any) -> Any:
+        raise AssertionError(f"harvest must not spawn CLI subprocess: {cmd}")
+
+    monkeypatch.setattr(subprocess_runner, "run_command", fail_subprocess)
+    harvest = tmp_path / "harvest"
+    cell = harvest / "experiment-A-analysis-de9im-001-rep1"
+    cell.mkdir(parents=True)
+    (cell / "manifest.json").write_text(
+        json.dumps({"arm": "A", "task": "analysis-de9im-001", "rep": 1, "status": "ok"}),
+        encoding="utf-8",
+    )
+    summary = workflow.run_harvest(
+        workflow.HarvestConfig(
+            harvest_dir=harvest,
+            arms=("A",),
+            repetitions=1,
+            fail_on_missing=False,
+            skip_oracle=False,
+            run_id="rid-det",
+        )
+    )
+    assert summary["oracle"] == {"analysis-de9im-001/A/rep-1": "fail"}
+    gate_file = harvest / "oracle" / "analysis-de9im-001-A-rep1.json"
+    assert gate_file.is_file()
+    payload = json.loads(gate_file.read_text(encoding="utf-8"))
+    assert payload["required_runs"] == 3
+    assert payload["passed"] is False

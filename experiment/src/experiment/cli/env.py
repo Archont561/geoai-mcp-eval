@@ -52,6 +52,29 @@ SCRIPT_ARG = typer.Argument(..., help="PyQGIS script to run in the scrubbed sand
 ARTIFACTS_DIR_OPTION = typer.Option(Path("."), "--artifacts-dir", help="cwd for the script")
 TIMEOUT_OPTION = typer.Option(120, "--timeout", help="Wall-clock timeout in seconds")
 
+EXIT_READY = 0
+EXIT_SSH_UNREACHABLE = 10
+EXIT_TUNNEL_DEAD = 11
+EXIT_MODEL_ABSENT = 12
+EXIT_AUTH_CLIENT = 13
+EXIT_TOKEN_LIMIT = 14
+EXIT_COMPLETION_REJECTED = 15
+
+_BACKEND_CHECK_EXIT_CODES: dict[str, int] = {
+    "ssh-unreachable": EXIT_SSH_UNREACHABLE,
+    "tunnel-dead": EXIT_TUNNEL_DEAD,
+    "model-absent": EXIT_MODEL_ABSENT,
+    "auth-error": EXIT_AUTH_CLIENT,
+    "client-error": EXIT_AUTH_CLIENT,
+    "token-limit": EXIT_TOKEN_LIMIT,
+    "completion-rejected": EXIT_COMPLETION_REJECTED,
+}
+
+
+def backend_check_exit_code(kind: str) -> int:
+    """Map a semantic :class:`BackendCheckError` kind to its CLI exit status."""
+    return _BACKEND_CHECK_EXIT_CODES.get(kind, EXIT_COMPLETION_REJECTED)
+
 
 @app.command()
 def preflight(run_id: str = RUN_ID_OPT) -> None:
@@ -107,7 +130,7 @@ def backend_check(  # noqa: CC102
     except backend_check_service.BackendCheckError as exc:
         typer.echo(f"ERROR [{exc.kind}]: {exc.detail}", err=True)
         typer.echo(f"HINT: {exc.hint}", err=True)
-        raise typer.Exit(code=exc.exit_code) from exc
+        raise typer.Exit(code=backend_check_exit_code(exc.kind)) from exc
     backend_check_service.emit_github_outputs(result)
     typer.echo(json.dumps(dataclasses.asdict(result), indent=2, sort_keys=True))
 
