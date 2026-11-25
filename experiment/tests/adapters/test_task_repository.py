@@ -1,15 +1,4 @@
-"""The task adapter: one parser, four failure modes, one unambiguous result.
-
-Before the adapter existed, five modules read task YAML and each decided
-differently what a valid task was, so a malformed file could load cleanly in one
-command and crash in another. These tests pin the contract that replaced them:
-every way a task can be wrong surfaces as :class:`TaskLoadError` carrying the
-offending path, and a *missing* task is a different thing entirely.
-
-The failure modes are kept distinct deliberately rather than collapsed into one
-generic error, so the tests assert the reason text too -- a directory scan
-reports which file was skipped, and the message is what a user sees.
-"""
+"""The task adapter: one parser, four failure modes, one unambiguous result."""
 
 from __future__ import annotations
 
@@ -19,7 +8,7 @@ from typing import Any
 
 import pytest
 import yaml
-from cli_harness import _TASK_CONTEXT, TASK_ROOT, UTF8
+from cli_harness import TASK_ROOT, UTF8
 
 from experiment.adapters.task_repository import (
     TaskLoadError,
@@ -41,23 +30,6 @@ SHIPPED_IDS = {
 }
 
 
-def _document(**overrides: Any) -> dict[str, Any]:
-    """A complete task document, with ``overrides`` applied last."""
-    base = {**_TASK_CONTEXT, "id": "task-001", "oracle": {"determinism_runs": 3, "assertions": []}}
-    return {**base, **overrides}
-
-
-def _write(tmp_path: Path, name: str, text: str) -> Path:
-    path = tmp_path / name
-    path.write_text(text, encoding=UTF8)
-    return path
-
-
-# --------------------------------------------------------------------------
-# Round trip: the real suite loads, and the model meets the schema
-# --------------------------------------------------------------------------
-
-
 def test_every_shipped_task_loads_as_a_model() -> None:
     tasks = load_suite(SHIPPED_SUITE)
     assert {task.id for task in tasks} == SHIPPED_IDS
@@ -71,14 +43,7 @@ def test_discovery_excludes_the_schema_beside_the_tasks() -> None:
 
 
 def test_model_and_schema_agree_on_every_required_key() -> None:
-    """The model and ``schema-v1.json`` are two halves of one truth.
-
-    A task must satisfy both, so a field added to one and forgotten in the other
-    silently splits the definition of a valid task. Compare the required keys of
-    the root and of every nested object the schema declares.
-    """
     schema = json.loads((SHIPPED_SUITE / "schema-v1.json").read_text(encoding=UTF8))
-
     schema_required = {
         "<root>": set(schema["required"]),
         **{
@@ -98,17 +63,14 @@ def test_model_and_schema_agree_on_every_required_key() -> None:
     assert model_required == schema_required
 
 
-def test_model_forbids_unknown_keys_like_the_schema_does(tmp_path: Path) -> None:
-    """``extra="forbid"`` mirrors ``additionalProperties: false``."""
-    path = _write(tmp_path, "extra.yaml", yaml.safe_dump({**_document(), "unexpected": True}))
+def test_model_forbids_unknown_keys_like_the_schema_does(
+    tmp_path: Path, sample_task_document: dict[str, Any]
+) -> None:
+    path = tmp_path / "extra.yaml"
+    path.write_text(yaml.safe_dump({**sample_task_document, "unexpected": True}), encoding=UTF8)
     with pytest.raises(TaskLoadError) as excinfo:
         load_task(path)
     assert "unexpected" in excinfo.value.reason
-
-
-# --------------------------------------------------------------------------
-# The four failure modes -- all TaskLoadError, each with its own reason
-# --------------------------------------------------------------------------
 
 
 def test_missing_file_reports_the_read_failure(tmp_path: Path) -> None:
@@ -120,42 +82,40 @@ def test_missing_file_reports_the_read_failure(tmp_path: Path) -> None:
 
 
 def test_malformed_yaml_reports_the_parse_failure(tmp_path: Path) -> None:
-    path = _write(tmp_path, "broken.yaml", "id: [unclosed\n")
+    path = tmp_path / "broken.yaml"
+    path.write_text("id: [unclosed\n", encoding=UTF8)
     with pytest.raises(TaskLoadError) as excinfo:
         load_task(path)
     assert excinfo.value.reason.startswith("cannot parse YAML: ")
 
 
 def test_non_mapping_document_is_rejected(tmp_path: Path) -> None:
-    path = _write(tmp_path, "list.yaml", "- one\n- two\n")
+    path = tmp_path / "list.yaml"
+    path.write_text("- one\n- two\n", encoding=UTF8)
     with pytest.raises(TaskLoadError) as excinfo:
         load_task(path)
     assert excinfo.value.reason == "task document must be a YAML mapping"
 
 
-def test_schema_violation_reports_which_field_is_missing(tmp_path: Path) -> None:
-    document = _document()
-    del document["fixtures"]
-    path = _write(tmp_path, "incomplete.yaml", yaml.safe_dump(document))
+def test_schema_violation_reports_which_field_is_missing(
+    tmp_path: Path, sample_task_document: dict[str, Any]
+) -> None:
+    del sample_task_document["fixtures"]
+    path = tmp_path / "incomplete.yaml"
+    path.write_text(yaml.safe_dump(sample_task_document), encoding=UTF8)
     with pytest.raises(TaskLoadError) as excinfo:
         load_task(path)
     assert "fixtures" in excinfo.value.reason
 
 
 def test_read_document_returns_the_mapping_without_validating(tmp_path: Path) -> None:
-    """``read_task_document`` must not validate: the suite checker needs the
-    mapping in order to report what is wrong with it."""
-    path = _write(tmp_path, "incomplete.yaml", yaml.safe_dump({"id": "only-an-id"}))
+    path = tmp_path / "incomplete.yaml"
+    path.write_text(yaml.safe_dump({"id": "only-an-id"}), encoding=UTF8)
     assert read_task_document(path) == {"id": "only-an-id"}
 
 
-# --------------------------------------------------------------------------
-# Absence is not a load failure
-# --------------------------------------------------------------------------
-
-
-def test_unknown_id_raises_not_found(tmp_path: Path) -> None:
-    _write(tmp_path, "task.yaml", yaml.safe_dump(_document()))
+def test_unknown_id_raises_not_found(tmp_path: Path, sample_task_document: dict[str, Any]) -> None:
+    (tmp_path / "task.yaml").write_text(yaml.safe_dump(sample_task_document), encoding=UTF8)
     with pytest.raises(TaskNotFoundError) as excinfo:
         find_task_file(tmp_path, "no-such-task")
     assert excinfo.value.task_id == "no-such-task"
@@ -164,27 +124,29 @@ def test_unknown_id_raises_not_found(tmp_path: Path) -> None:
 
 
 def test_not_found_is_a_lookup_error() -> None:
-    """Callers catch ``LookupError`` where absence is expected; keep that true."""
     assert issubclass(TaskNotFoundError, LookupError)
 
 
-def test_find_task_returns_the_validated_model(tmp_path: Path) -> None:
-    _write(tmp_path, "task.yaml", yaml.safe_dump(_document(id="task-001")))
+def test_find_task_returns_the_validated_model(
+    tmp_path: Path, sample_task_document: dict[str, Any]
+) -> None:
+    (tmp_path / "task.yaml").write_text(yaml.safe_dump(sample_task_document), encoding=UTF8)
     assert find_task(tmp_path, "task-001").id == "task-001"
 
 
-def test_an_unparsable_sibling_does_not_hide_a_valid_task(tmp_path: Path) -> None:
-    """Scanning for one task must not be defeated by a broken neighbour."""
-    _write(tmp_path, "aaa-broken.yaml", "id: [unclosed\n")
-    _write(tmp_path, "zzz-valid.yaml", yaml.safe_dump(_document(id="task-001")))
+def test_an_unparsable_sibling_does_not_hide_a_valid_task(
+    tmp_path: Path, sample_task_document: dict[str, Any]
+) -> None:
+    (tmp_path / "aaa-broken.yaml").write_text("id: [unclosed\n", encoding=UTF8)
+    (tmp_path / "zzz-valid.yaml").write_text(yaml.safe_dump(sample_task_document), encoding=UTF8)
     assert find_task_file(tmp_path, "task-001").name == "zzz-valid.yaml"
 
 
-def test_load_suite_refuses_to_skip_a_broken_file(tmp_path: Path) -> None:
-    """The opposite of ``find_task_file``: a full load must not silently drop
-    a task, or a broken suite would score against fewer tasks than it claims."""
-    _write(tmp_path, "valid.yaml", yaml.safe_dump(_document()))
-    _write(tmp_path, "broken.yaml", "id: [unclosed\n")
+def test_load_suite_refuses_to_skip_a_broken_file(
+    tmp_path: Path, sample_task_document: dict[str, Any]
+) -> None:
+    (tmp_path / "valid.yaml").write_text(yaml.safe_dump(sample_task_document), encoding=UTF8)
+    (tmp_path / "broken.yaml").write_text("id: [unclosed\n", encoding=UTF8)
     with pytest.raises(TaskLoadError) as excinfo:
         load_suite(tmp_path)
     assert excinfo.value.path.name == "broken.yaml"

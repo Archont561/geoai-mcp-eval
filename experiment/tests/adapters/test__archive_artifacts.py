@@ -4,12 +4,23 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from hypothesis import given
+from hypothesis import strategies as st
+
 from experiment.adapters._archive_artifacts import (
     build_artifact_refs,
     collect_dir_files,
     infer_artifact_kind,
     sha256_bytes,
 )
+
+
+@given(data=st.binary(max_size=512))
+def test_sha256_bytes_is_deterministic_64_hex_chars(data: bytes) -> None:
+    digest = sha256_bytes(data)
+    assert len(digest) == 64
+    assert all(ch in "0123456789abcdef" for ch in digest)
+    assert digest == sha256_bytes(data)
 
 
 def test_collect_dir_build_refs_and_hash(tmp_path: Path) -> None:

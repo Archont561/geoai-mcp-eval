@@ -3,47 +3,15 @@
 from __future__ import annotations
 
 import json
-import shutil
+import os
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
 from experiment_plugin import review, session
 
-TASK_ROOT = Path(__file__).resolve().parents[2] / "experiment" / "tasks"
 UTF8 = "utf-8"
-
-
-def copy_suite(tmp_path: Path) -> Path:
-    suite = tmp_path / "tasks"
-    suite.mkdir(parents=True)
-    yaml_src = TASK_ROOT / "prep-axis-order-001.yaml"
-    shutil.copy2(yaml_src, suite / yaml_src.name)
-    fixture_src = session.task_fixture(yaml_src)
-    fixture_rel = fixture_src.relative_to(TASK_ROOT)
-    (suite / fixture_rel).parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(fixture_src, suite / fixture_rel)
-    return suite
-
-
-def make_recorded_take(
-    tmp_path: Path,
-    *,
-    processing_connected: bool = True,
-    with_execution: bool = True,
-) -> Path:
-    suite = copy_suite(tmp_path)
-    recorder = session.start_session("prep-axis-order-001", suite)
-    hooks = ["project", "processing"] if processing_connected else ["project"]
-    recorder.set_hook_status(hooks, [], processing_connected=processing_connected)
-    if with_execution:
-        recorder.record_processing_execution(
-            "native:reprojectlayer",
-            parameters={"TARGET_CRS": "EPSG:2180"},
-            entry_timestamp="2026-11-24T12:00:05+00:00",
-        )
-    recorder.finish()
-    return recorder.output_dir
 
 
 def test_parse_processing_log_handles_qgis_expressions_and_legacy_pipe(tmp_path: Path) -> None:
@@ -85,13 +53,15 @@ def test_parse_processing_log_empty_file_is_valid_zero_algorithms(tmp_path: Path
     assert errors == []
 
 
-def test_review_pure_manual_with_empty_processing_log_verifies_empty_tools(tmp_path: Path) -> None:
-    take = make_recorded_take(tmp_path, processing_connected=False, with_execution=False)
+def test_review_pure_manual_with_empty_processing_log_verifies_empty_tools(
+    tmp_path: Path,
+    recorded_take_without_processing: Path,
+) -> None:
     empty_log = tmp_path / "processing.log"
     empty_log.write_text("", encoding=UTF8)
 
     result = review.review_session(
-        take,
+        recorded_take_without_processing,
         manual_actions=[review.ReviewActionInput(action_group="digitized boundary manually")],
         processing_log=empty_log,
         mark_reviewed=True,
@@ -104,12 +74,16 @@ def test_review_pure_manual_with_empty_processing_log_verifies_empty_tools(tmp_p
     assert result.trajectory_entries[0]["tool"] is None
 
 
-def test_review_incomplete_processing_log_keeps_metrics_pending(tmp_path: Path) -> None:
-    take = make_recorded_take(tmp_path, processing_connected=False, with_execution=False)
+def test_review_incomplete_processing_log_keeps_metrics_pending(
+    tmp_path: Path,
+    recorded_take_without_processing: Path,
+) -> None:
     bad_log = tmp_path / "processing.log"
     bad_log.write_text("ALGORITHM|2026-11-24 12:03:00|corrupt-payload\n", encoding=UTF8)
 
-    result = review.review_session(take, processing_log=bad_log, mark_reviewed=True)
+    result = review.review_session(
+        recorded_take_without_processing, processing_log=bad_log, mark_reviewed=True
+    )
     assert result.record["session"]["metrics_status"] == "pending_review"
     assert "processing_history_incomplete" in result.record["study_metrics"]["pending_reasons"]
     assert result.record["session"]["steps"] is None
@@ -118,8 +92,8 @@ def test_review_incomplete_processing_log_keeps_metrics_pending(tmp_path: Path) 
 
 def test_review_deduplicates_matching_processing_log_entry_and_is_idempotent(
     tmp_path: Path,
+    recorded_take: Path,
 ) -> None:
-    take = make_recorded_take(tmp_path, processing_connected=True, with_execution=True)
     log_path = tmp_path / "processing.log"
     log_path.write_text(
         'ALGORITHM|2026-11-24T12:00:05+00:00|processing.run("native:reprojectlayer", '
@@ -127,13 +101,13 @@ def test_review_deduplicates_matching_processing_log_entry_and_is_idempotent(
         encoding=UTF8,
     )
     first = review.review_session(
-        take,
+        recorded_take,
         manual_actions=[{"action_group": "saved output", "tool": "qgis:save-features-as"}],
         processing_log=log_path,
         mark_reviewed=True,
     )
     second = review.review_session(
-        take,
+        recorded_take,
         manual_actions=[{"action_group": "saved output", "tool": "qgis:save-features-as"}],
         processing_log=log_path,
         mark_reviewed=True,
@@ -143,7 +117,10 @@ def test_review_deduplicates_matching_processing_log_entry_and_is_idempotent(
     assert len(second.trajectory_entries) == 2
 
 
-def test_review_rejects_invalid_sessions_and_inputs(tmp_path: Path) -> None:
+def test_review_rejects_invalid_sessions_and_inputs(
+    tmp_path: Path,
+    recorded_take: Path,
+) -> None:
     with pytest.raises(review.ReviewError, match="does not exist"):
         review.review_session(tmp_path / "missing")
 
@@ -152,10 +129,12 @@ def test_review_rejects_invalid_sessions_and_inputs(tmp_path: Path) -> None:
     with pytest.raises(review.ReviewError, match="human-reference-record.json"):
         review.review_session(empty_dir)
 
-    take = make_recorded_take(tmp_path)
-    (take / "events.jsonl").unlink()
+    with pytest.raises(ValueError, match="action_group"):
+        review.review_session(recorded_take, manual_actions=[{"action_group": "   "}])
+
+    (recorded_take / "events.jsonl").unlink()
     with pytest.raises(review.ReviewError, match="events.jsonl"):
-        review.review_session(take)
+        review.review_session(recorded_take)
 
     bad_version = tmp_path / "v1"
     bad_version.mkdir()
@@ -165,10 +144,6 @@ def test_review_rejects_invalid_sessions_and_inputs(tmp_path: Path) -> None:
     )
     with pytest.raises(review.ReviewError, match="record_version"):
         review.review_session(bad_version)
-
-    take2 = make_recorded_take(tmp_path / "t2")
-    with pytest.raises(ValueError, match="action_group"):
-        review.review_session(take2, manual_actions=[{"action_group": "   "}])
 
 
 def test_review_cli_returns_nonzero_on_errors(tmp_path: Path, capsys) -> None:
@@ -182,9 +157,9 @@ def test_review_cli_returns_nonzero_on_errors(tmp_path: Path, capsys) -> None:
 
 def test_review_preserves_session_logged_manual_actions_and_handles_corrupt_inputs(
     tmp_path: Path,
+    copied_pilot_suite: Path,
 ) -> None:
-    suite = copy_suite(tmp_path / "keep")
-    recorder = session.start_session("prep-axis-order-001", suite)
+    recorder = session.start_session("prep-axis-order-001", copied_pilot_suite)
     recorder.set_hook_status(["project", "processing"], [], processing_connected=True)
     recorder.record_manual_action_group("styled layer", tool=None)
     recorder.finish()
@@ -222,17 +197,10 @@ def test_review_preserves_session_logged_manual_actions_and_handles_corrupt_inpu
 
 
 def test_review_atomic_write_cleans_up_temp_file_on_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    recorded_take: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import os
-
-    take = make_recorded_take(tmp_path)
-
-    def boom(_src: Path, _dst: Path) -> None:
-        raise OSError("disk full")
-
-    monkeypatch.setattr(os, "replace", boom)
+    monkeypatch.setattr(os, "replace", MagicMock(side_effect=OSError("disk full")))
     with pytest.raises(OSError, match="disk full"):
-        review.review_session(take, mark_reviewed=True)
-    assert not list(take.glob(".human-reference-record-reviewed-*.tmp"))
-    assert not (take / review.REVIEWED_RECORD_FILENAME).exists()
+        review.review_session(recorded_take, mark_reviewed=True)
+    assert not list(recorded_take.glob(".human-reference-record-reviewed-*.tmp"))
+    assert not (recorded_take / review.REVIEWED_RECORD_FILENAME).exists()

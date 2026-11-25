@@ -6,46 +6,26 @@ import json
 import shutil
 from collections.abc import Sequence
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from pydantic import ValidationError
 
+from experiment.adapters import paths
 from experiment.adapters.run_archive import RunArchive
 from experiment.adapters.subprocess_runner import CommandResult
 from experiment.analysis import GitHubRunClient, GitHubRunError, RunDataset, WorkflowRunSummary
-from experiment.services import archive as archive_service
-from experiment.services import runs
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-REAL_TASKS = REPO_ROOT / "experiment" / "tasks"
 
 
-def _build_packed_pilot_zip(tmp_path: Path) -> Path:
-    out_dir = tmp_path / "pilot-run"
-    spec = runs.parse_run_spec(
-        runs.RunSpecInput(driver="scripted", arm="both", task="all", backend="local")
-    )
-    runs.run_experiment(REAL_TASKS, spec, out_dir)
-    zip_path = tmp_path / "experiment-run-pilot-001.zip"
-    archive_service.pack_archive(
-        archive_service.PackOptions(
-            source_dir=out_dir,
-            output_zip=zip_path,
-            run_id="pilot-001",
-            stage="pilot",
-            run_harvest=False,
-        )
-    )
-    return zip_path
-
-
-def test_github_run_client_download_cache_list_latest_and_offline(tmp_path: Path) -> None:
-    source_zip = _build_packed_pilot_zip(tmp_path / "src")
-    calls: list[list[str]] = []
-
-    def fake_runner(argv: Sequence[str]) -> CommandResult:
+def test_github_run_client_download_cache_list_latest_and_offline(
+    tmp_path: Path,
+    packed_pilot_zip: Path,
+    fake_subprocess_runner: MagicMock,
+) -> None:
+    def dispatch(argv: Sequence[str]) -> CommandResult:
         cmd = list(argv)
-        calls.append(cmd)
         if cmd[:3] == ["gh", "run", "list"]:
             payload = [
                 {
@@ -63,14 +43,15 @@ def test_github_run_client_download_cache_list_latest_and_offline(tmp_path: Path
             dir_idx = cmd.index("--dir") + 1
             dest = Path(cmd[dir_idx]) / "experiment-run-987654321-deadbeef"
             dest.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source_zip, dest / "experiment-run-987654321-deadbeef.zip")
+            shutil.copyfile(packed_pilot_zip, dest / "experiment-run-987654321-deadbeef.zip")
             return CommandResult(returncode=0)
         return CommandResult(returncode=1, stderr=f"unexpected command: {cmd}")
 
+    fake_subprocess_runner.side_effect = dispatch
     client = GitHubRunClient(
         repo="Archont561/geoai-mcp-eval",
         cache_dir=tmp_path / "cache",
-        runner=fake_runner,
+        runner=fake_subprocess_runner,
     )
 
     runs_list = client.list_runs(limit=5, branch="main")
@@ -79,57 +60,86 @@ def test_github_run_client_download_cache_list_latest_and_offline(tmp_path: Path
 
     with client.load_latest(branch="main") as ds1:
         assert len(ds1.measurements_df()) == 6
-    assert sum(1 for c in calls if c[:3] == ["gh", "run", "download"]) == 1
+    download_calls = [
+        call.args[0]
+        for call in fake_subprocess_runner.call_args_list
+        if list(call.args[0])[:3] == ["gh", "run", "download"]
+    ]
+    assert len(download_calls) == 1
 
     with client.load_run(987654321) as ds2:
         assert len(ds2.measurements_df()) == 6
-    assert sum(1 for c in calls if c[:3] == ["gh", "run", "download"]) == 1
+    download_calls = [
+        call.args[0]
+        for call in fake_subprocess_runner.call_args_list
+        if list(call.args[0])[:3] == ["gh", "run", "download"]
+    ]
+    assert len(download_calls) == 1
 
     client.download_run(987654321, cache="refresh")
-    assert sum(1 for c in calls if c[:3] == ["gh", "run", "download"]) == 2
+    download_calls = [
+        call.args[0]
+        for call in fake_subprocess_runner.call_args_list
+        if list(call.args[0])[:3] == ["gh", "run", "download"]
+    ]
+    assert len(download_calls) == 2
 
-    with client.load_zip(source_zip) as offline:
+    with client.load_zip(packed_pilot_zip) as offline:
         assert offline.run.run_id == "pilot-001"
-        with RunArchive.open(source_zip) as arc:
+        with RunArchive.open(packed_pilot_zip) as arc:
             wrapped = RunDataset.from_archive(arc)
             assert len(wrapped.measurements_df()) == 6
 
 
-def test_github_run_client_errors(tmp_path: Path) -> None:
-    def failing_runner(_argv: Sequence[str]) -> CommandResult:
-        return CommandResult(returncode=1, stderr="auth required")
-
-    client = GitHubRunClient(cache_dir=tmp_path / "cache", runner=failing_runner)
+def test_github_run_client_errors(tmp_path: Path, fake_subprocess_runner: MagicMock) -> None:
+    fake_subprocess_runner.return_value = CommandResult(returncode=1, stderr="auth required")
+    client = GitHubRunClient(cache_dir=tmp_path / "cache", runner=fake_subprocess_runner)
     with pytest.raises(GitHubRunError, match="auth required"):
         client.list_runs()
 
-    def empty_runner(argv: Sequence[str]) -> CommandResult:
-        if list(argv)[:3] == ["gh", "run", "list"]:
-            return CommandResult(returncode=0, stdout="[]")
-        return CommandResult(returncode=0, stdout="")
-
-    empty_client = GitHubRunClient(cache_dir=tmp_path / "cache2", runner=empty_runner)
+    fake_subprocess_runner.side_effect = lambda argv: (
+        CommandResult(returncode=0, stdout="[]")
+        if list(argv)[:3] == ["gh", "run", "list"]
+        else CommandResult(returncode=0, stdout="")
+    )
+    empty_client = GitHubRunClient(cache_dir=tmp_path / "cache2", runner=fake_subprocess_runner)
     with pytest.raises(GitHubRunError, match="no successful completed runs"):
         empty_client.load_latest()
     with pytest.raises(GitHubRunError, match="no experiment-run"):
         empty_client.download_run(111)
 
 
-def test_github_run_client_default_cache_dir_and_summary_model() -> None:
-    from experiment.adapters import paths
-
-    client = GitHubRunClient()
-    assert client.cache_dir == paths.find_repo_root() / ".cache" / "gh-runs"
-
+@given(
+    database_id=st.integers(min_value=1, max_value=10**12),
+    head_sha=st.text(alphabet="0123456789abcdef", min_size=7, max_size=40),
+    title=st.text(min_size=1, max_size=40),
+)
+def test_workflow_run_summary_roundtrips_for_arbitrary_runs(
+    database_id: int, head_sha: str, title: str
+) -> None:
     summary = WorkflowRunSummary(
-        database_id=42,
-        head_sha="abc",
+        database_id=database_id,
+        head_sha=head_sha,
         status="completed",
         conclusion="success",
         created_at="2026-11-24T12:00:00Z",
-        display_title="Run",
-        url="https://example.invalid/42",
+        display_title=title,
+        url=f"https://example.invalid/{database_id}",
     )
     assert WorkflowRunSummary.model_validate_json(summary.model_dump_json()) == summary
+
+
+def test_github_run_client_default_cache_dir_and_extra_field_rejection() -> None:
+    client = GitHubRunClient()
+    assert client.cache_dir == paths.find_repo_root() / ".cache" / "gh-runs"
     with pytest.raises(ValidationError):
-        WorkflowRunSummary(**summary.model_dump(), extra=1)  # type: ignore[call-arg]
+        WorkflowRunSummary(
+            database_id=42,
+            head_sha="abc",
+            status="completed",
+            conclusion="success",
+            created_at="2026-11-24T12:00:00Z",
+            display_title="Run",
+            url="https://example.invalid/42",
+            extra=1,  # type: ignore[call-arg]
+        )

@@ -26,35 +26,13 @@ from experiment.domain.run import (
     TrialMeasurement,
     TrialRecord,
 )
-from experiment.services import archive as archive_service
-from experiment.services import runs
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 REAL_TASKS = REPO_ROOT / "experiment" / "tasks"
 
 
-def _build_packed_pilot_zip(tmp_path: Path) -> Path:
-    out_dir = tmp_path / "pilot-run"
-    spec = runs.parse_run_spec(
-        runs.RunSpecInput(driver="scripted", arm="both", task="all", backend="local")
-    )
-    runs.run_experiment(REAL_TASKS, spec, out_dir)
-    zip_path = tmp_path / "experiment-run-pilot-001.zip"
-    archive_service.pack_archive(
-        archive_service.PackOptions(
-            source_dir=out_dir,
-            output_zip=zip_path,
-            run_id="pilot-001",
-            stage="pilot",
-            run_harvest=False,
-        )
-    )
-    return zip_path
-
-
-def test_run_dataset_projections_and_lazy_trial_inspection(tmp_path: Path) -> None:
-    zip_path = _build_packed_pilot_zip(tmp_path)
-    with RunDataset.from_zip(zip_path) as dataset:
+def test_run_dataset_projections_and_lazy_trial_inspection(packed_pilot_zip: Path) -> None:
+    with RunDataset.from_zip(packed_pilot_zip) as dataset:
         assert dataset.run.run_id == "pilot-001"
 
         meas = dataset.measurements_df()

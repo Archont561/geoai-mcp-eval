@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from experiment.domain.run.metrics import _TranscriptTally, extract_transcript_metrics
@@ -53,17 +55,53 @@ def test_extract_transcript_metrics_counts_calls_repairs_and_violations() -> Non
     assert empty.tokens.total_tokens is None
 
 
-def test_transcript_tally_pydantic_validation() -> None:
+@given(
+    tool_counts=st.lists(st.integers(min_value=0, max_value=4), max_size=8),
+    wall_s=st.floats(min_value=0.0, max_value=600.0, allow_nan=False, allow_infinity=False),
+)
+def test_extract_transcript_metrics_counts_arbitrary_assistant_turns_and_tool_calls(
+    tool_counts: list[int], wall_s: float
+) -> None:
+    entries = [
+        {
+            "role": "assistant",
+            "content": "step",
+            "tool_calls": [
+                {"id": str(i), "function": {"name": f"op_{i}", "arguments": "{}"}}
+                for i in range(n_tools)
+            ],
+        }
+        for n_tools in tool_counts
+    ]
+    metrics = extract_transcript_metrics(entries, wall_seconds=wall_s)
+    assert metrics.llm_calls == len(tool_counts)
+    assert metrics.tool_calls == sum(tool_counts)
+    assert metrics.wall_seconds == wall_s
+
+
+@given(
+    turns=st.integers(min_value=0, max_value=50),
+    calls=st.integers(min_value=0, max_value=100),
+    violations=st.integers(min_value=0, max_value=50),
+    repairs=st.integers(min_value=0, max_value=50),
+)
+def test_transcript_tally_roundtrips_non_negative_counts(
+    turns: int, calls: int, violations: int, repairs: int
+) -> None:
     tally = _TranscriptTally(
-        assistant_turns=1,
-        tool_calls=2,
-        schema_violations=0,
-        repair_turns=0,
+        assistant_turns=turns,
+        tool_calls=calls,
+        schema_violations=violations,
+        repair_turns=repairs,
     )
     assert _TranscriptTally.model_validate_json(tally.model_dump_json()) == tally
+
+
+@given(neg=st.integers(max_value=-1))
+def test_transcript_tally_rejects_negative_counts(neg: int) -> None:
     with pytest.raises(ValidationError):
         _TranscriptTally(
-            assistant_turns=-1,
+            assistant_turns=neg,
             tool_calls=0,
             schema_violations=0,
             repair_turns=0,

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from experiment.domain.task_validation import (
@@ -74,15 +76,23 @@ def test_domain_task_validation_pure_helpers() -> None:
     assert any("required pilot trap" in i.message for i in issues)
 
 
-def test_validation_models_roundtrip_and_strict() -> None:
-    issue = ValidationIssue(path="tasks/a.yaml", message="bad")
+@given(
+    task_count=st.integers(min_value=0, max_value=50),
+    messages=st.lists(st.text(min_size=1, max_size=30), max_size=5),
+)
+def test_validation_report_passed_iff_no_issues_and_roundtrips(
+    task_count: int, messages: list[str]
+) -> None:
+    issues = tuple(ValidationIssue(path="tasks/a.yaml", message=msg) for msg in messages)
     report = ValidationReport(
-        task_count=1,
+        task_count=task_count,
         traps_found=frozenset({"crs-axis-order"}),
-        issues=(issue,),
+        issues=issues,
     )
-    assert report.passed is False
-    reloaded = ValidationReport.model_validate_json(report.model_dump_json())
-    assert reloaded == report
+    assert report.passed is (len(issues) == 0)
+    assert ValidationReport.model_validate_json(report.model_dump_json()) == report
+
+
+def test_validation_issue_forbids_extra_fields() -> None:
     with pytest.raises(ValidationError):
         ValidationIssue(path="x", message="y", extra=1)  # type: ignore[call-arg]

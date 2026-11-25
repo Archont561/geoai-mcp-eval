@@ -10,54 +10,15 @@ import pytest
 from experiment.adapters import _ollama_chat, harness_io, task_repository
 from experiment.adapters import openrouter as openrouter_adapter
 from experiment.domain.backend import BackendProfile
-from experiment.domain.task import Task
+from experiment.domain.task import Fixtures, Task
 from experiment.services import runs
 
 TASK_ROOT = harness_io.TASK_ROOT
 
 
-def _task_document(**overrides: object) -> Task:
-    document = {
-        "schema_version": 1,
-        "id": "fixture-task",
-        "title": "fixture task",
-        "prompt": "fixture prompt",
-        "family": "A",
-        "difficulty_rubric": {
-            "tier": 2,
-            "n_tools_human": 1,
-            "n_steps_human": 1,
-            "expressible": "medium",
-        },
-        "provenance": {
-            "source": "constructed",
-            "source_url": "https://example.invalid",
-            "source_file": "fixture.geojson",
-            "source_commit": "0" * 40,
-            "license": "CC0",
-            "contamination": "constructed",
-        },
-        "fixtures": {"input": "fixtures/fixture.geojson"},
-        "human_baseline": {
-            "status": "pending",
-            "artifact_dir": "baselines/fixture",
-            "produced_with": None,
-            "human_time_min": None,
-            "human_steps": None,
-            "human_tools": [],
-        },
-        "oracle": {"determinism_runs": 3, "assertions": []},
-        "budget_bounds": {"max_tool_calls": 10, "max_wall_s": 60},
-        "runs": 2,
-        "required_traps": [],
-    }
-    document.update(overrides)
-    return Task.model_validate(document)
-
-
-def test_fixture_path_errors(tmp_path: Path) -> None:
+def test_fixture_path_errors(tmp_path: Path, sample_task: Task) -> None:
     task_path = tmp_path / "t.yaml"
-    task = _task_document(fixtures={"input": "missing.geojson"})
+    task = sample_task.model_copy(update={"fixtures": Fixtures(input="missing.geojson")})
     with pytest.raises(ValueError, match="fixture"):
         harness_io.fixture_path(task_path, task)
 
@@ -126,19 +87,20 @@ def test_run_python_sandboxed_geopandas_and_pyproj_have_clean_stderr() -> None:
     assert completed.stderr == ""
 
 
-def test_create_chat_gateway_dispatches_by_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_create_chat_gateway_dispatches_by_provider(
+    monkeypatch: pytest.MonkeyPatch,
+    openrouter_profile: BackendProfile,
+    ollama_profile: BackendProfile,
+) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-key")
-    or_prof = BackendProfile(
-        base_url="https://openrouter.ai/api/v1",
-        model="qwen/qwen-2.5-coder-32b-instruct:free",
-        api_key_env="OPENROUTER_API_KEY",
-    )
-    ollama_prof = BackendProfile(base_url="http://127.0.0.1:11434/v1", model="qwen2.5:3b")
     custom_prof = BackendProfile(
         base_url="https://api.example.invalid/v1", model="custom", api_key_env="OPENROUTER_API_KEY"
     )
     assert isinstance(
-        harness_io.create_chat_gateway(or_prof), openrouter_adapter.OpenRouterChatGateway
+        harness_io.create_chat_gateway(openrouter_profile),
+        openrouter_adapter.OpenRouterChatGateway,
     )
-    assert isinstance(harness_io.create_chat_gateway(ollama_prof), _ollama_chat.OllamaChatGateway)
+    assert isinstance(
+        harness_io.create_chat_gateway(ollama_profile), _ollama_chat.OllamaChatGateway
+    )
     assert isinstance(harness_io.create_chat_gateway(custom_prof), harness_io.HttpChatGateway)

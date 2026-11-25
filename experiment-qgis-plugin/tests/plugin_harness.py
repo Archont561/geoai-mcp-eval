@@ -27,11 +27,13 @@ never for ``experiment_plugin`` itself.
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import types
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from qgis_sdk.adapters.desktop import host
@@ -618,6 +620,59 @@ def read_events(output_dir: Path) -> list[dict[str, Any]]:
 def read_record(output_dir: Path) -> dict[str, Any]:
     """Parse ``human-reference-record.json`` from a session directory."""
     return json.loads((output_dir / "human-reference-record.json").read_text(encoding=UTF8))
+
+
+@pytest.fixture
+def fake_qgis_modules(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Install mock ``qgis.core`` and ``qgis.utils`` modules via ``unittest.mock.MagicMock``."""
+    core = types.ModuleType("qgis.core")
+    utils = types.ModuleType("qgis.utils")
+    qgs_project = MagicMock(name="QgsProject")
+    qgs_project.instance.side_effect = RuntimeError("project instance unavailable")
+    core.QgsProject = qgs_project  # type: ignore[attr-defined]
+    utils.iface = None  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "qgis.core", core)
+    monkeypatch.setitem(sys.modules, "qgis.utils", utils)
+
+    bundle = MagicMock(name="fake_qgis_modules")
+    bundle.core = core
+    bundle.utils = utils
+    bundle.QgsProject = qgs_project
+    return bundle
+
+
+@pytest.fixture
+def copied_pilot_suite(tmp_path: Path) -> Path:
+    """Isolated copy of the shipped pilot tasks + fixtures under ``tmp_path``."""
+    suite = tmp_path / "pilot-suite"
+    suite.mkdir(parents=True)
+    for yaml_file in TASK_ROOT.glob("*.yaml"):
+        shutil.copy2(yaml_file, suite / yaml_file.name)
+    shutil.copytree(TASK_ROOT / "fixtures", suite / "fixtures")
+    return suite
+
+
+@pytest.fixture
+def recorded_take(copied_pilot_suite: Path) -> Path:
+    """Completed human-baseline take with one recorded processing execution."""
+    recorder = session.start_session("prep-axis-order-001", copied_pilot_suite)
+    recorder.set_hook_status(["project", "processing"], [], processing_connected=True)
+    recorder.record_processing_execution(
+        "native:reprojectlayer",
+        parameters={"TARGET_CRS": "EPSG:2180"},
+        entry_timestamp="2026-11-24T12:00:05+00:00",
+    )
+    recorder.finish()
+    return recorder.output_dir
+
+
+@pytest.fixture
+def recorded_take_without_processing(copied_pilot_suite: Path) -> Path:
+    """Completed human-baseline take with no processing hook and no executions."""
+    recorder = session.start_session("prep-axis-order-001", copied_pilot_suite)
+    recorder.set_hook_status(["project"], [], processing_connected=False)
+    recorder.finish()
+    return recorder.output_dir
 
 
 __all__ = [

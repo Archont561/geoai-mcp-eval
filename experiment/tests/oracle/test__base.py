@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from experiment.oracle._base import (
@@ -17,31 +19,51 @@ from experiment.oracle._base import (
     safe_path,
 )
 
+PATH_SEG = st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789_-", min_size=1, max_size=10)
 
-def test_oracle_models_to_dict_and_pydantic_validation() -> None:
-    check = AssertionResult(assertion_id="c1", passed=True, message="ok")
-    verdict = OracleVerdict(passed=True, checks=(check,))
+
+@given(
+    assertion_id=st.text(min_size=1, max_size=24),
+    passed=st.booleans(),
+    message=st.text(max_size=60),
+    required_runs=st.integers(min_value=0, max_value=10),
+)
+def test_oracle_models_to_dict_and_roundtrip_for_arbitrary_verdicts(
+    assertion_id: str, passed: bool, message: str, required_runs: int
+) -> None:
+    check = AssertionResult(assertion_id=assertion_id, passed=passed, message=message)
+    verdict = OracleVerdict(passed=passed, checks=(check,))
     assert verdict.to_dict() == {
-        "passed": True,
-        "checks": [{"assertion_id": "c1", "passed": True, "message": "ok"}],
+        "passed": passed,
+        "checks": [{"assertion_id": assertion_id, "passed": passed, "message": message}],
     }
     assert OracleVerdict.model_validate_json(verdict.model_dump_json()) == verdict
 
     report = DeterminismReport(
-        passed=True,
-        required_runs=3,
-        consistent=True,
+        passed=passed,
+        required_runs=required_runs,
+        consistent=passed,
         run_results=(verdict.to_dict(),),
         issues=(),
     )
     assert DeterminismReport.model_validate_json(report.model_dump_json()) == report
 
+
+def test_oracle_models_reject_extra_fields_and_negative_runs() -> None:
     with pytest.raises(ValidationError):
         AssertionResult(assertion_id="c1", passed=True, message="ok", bogus=1)  # type: ignore[call-arg]
     with pytest.raises(ValidationError):
         DeterminismReport(
             passed=False, required_runs=-1, consistent=False, run_results=(), issues=()
         )
+
+
+@given(segments=st.lists(PATH_SEG, min_size=1, max_size=4))
+@settings(max_examples=30, suppress_health_check=[HealthCheck.function_scoped_fixture])
+def test_safe_path_contains_arbitrary_relative_paths(tmp_path: Path, segments: list[str]) -> None:
+    rel = "/".join(segments)
+    resolved = safe_path(tmp_path, rel)
+    assert resolved.is_relative_to(tmp_path.resolve())
 
 
 def test_safe_path_read_json_and_geojson_features(tmp_path: Path) -> None:

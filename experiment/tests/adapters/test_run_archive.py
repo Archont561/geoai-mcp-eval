@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import zipfile
 from pathlib import Path
 
@@ -15,7 +14,6 @@ from experiment.adapters.run_archive import (
     collect_dir_files,
 )
 from experiment.domain.run import (
-    AssertionResult,
     EnvironmentPin,
     ExperimentRun,
     ModelPin,
@@ -27,54 +25,11 @@ from experiment.domain.run import (
 )
 
 
-def _make_trial_with_files(
-    *,
-    task_id: str = "analysis-de9im-001",
-    paradigm: str = "typed_mcp",
-    enforcement: str = "semantic_repair",
-    rep: int = 1,
-) -> tuple[TrialRecord, TrialMeasurement, dict[str, bytes]]:
-    transcript_lines = [
-        json.dumps({"role": "meta", "task": task_id, "custom_tag": "keep-me"}),
-        json.dumps({"role": "assistant", "content": "final answer", "cache_hit": False}),
-    ]
-    files = {
-        "transcript.jsonl": ("\n".join(transcript_lines) + "\n").encode("utf-8"),
-        "result.json": json.dumps({"relation": "touches", "passed": True}).encode("utf-8"),
-        "oracle-passes.json": json.dumps({"passes": 3, "consistent": True}).encode("utf-8"),
-        "ollama-serve.log": b"ollama ready\n",
-    }
-    key = TrialKey(
-        task_id=task_id,
-        paradigm=paradigm,  # type: ignore[arg-type]
-        enforcement_level=enforcement,  # type: ignore[arg-type]
-        repetition=rep,
-    )
-    treatment = Treatment(
-        paradigm=paradigm,  # type: ignore[arg-type]
-        enforcement_level=enforcement,  # type: ignore[arg-type]
-    )
-    trial = TrialRecord(
-        key=key,
-        treatment=treatment,
-        driver="ollama",
-        model_tag="qwen2.5:3b",
-        status="ok",
-        artifacts=build_artifact_refs(files),
-    )
-    measurement = TrialMeasurement.from_assertions(
-        key=key,
-        assertions=[
-            AssertionResult(
-                assertion_id="touches", predicate="touches", tier="spatial", passed=True
-            )
-        ],
-    )
-    return trial, measurement, files
-
-
-def test_run_archive_round_trip_and_lazy_hydration(tmp_path: Path) -> None:
-    trial, measurement, files = _make_trial_with_files()
+def test_run_archive_round_trip_and_lazy_hydration(
+    tmp_path: Path,
+    sample_archive_trial: tuple[TrialRecord, TrialMeasurement, dict[str, bytes]],
+) -> None:
+    trial, measurement, files = sample_archive_trial
     run = ExperimentRun(
         run_id="run-100",
         stage="pilot",
@@ -117,8 +72,11 @@ def test_run_archive_round_trip_and_lazy_hydration(tmp_path: Path) -> None:
         archive.verify_all()
 
 
-def test_run_archive_detects_tampered_or_missing_member(tmp_path: Path) -> None:
-    trial, measurement, files = _make_trial_with_files()
+def test_run_archive_detects_tampered_or_missing_member(
+    tmp_path: Path,
+    sample_archive_trial: tuple[TrialRecord, TrialMeasurement, dict[str, bytes]],
+) -> None:
+    trial, measurement, files = sample_archive_trial
     run = ExperimentRun(
         run_id="run-tamper",
         trials={trial.trial_id: trial},
@@ -149,11 +107,20 @@ def test_run_archive_detects_tampered_or_missing_member(tmp_path: Path) -> None:
         RunArchive.write(tmp_path / "incomplete.zip", run, trial_files={})
 
 
-def test_run_archive_merge_archives_packs_fragments_into_one_zip(tmp_path: Path) -> None:
-    trial_a, meas_a, files_a = _make_trial_with_files(
-        paradigm="typed_mcp", enforcement="semantic_repair", rep=1
+def test_run_archive_merge_archives_packs_fragments_into_one_zip(
+    tmp_path: Path,
+    sample_archive_trial: tuple[TrialRecord, TrialMeasurement, dict[str, bytes]],
+) -> None:
+    trial_a, meas_a, files_a = sample_archive_trial
+    key_b = trial_a.key.model_copy(update={"paradigm": "codegen", "enforcement_level": "none"})
+    trial_b = trial_a.model_copy(
+        update={
+            "key": key_b,
+            "treatment": Treatment(paradigm="codegen", enforcement_level="none"),
+        }
     )
-    trial_b, meas_b, files_b = _make_trial_with_files(paradigm="codegen", enforcement="none", rep=1)
+    meas_b = meas_a.model_copy(update={"key": key_b, "trial_id": key_b.slug})
+    files_b = dict(files_a)
 
     preflight_zip = tmp_path / "frag-preflight.zip"
     RunArchive.write(
