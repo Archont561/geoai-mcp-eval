@@ -62,13 +62,33 @@ def list_tasks(root: Path = ROOT_OPTION, as_json: bool = JSON_OPTION) -> None:
     rich_console.print(table)
 
 
+def _task_detail_payload(path: Path, task: object) -> dict[str, object]:
+    return {
+        "file": path.name,
+        "id": task.id,
+        "title": task.title,
+        "family": task.family,
+        "tier": task.difficulty_rubric.tier,
+        "expressible": task.difficulty_rubric.expressible,
+        "contamination": task.provenance.contamination,
+        "fixture_input": task.fixture_input,
+        "required_traps": list(task.required_traps),
+        "human_baseline_status": task.human_baseline.status,
+        "prompt": task.prompt,
+        "assertions": [dict(a) for a in task.oracle.assertions],
+    }
+
+
 @app.command()
-def show(task_id: str = TASK_ID_ARG, root: Path = ROOT_OPTION) -> None:
+def show(task_id: str = TASK_ID_ARG, root: Path = ROOT_OPTION, as_json: bool = JSON_OPTION) -> None:
     """Display detailed metadata, prompt, fixtures, and assertions for one task."""
     try:
         path, task = tasks_service.get_task(task_id, root)
     except tasks_service.TaskNotFoundError as exc:
         raise typer.BadParameter(f"unknown task ID: {task_id}") from exc
+    if as_json:
+        typer.echo(json.dumps(_task_detail_payload(path, task), indent=2, sort_keys=True))
+        return
     assertion_lines = "\n".join(
         f"  - {a.get('id', '?')} ({a.get('type', '?')})" for a in task.oracle.assertions
     )
@@ -88,9 +108,20 @@ def show(task_id: str = TASK_ID_ARG, root: Path = ROOT_OPTION) -> None:
 
 
 @app.command()
-def validate(root: Path = ROOT_OPTION) -> None:
+def validate(root: Path = ROOT_OPTION, as_json: bool = JSON_OPTION) -> None:
     """Validate task schemas, fixtures, oracle types, and required trap coverage."""
     report = tasks_service.validate_suite(root)
+    if as_json:
+        payload = {
+            "passed": report.passed,
+            "task_count": report.task_count,
+            "traps_found": sorted(report.traps_found),
+            "issues": [str(issue) for issue in report.issues],
+        }
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+        if not report.passed:
+            raise typer.Exit(code=1)
+        return
     if report.passed:
         console.print(
             Text(

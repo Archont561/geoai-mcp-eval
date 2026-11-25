@@ -23,8 +23,12 @@ _qgis_app = typer.Typer(help="PyQGIS sandbox: check availability, run scripts sc
 app.add_typer(_qgis_app, name="qgis")
 console = Console(highlight=False)
 
-RUN_ID_OPT = typer.Option("", "--run-id", envvar="RUN_ID", help="Run identifier")
-MODEL_OPT = typer.Option("qwen2.5:3b", "--model", envvar="MODEL", help="Ollama model tag")
+RUN_ID_OPT = typer.Option(
+    "", "--run-id", envvar=["EXPERIMENT_RUN_ID", "RUN_ID"], help="Run identifier"
+)
+MODEL_OPT = typer.Option(
+    "qwen2.5:3b", "--model", envvar=["EXPERIMENT_MODEL", "MODEL"], help="Ollama model tag"
+)
 BACKEND_OPT = typer.Option(
     "remote-ollama",
     "--backend",
@@ -41,12 +45,15 @@ EXPECTED_DIGEST_OPT = typer.Option(
     None, "--expected-digest", envvar="EXPERIMENT_EXPECTED_DIGEST", help="Expected model digest"
 )
 OPT_MODEL_OPT = typer.Option(
-    None, "--model", envvar="EXPERIMENT_MODEL", help="Optional model override"
+    None, "--model", envvar=["EXPERIMENT_MODEL", "MODEL"], help="Optional model override"
 )
-HOST_OPT = typer.Option(None, "--host", envvar="OLLAMA_HOST", help="Optional base_url override")
+HOST_OPT = typer.Option(
+    None, "--host", envvar=["EXPERIMENT_HOST", "OLLAMA_HOST"], help="Optional base_url override"
+)
 POLL_TIMEOUT_OPT = typer.Option(
     30.0, "--poll-timeout-s", envvar="EXPERIMENT_POLL_TIMEOUT_S", help="Digest poll timeout (s)"
 )
+JSON_OPTION = typer.Option(False, "--json", help="Emit machine-readable JSON")
 SCRIPT_ARG = typer.Argument(..., help="PyQGIS script to run in the scrubbed sandbox")
 ARTIFACTS_DIR_OPTION = typer.Option(Path("."), "--artifacts-dir", help="cwd for the script")
 TIMEOUT_OPTION = typer.Option(120, "--timeout", help="Wall-clock timeout in seconds")
@@ -135,9 +142,13 @@ def backend_check(  # noqa: CC102
 
 
 @app.command("mcp-ops")
-def mcp_ops() -> None:
+def mcp_ops(as_json: bool = JSON_OPTION) -> None:
     """List the Arm A typed GIS operation catalogue."""
     ops = mcp_selftest_service.list_operations()
+    if as_json:
+        payload = [{"name": name, "summary": summary} for name, summary in ops]
+        typer.echo(json.dumps(payload, indent=2))
+        return
     table = Table(title="Prototype GIS MCP operations", header_style="bold cyan")
     table.add_column("tool", style="green")
     table.add_column("summary")
@@ -153,9 +164,13 @@ def mcp_ops() -> None:
 
 
 @app.command("mcp-selftest")
-def mcp_selftest() -> None:
+def mcp_selftest(as_json: bool = JSON_OPTION) -> None:
     """Exercise the Arm A stdio MCP server against the shipped topology fixture."""
     rows = asyncio.run(mcp_selftest_service.selftest_rows())
+    if as_json:
+        payload = [{"step": step, "result": res, "detail": detail} for step, res, detail in rows]
+        typer.echo(json.dumps(payload, indent=2))
+        return
     table = Table(title="MCP stdio self-test", header_style="bold cyan")
     for col in ("step", "result", "detail"):
         table.add_column(col)
@@ -190,9 +205,14 @@ def _print_qgis_unavailable() -> None:
 
 
 @_qgis_app.command("check")
-def qgis_check() -> None:
+def qgis_check(as_json: bool = JSON_OPTION) -> None:
     """Report PyQGIS availability and versions; exit 3 when unavailable."""
     versions = qgis_service.qgis_versions()
+    if as_json:
+        typer.echo(json.dumps({"available": versions is not None, "versions": versions}, indent=2))
+        if versions is None:
+            raise typer.Exit(code=3)
+        return
     if versions is None:
         _print_qgis_unavailable()
         raise typer.Exit(code=3)

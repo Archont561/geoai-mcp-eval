@@ -1,20 +1,54 @@
 """Filesystem persistence for run, cell, and harvest artifacts.
 
 Centralises JSON/JSONL reading and writing, SHA-256 artifact hashing, env-pin
-serialization, and run/harvest directory discovery so services stay free of
-ad-hoc filesystem I/O.
+serialization, and the canonical ``cell-<arm>-<task>-r<rep>/`` directory layout
+so services stay free of ad-hoc filesystem I/O and dual-layout sniffing.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 UTF8 = "utf-8"
 JSON_INDENT = 2
+CELL_DIR_PREFIX = "cell-"
+_CELL_DIR_RE = re.compile(r"^cell-([A-Za-z]+)-(.+)-r([1-9]\d*)$")
+
+
+@dataclass(frozen=True)
+class CellDir:
+    """One discovered experiment cell directory under a run or harvest root."""
+
+    arm: str
+    task_id: str
+    repetition: int
+    path: Path
+
+
+def cell_dir_name(arm: str, task_id: str, repetition: int = 1) -> str:
+    """Canonical directory name ``cell-<arm>-<task>-r<rep>`` for one cell."""
+    if repetition < 1:
+        raise ValueError(f"repetition must be >= 1, got {repetition}")
+    return f"{CELL_DIR_PREFIX}{arm}-{task_id}-r{repetition}"
+
+
+def cell_dir_path(root: Path, arm: str, task_id: str, repetition: int = 1) -> Path:
+    """Canonical path ``<root>/cell-<arm>-<task>-r<rep>`` for one cell."""
+    return root / cell_dir_name(arm, task_id, repetition)
+
+
+def parse_cell_dir_name(name: str) -> tuple[str, str, int] | None:
+    """Parse ``cell-<arm>-<task>-r<rep>`` into ``(arm, task_id, repetition)``."""
+    match = _CELL_DIR_RE.match(name)
+    if match is None:
+        return None
+    return match.group(1), match.group(2), int(match.group(3))
 
 
 def ensure_dir(path: Path) -> Path:
@@ -131,21 +165,49 @@ def discover_score_files(results_root: Path) -> list[Path]:
     return sorted(results_root.rglob("score.json"))
 
 
-def discover_cell_dirs(run_dir: Path, arm_prefix: str) -> list[Path]:
-    """Every ``<task>/<arm_prefix>*`` cell directory under ``run_dir``, sorted."""
-    return [path for path in sorted(run_dir.glob(f"*/{arm_prefix}*")) if path.is_dir()]
+def _manifest_cell(path: Path) -> CellDir | None:
+    record = read_json_mapping(path)
+    if record is None:
+        return None
+    arm, task, rep = record.get("arm"), record.get("task"), record.get("rep")
+    if type(arm) is not str or type(task) is not str:
+        return None
+    if type(rep) is not int or rep < 1:
+        return None
+    return CellDir(arm=arm, task_id=task, repetition=rep, path=path.parent)
+
+
+def discover_cells(root: Path) -> list[CellDir]:
+    """Discover all cells under ``root`` using canonical names or cell manifests."""
+    found: dict[tuple[str, str, int], CellDir] = {}
+    for manifest_path in discover_manifests(root):
+        cell = _manifest_cell(manifest_path)
+        if cell is not None:
+            found.setdefault((cell.task_id, cell.arm, cell.repetition), cell)
+    if root.is_dir():
+        for child in sorted(root.iterdir()):
+            if not child.is_dir():
+                continue
+            parsed = parse_cell_dir_name(child.name)
+            if parsed is not None:
+                arm, task_id, rep = parsed
+                found.setdefault((task_id, arm, rep), CellDir(arm, task_id, rep, child))
+    return [found[key] for key in sorted(found)]
 
 
 def find_cell_dir(harvest_dir: Path, arm: str, task: str, rep: int) -> Path | None:
-    """Locate an extracted cell directory inside ``harvest_dir``."""
+    """Locate a cell directory inside ``harvest_dir`` (canonical or downloaded artifact)."""
     candidates = [
+        cell_dir_path(harvest_dir, arm, task, rep),
         harvest_dir / f"experiment-{arm}-{task}-rep{rep}",
-        harvest_dir / task / arm / f"rep-{rep}",
         *harvest_dir.glob(f"experiment-{arm}-{task}-rep{rep}*"),
     ]
     for candidate in candidates:
         if candidate.is_dir():
             return candidate
+    for cell in discover_cells(harvest_dir):
+        if (cell.arm, cell.task_id, cell.repetition) == (arm, task, rep):
+            return cell.path
     return None
 
 

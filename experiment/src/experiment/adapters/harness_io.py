@@ -30,7 +30,6 @@ RESULTS_ROOT = paths.results_root()
 UTF8 = run_store.UTF8
 JSON_INDENT = run_store.JSON_INDENT
 
-ARM_PREFIX = "arm-"
 SANDBOX_FIXTURE_NAME = "input.geojson"
 
 DRIVERS = ("scripted", "ollama")
@@ -58,8 +57,9 @@ def resolve_output_dir(output_dir: Path | None) -> Path:
     return run_store.ensure_dir(path)
 
 
-def cell_dir(output_root: Path, task_id: str, arm: str) -> Path:
-    return run_store.ensure_dir(output_root / task_id / f"{ARM_PREFIX}{arm}")
+def cell_dir(output_root: Path, task_id: str, arm: str, repetition: int = 1) -> Path:
+    """Ensure and return the canonical ``cell-<arm>-<task>-r<rep>`` directory."""
+    return run_store.ensure_dir(run_store.cell_dir_path(output_root, arm, task_id, repetition))
 
 
 def append_transcript(cell: Path, record: dict[str, Any]) -> None:

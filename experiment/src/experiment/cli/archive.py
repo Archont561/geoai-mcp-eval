@@ -25,7 +25,10 @@ HARVEST_DIR_OPT = typer.Option(
 OUTPUT_ZIP_OPT = typer.Option(
     None, "--output", envvar="EXPERIMENT_ARCHIVE_OUT", help="Output zip file path"
 )
-RUN_ID_OPT = typer.Option("", "--run-id", envvar="RUN_ID", help="Run identifier")
+RUN_ID_OPT = typer.Option(
+    "", "--run-id", envvar=["EXPERIMENT_RUN_ID", "RUN_ID"], help="Run identifier"
+)
+JSON_OPTION = typer.Option(False, "--json", help="Emit machine-readable JSON")
 ARMS_OPT = typer.Option("A,B", "--arms", envvar="EXPERIMENT_ARMS", help="Expected arms (e.g. A,B)")
 REPS_OPT = typer.Option(2, "--repetitions", envvar="EXPERIMENT_REPETITIONS", help="Repetitions")
 FAIL_MISSING_OPT = typer.Option(
@@ -118,9 +121,12 @@ def summary(harvest_dir: Path = HARVEST_DIR_OPT, run_id: str = RUN_ID_OPT) -> No
 
 
 @app.command()
-def inspect(archive_path: Path = ARCHIVE_ARG) -> None:
+def inspect(archive_path: Path = ARCHIVE_ARG, as_json: bool = JSON_OPTION) -> None:
     """Validate RunArchive integrity and print a Rich overview of trials and scores."""
     overview = archive_service.inspect_archive(archive_path)
+    if as_json:
+        typer.echo(json.dumps(overview.to_dict(), indent=2, sort_keys=True))
+        return
     table = Table(
         title=f"RunArchive · {overview.run_id} ({overview.stage})",
         header_style="bold cyan",

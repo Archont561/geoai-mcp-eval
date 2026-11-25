@@ -110,6 +110,7 @@ def _build_cell_meta(
         "run_id": active_req.run_id,
         "task": active_req.task.id,
         "arm": active_req.arm,
+        "repetition": active_req.repetition,
         "driver": active_req.driver,
         "model": model_label(active_req.driver, active_req.model),
         "model_digest": active_req.model_digest,
@@ -177,11 +178,12 @@ def _resolve_run_digest(spec: RunSpec) -> str | None:
         session.close()
 
 
-def _cell_meta_record(task: Task, arm: str, ctx: _RunContext) -> dict[str, Any]:
+def _cell_meta_record(task: Task, arm: str, repetition: int, ctx: _RunContext) -> dict[str, Any]:
     return {
         "role": "meta",
         "task": task.id,
         "arm": arm,
+        "repetition": repetition,
         "driver": ctx.spec.driver,
         "model": model_label(ctx.spec.driver, ctx.spec.model),
         "model_digest": ctx.model_digest,
@@ -192,9 +194,11 @@ def _cell_meta_record(task: Task, arm: str, ctx: _RunContext) -> dict[str, Any]:
     }
 
 
-def _run_one_cell(task_path: Path, task: Task, arm: str, ctx: _RunContext) -> dict[str, Any]:
-    cell = cell_dir(ctx.output_root, task.id, arm)
-    append_transcript(cell, _cell_meta_record(task, arm, ctx))
+def _run_one_cell(
+    task_path: Path, task: Task, arm: str, repetition: int, ctx: _RunContext
+) -> dict[str, Any]:
+    cell = cell_dir(ctx.output_root, task.id, arm, repetition)
+    append_transcript(cell, _cell_meta_record(task, arm, repetition, ctx))
     req = CellRequest(
         task_path=task_path,
         task=task,
@@ -211,6 +215,7 @@ def _run_one_cell(task_path: Path, task: Task, arm: str, ctx: _RunContext) -> di
         use_cache=ctx.spec.use_cache,
         cache_dir=ctx.spec.cache_dir,
         enforce=ctx.spec.enforce,
+        repetition=repetition,
     )
     return run_cell(req)
 
@@ -284,5 +289,9 @@ def run_experiment(task_root: Path, spec: RunSpec, output_root: Path) -> RunSumm
         task = load_task(task_path)
         if spec.task_ids and task.id not in spec.task_ids:
             continue
-        cells.extend(_run_one_cell(task_path, task, arm, ctx) for arm in spec.arms)
+        cells.extend(
+            _run_one_cell(task_path, task, arm, rep, ctx)
+            for arm in spec.arms
+            for rep in range(1, spec.repetitions + 1)
+        )
     return _write_summary(ctx, cells)

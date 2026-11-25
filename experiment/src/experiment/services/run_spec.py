@@ -36,6 +36,7 @@ class RunSpecInput:
     use_cache: bool = True
     cache_dir: Path | None = None
     enforce: str = "semantic_repair"
+    repetitions: int = 1
 
 
 def _parse_arms(raw: str) -> tuple[str, ...]:
@@ -72,16 +73,18 @@ def parse_enforce(raw: str) -> EnforcementLevel:
         raise RunSpecError(str(exc)) from exc
 
 
-def _validate_run_inputs(driver: str, max_cell_tokens: int | None) -> None:
+def _validate_run_inputs(driver: str, max_cell_tokens: int | None, repetitions: int) -> None:
     if driver not in DRIVERS:
         raise RunSpecError(f"--driver must be one of {', '.join(DRIVERS)}")
     if max_cell_tokens is not None and max_cell_tokens < 1:
         raise RunSpecError("--max-cell-tokens must be a positive integer")
+    if repetitions < 1:
+        raise RunSpecError("--repetitions must be a positive integer")
 
 
 def parse_run_spec(raw: RunSpecInput) -> RunSpec:
     """Resolve the backend and validate a requested run before creating output."""
-    _validate_run_inputs(raw.driver, raw.max_cell_tokens)
+    _validate_run_inputs(raw.driver, raw.max_cell_tokens, raw.repetitions)
     profile = _resolve_backend_profile(raw.driver, raw.backend, raw.host, raw.model)
     return RunSpec(
         driver=raw.driver,
@@ -95,4 +98,5 @@ def parse_run_spec(raw: RunSpecInput) -> RunSpec:
         use_cache=raw.use_cache,
         cache_dir=raw.cache_dir,
         enforce=parse_enforce(raw.enforce),
+        repetitions=raw.repetitions,
     )

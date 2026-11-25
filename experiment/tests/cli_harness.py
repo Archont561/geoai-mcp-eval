@@ -130,9 +130,10 @@ def write_cell(
     checks: list[dict[str, Any]],
     *,
     run_id: str = "r1",
+    repetition: int = 1,
 ) -> None:
     """Write one prototype cell's ``score.json`` into the results directory."""
-    cell = results["dir"] / task / f"arm-{arm}"
+    cell = results["dir"] / f"cell-{arm}-{task}-r{repetition}"
     cell.mkdir(parents=True, exist_ok=True)
     payload = {
         "passed": all(check["passed"] for check in checks),

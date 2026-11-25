@@ -7,7 +7,7 @@ from typing import Any
 
 from experiment import oracle
 from experiment.adapters import run_store
-from experiment.adapters.harness_io import ARM_PREFIX, TASK_ROOT
+from experiment.adapters.harness_io import TASK_ROOT
 from experiment.adapters.run_archive import RunArchive
 from experiment.adapters.task_repository import discover_task_files, load_task
 from experiment.domain.run import TrialMeasurement
@@ -28,22 +28,22 @@ def run_determinism_gate(task_path: Path, artifacts_dir: Path) -> DeterminismRep
     return oracle.run_determinism_gate(task_path, artifacts_dir)
 
 
-def _rescore_cell(task_path: Path, cell: Path) -> CellSummary:
-    task_id = cell.parent.name
-    arm = cell.name.removeprefix(ARM_PREFIX)
-    report = score_cell(task_path, cell)
+def _rescore_cell(task_path: Path, cell: run_store.CellDir) -> CellSummary:
+    report = score_cell(task_path, cell.path)
     checks = tuple(CheckView.from_mapping(c) for c in report.get("checks", ()))
     return CellSummary(
-        task=task_id,
-        arm=arm,
+        task=cell.task_id,
+        arm=cell.arm,
+        repetition=cell.repetition,
         status="rescored",
         oracle_passed=bool(report["passed"]),
         checks=checks,
         wall_s="—",
         raw={
             **report,
-            "task": task_id,
-            "arm": arm,
+            "task": cell.task_id,
+            "arm": cell.arm,
+            "repetition": cell.repetition,
             "status": "rescored",
             "wall_s": "—",
             "oracle_passed": report["passed"],
@@ -97,9 +97,9 @@ def rescore_run(run_dir: Path, task_root: Path | None = None) -> RunSummary | No
     suite_root = task_root if task_root is not None else TASK_ROOT
     task_by_id = {load_task(path).id: path for path in discover_task_files(suite_root)}
     cells = tuple(
-        _rescore_cell(task_by_id[cell.parent.name], cell)
-        for cell in run_store.discover_cell_dirs(run_dir, ARM_PREFIX)
-        if cell.parent.name in task_by_id
+        _rescore_cell(task_by_id[cell.task_id], cell)
+        for cell in run_store.discover_cells(run_dir)
+        if cell.task_id in task_by_id
     )
     if not cells:
         return None

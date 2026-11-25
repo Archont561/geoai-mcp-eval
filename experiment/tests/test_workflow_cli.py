@@ -167,7 +167,7 @@ def test_workflow_run_executes_pilot_and_smoke(
     assert seen_reqs[0].driver == "ollama"
     assert seen_reqs[0].model == "qwen2.5:3b"
     assert seen_reqs[0].model_digest == "sha256:abc123"
-    cell_p = tmp_path / "results" / "rid-p" / "analysis-de9im-001" / "A" / "rep-1"
+    cell_p = tmp_path / "results" / "rid-p" / "cell-A-analysis-de9im-001-r1"
     pilot_manifest = json.loads((cell_p / "manifest.json").read_text(encoding="utf-8"))
     assert pilot_manifest["status"] == "ok"
     assert pilot_manifest["oracle_passed"] is True
@@ -194,7 +194,7 @@ def test_workflow_run_executes_pilot_and_smoke(
         ],
     )
     assert smoke_res.exit_code == 0, smoke_res.output
-    cell_s = tmp_path / "results" / "rid-s" / "analysis-de9im-001" / "B" / "rep-1"
+    cell_s = tmp_path / "results" / "rid-s" / "cell-B-analysis-de9im-001-r1"
     manifest = json.loads((cell_s / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["status"] == "mock-smoke"
     assert (cell_s / "transcript.jsonl").is_file()

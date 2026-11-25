@@ -61,11 +61,12 @@ def test_run_store_roundtrips_json_jsonl_pins_and_discovery(tmp_path: Path) -> N
     assert run_store.read_env_pins(tmp_path) == {"python": "3.13"}
     assert run_store.read_env_pins(tmp_path / "empty") == {}
 
-    cell_a = run_store.ensure_dir(tmp_path / "harvest" / "t1" / "A" / "rep-1")
+    cell_a = run_store.ensure_dir(run_store.cell_dir_path(tmp_path / "harvest", "A", "t1", 1))
     run_store.write_json(cell_a / "manifest.json", {"arm": "A", "task": "t1", "rep": 1})
     assert run_store.find_cell_dir(tmp_path / "harvest", "A", "t1", 1) == cell_a
     assert run_store.find_cell_dir(tmp_path / "harvest", "B", "t1", 1) is None
     assert len(run_store.discover_manifests(tmp_path / "harvest")) == 1
+    assert len(run_store.discover_cells(tmp_path / "harvest")) == 1
 
     hashes = run_store.artifact_hashes(cell_a)
     assert len(hashes) == 1 and hashes[0]["path"] == "manifest.json"
