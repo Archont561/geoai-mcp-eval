@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from experiment.domain.run._common import (
     STRICT_MODEL,
@@ -182,9 +181,10 @@ def compute_outcome_metrics(
     )
 
 
-@dataclass(frozen=True)
-class MeasurementContext:
+class MeasurementContext(BaseModel):
     """Optional contextual signals attached when constructing a :class:`TrialMeasurement`."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     deliverable_readable: bool | None = None
     determinism: DeterminismAudit | None = None

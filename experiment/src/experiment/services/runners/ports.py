@@ -9,20 +9,21 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
 
+from pydantic import BaseModel, ConfigDict, Field
+
+from experiment.domain.backend import BackendProfile
+from experiment.domain.cache_key import CacheStats
 from experiment.domain.prompts import ChatTurn, SandboxExecution
-
-if TYPE_CHECKING:
-    from experiment.domain.backend import BackendProfile
-    from experiment.domain.cache_key import CacheStats
-    from experiment.domain.task import Task
-    from experiment.domain.usage import UsageAccumulator
+from experiment.domain.task import Task
+from experiment.domain.usage import UsageAccumulator
 
 
-@dataclass(frozen=True)
-class RunSpec:
+class RunSpec(BaseModel):
     """What to run: arms, task filter, driver, model, host."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     arms: tuple[str, ...]
     task_ids: tuple[str, ...] | None
@@ -35,12 +36,13 @@ class RunSpec:
     use_cache: bool = True
     cache_dir: Path | None = None
     enforce: str = "semantic_repair"
-    repetitions: int = 1
+    repetitions: int = Field(default=1, ge=1)
 
 
-@dataclass(frozen=True)
-class CellRequest:
+class CellRequest(BaseModel):
     """Everything one (task, arm) cell needs; threaded through runners."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     task_path: Path
     task: Task
@@ -59,7 +61,7 @@ class CellRequest:
     cache_dir: Path | None = None
     cache_stats: CacheStats | None = None
     enforce: str = "semantic_repair"
-    repetition: int = 1
+    repetition: int = Field(default=1, ge=1)
 
 
 class ChatGateway(Protocol):
@@ -139,6 +141,7 @@ class CompletionCachePort(Protocol):
         """Store a raw completion response under its digest key."""
 
 
+# Kept as dataclass (not BaseModel): DI container of runtime Protocol/callable ports.
 @dataclass(frozen=True)
 class HarnessPorts:
     """Injected ports for live LLM arm execution (defaults wired at the adapter edge)."""

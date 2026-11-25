@@ -68,10 +68,14 @@ def _baseline_issues(task: dict[str, Any], task_id: str, root: Path) -> list[Val
         baseline_dir = _resolve_inside(root, baseline["artifact_dir"])
         if not baseline_dir.is_dir():
             return [
-                ValidationIssue(task_id, "completed human baseline artifact_dir does not exist")
+                ValidationIssue(
+                    path=task_id, message="completed human baseline artifact_dir does not exist"
+                )
             ]
     except (KeyError, TypeError, ValueError) as exc:
-        return [ValidationIssue(task_id, f"invalid human baseline artifact_dir: {exc}")]
+        return [
+            ValidationIssue(path=task_id, message=f"invalid human baseline artifact_dir: {exc}")
+        ]
     return []
 
 
@@ -79,11 +83,11 @@ def _fixture_file_issue(task_id: str, root: Path, relative: str) -> ValidationIs
     try:
         fixture = _resolve_inside(root, relative)
         if not fixture.is_file():
-            return ValidationIssue(task_id, f"fixture does not exist: {relative}")
+            return ValidationIssue(path=task_id, message=f"fixture does not exist: {relative}")
         data = json.loads(fixture.read_text(encoding="utf-8"))
         return validate_fixture_document(task_id, relative, data)
     except (OSError, json.JSONDecodeError, TypeError, ValueError, AttributeError) as exc:
-        return ValidationIssue(task_id, f"cannot read fixture {relative}: {exc}")
+        return ValidationIssue(path=task_id, message=f"cannot read fixture {relative}: {exc}")
 
 
 def _fixture_file_issues(
@@ -111,8 +115,8 @@ def _assertion_path_issues(
         except (TypeError, ValueError) as exc:
             issues.append(
                 ValidationIssue(
-                    task_id,
-                    f"oracle assertion {assertion_id!r} has unsafe {key} path: {exc}",
+                    path=task_id,
+                    message=f"oracle assertion {assertion_id!r} has unsafe {key} path: {exc}",
                 )
             )
     return issues
@@ -153,15 +157,19 @@ def _read_schema(root: Path) -> tuple[dict[str, Any] | None, list[ValidationIssu
     try:
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
     except OSError as exc:
-        return None, [ValidationIssue(str(schema_path), f"cannot read schema: {exc}")]
+        return None, [ValidationIssue(path=str(schema_path), message=f"cannot read schema: {exc}")]
     except json.JSONDecodeError as exc:
-        return None, [ValidationIssue(str(schema_path), f"invalid JSON schema: {exc}")]
+        return None, [ValidationIssue(path=str(schema_path), message=f"invalid JSON schema: {exc}")]
     if not isinstance(schema, dict):
-        return None, [ValidationIssue(str(schema_path), "JSON schema root must be an object")]
+        return None, [
+            ValidationIssue(path=str(schema_path), message="JSON schema root must be an object")
+        ]
     try:
         Draft202012Validator.check_schema(schema)
     except SchemaError as exc:
-        return None, [ValidationIssue(str(schema_path), f"invalid JSON schema: {exc.message}")]
+        return None, [
+            ValidationIssue(path=str(schema_path), message=f"invalid JSON schema: {exc.message}")
+        ]
     return schema, []
 
 
@@ -172,17 +180,17 @@ def _load_task_files(
     issues: list[ValidationIssue] = []
     files = sorted(root.glob("*.yaml"))
     if not files:
-        issues.append(ValidationIssue(str(root), "no task YAML files found"))
+        issues.append(ValidationIssue(path=str(root), message="no task YAML files found"))
     for path in files:
         # Report malformed tasks as issues rather than raising.
         try:
             task = read_task_document(path)
         except TaskLoadError as exc:
-            issues.append(ValidationIssue(path.name, exc.reason))
+            issues.append(ValidationIssue(path=path.name, message=exc.reason))
             continue
         for issue in _schema_validation_issues(task, schema):
             msg = issue.message if issue.path == "$" else f"{issue.path}: {issue.message}"
-            issues.append(ValidationIssue(path.name, msg))
+            issues.append(ValidationIssue(path=path.name, message=msg))
         issues.extend(_task_semantic_issues(task, path, root))
         tasks.append((path.name, task))
     return tasks, issues
@@ -193,7 +201,9 @@ def validate_suite(root: Path) -> ValidationReport:
     root = root.resolve()
     schema, schema_issues = _read_schema(root)
     if schema is None:
-        return ValidationReport(0, frozenset(), tuple(schema_issues))
+        return ValidationReport(task_count=0, traps_found=frozenset(), issues=tuple(schema_issues))
     tasks, issues = _load_task_files(root, schema)
     traps_found, coverage_issues = validate_suite_coverage(tasks, str(root))
-    return ValidationReport(len(tasks), traps_found, tuple(issues + coverage_issues))
+    return ValidationReport(
+        task_count=len(tasks), traps_found=traps_found, issues=tuple(issues + coverage_issues)
+    )

@@ -1,7 +1,7 @@
 ---
 id: GEO-024
 title: Migrate remaining dataclasses and DTOs to Pydantic v2 BaseModel
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-24T00:00:00Z'
 labels:
@@ -52,12 +52,12 @@ Standardize structured data models, value objects, request/response DTOs, and co
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All data value objects, domain models, and internal DTOs in `experiment/src/experiment/domain/` (`cache_key.py`, `jenks.py`, `prompts.py`, `task_validation.py`, `usage.py`, `run/measurement.py`, `run/metrics.py`) are migrated from `@dataclass` / `NamedTuple` to `pydantic.BaseModel` with explicit `ConfigDict` and field constraints.
-- [ ] #2 All value/DTO models in `experiment/src/experiment/oracle/`, `services/`, `adapters/`, `cli/`, and `analysis/` (reports, run specs, backend-check config/results, archive/workflow summaries, SSH target/tunnel specs, retry policy, command result, CLI option bundles, GitHub client records) are migrated to `pydantic.BaseModel` (with explicit documented exclusion only for live OS process/file handles or protocol dependency containers).
-- [ ] #3 Manual `dataclasses.asdict()` / custom `.to_dict()` serialization boilerplate is replaced with Pydantic `model_dump(mode="json")` / `model_validate(...)`, with zero regressions in existing JSON/CSV/CLI `--json` output contracts.
-- [ ] #4 `experiment.domain` remains 100% pure (no `pathlib`, `os`, or I/O imports added during migration), and `experiment-qgis-plugin/` remains compatible with QGIS's stdlib runtime.
-- [ ] #5 Unit tests verify validation errors (invalid types, out-of-range bounds, forbidden extra fields) and JSON round-tripping for the migrated Pydantic models.
-- [ ] #6 `pixi run tools run check`, `md`, and `links` pass with `0` `clean_code` violations, all `import-linter` contracts kept, and `>=90%` test coverage.
+- [x] #1 All data value objects, domain models, and internal DTOs in `experiment/src/experiment/domain/` (`cache_key.py`, `jenks.py`, `prompts.py`, `task_validation.py`, `usage.py`, `run/measurement.py`, `run/metrics.py`) are migrated from `@dataclass` / `NamedTuple` to `pydantic.BaseModel` with explicit `ConfigDict` and field constraints.
+- [x] #2 All value/DTO models in `experiment/src/experiment/oracle/`, `services/`, `adapters/`, `cli/`, and `analysis/` (reports, run specs, backend-check config/results, archive/workflow summaries, SSH target/tunnel specs, retry policy, command result, CLI option bundles, GitHub client records) are migrated to `pydantic.BaseModel` (with explicit documented exclusion only for live OS process/file handles or protocol dependency containers).
+- [x] #3 Manual `dataclasses.asdict()` / custom `.to_dict()` serialization boilerplate is replaced with Pydantic `model_dump(mode="json")` / `model_validate(...)`, with zero regressions in existing JSON/CSV/CLI `--json` output contracts.
+- [x] #4 `experiment.domain` remains 100% pure (no `pathlib`, `os`, or I/O imports added during migration), and `experiment-qgis-plugin/` remains compatible with QGIS's stdlib runtime.
+- [x] #5 Unit tests verify validation errors (invalid types, out-of-range bounds, forbidden extra fields) and JSON round-tripping for the migrated Pydantic models.
+- [x] #6 `pixi run tools run check`, `md`, and `links` pass with `0` `clean_code` violations, all `import-linter` contracts kept, and `>=90%` test coverage.
 <!-- AC:END -->
 
 ## Implementation Plan

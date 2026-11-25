@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from experiment.adapters import backends
 from experiment.adapters.backend_probe import BackendProbeError, create_backend_probe
@@ -32,9 +33,10 @@ class BackendCheckError(RuntimeError):
         super().__init__(f"[{kind}] {detail}. Next step: {hint}")
 
 
-@dataclass(frozen=True)
-class BackendCheckConfig:
+class BackendCheckConfig(BaseModel):
     """Parameters for a remote-Ollama preflight check."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     backend: str = "remote-ollama"
     ssh_host: str | None = None
@@ -42,14 +44,15 @@ class BackendCheckConfig:
     expected_digest: str | None = None
     model: str | None = None
     host: str | None = None
-    poll_timeout_s: float = 30.0
-    poll_interval_s: float = 1.0
-    max_tokens: int = 16
+    poll_timeout_s: float = Field(default=30.0, ge=0.0)
+    poll_interval_s: float = Field(default=1.0, ge=0.0)
+    max_tokens: int = Field(default=16, ge=1)
 
 
-@dataclass(frozen=True)
-class BackendCheckResult:
+class BackendCheckResult(BaseModel):
     """Confirmed preflight result with pinned model digest."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     status: str
     backend: str

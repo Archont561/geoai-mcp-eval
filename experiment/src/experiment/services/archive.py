@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from experiment.adapters import paths, run_store
 from experiment.adapters.github_workflow import GitHubWorkflowAdapter
@@ -35,16 +34,17 @@ from experiment.services.measurement import TrialMeasurementOptions, measure_tri
 from experiment.services.reports import ArchiveOverview, TrialOverview
 
 
-@dataclass(frozen=True)
-class PackOptions:
+class PackOptions(BaseModel):
     """Options for packing a run or harvest directory into one ``RunArchive`` zip."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     source_dir: Path
     output_zip: Path | None = None
     run_id: str = ""
     stage: RunStage = "pilot"
     arms: tuple[str, ...] = ("A", "B")
-    repetitions: int = 2
+    repetitions: int = Field(default=2, ge=1)
     fail_on_missing: bool = False
     skip_oracle: bool = False
     run_harvest: bool = False

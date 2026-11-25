@@ -6,17 +6,19 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict
 
 
 class CommandTimeoutError(RuntimeError):
     """A subprocess exceeded its wall-clock timeout."""
 
 
-@dataclass(frozen=True)
-class CommandResult:
+class CommandResult(BaseModel):
     """Typed subprocess outcome returned to services and CLI layers."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     returncode: int
     stdout: str = ""

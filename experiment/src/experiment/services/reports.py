@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict
 
 
 def _str_tuple(raw: object) -> tuple[str, ...]:
@@ -33,20 +34,17 @@ def _opt_dict(raw: Mapping[str, Any], key: str) -> dict[str, Any] | None:
     return dict(value) if isinstance(value, Mapping) else None
 
 
-@dataclass(frozen=True)
-class CheckView:
+class CheckView(BaseModel):
     """One oracle assertion outcome formatted for CLI tables and summaries."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     assertion_id: str
     passed: bool
     detail: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "assertion_id": self.assertion_id,
-            "passed": self.passed,
-            "detail": self.detail,
-        }
+        return self.model_dump(mode="json")
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, Any]) -> CheckView:
@@ -57,9 +55,10 @@ class CheckView:
         )
 
 
-@dataclass(frozen=True)
-class CellSummary:
+class CellSummary(BaseModel):
     """Typed summary of one executed or rescored cell."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     task: str
     arm: str
@@ -122,9 +121,10 @@ class CellSummary:
         )
 
 
-@dataclass(frozen=True)
-class RunSummary:
+class RunSummary(BaseModel):
     """Typed summary of an experiment run (live, scripted, rescored, or loaded from archive)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     run_id: str
     prototype: bool
@@ -183,9 +183,10 @@ class RunSummary:
         )
 
 
-@dataclass(frozen=True)
-class TrialOverview:
+class TrialOverview(BaseModel):
     """One row of an archive inspection report."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     trial_id: str
     task_id: str
@@ -197,25 +198,17 @@ class TrialOverview:
     silent_invalid: bool
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "trial_id": self.trial_id,
-            "task_id": self.task_id,
-            "paradigm": self.paradigm,
-            "enforcement_level": self.enforcement_level,
-            "repetition": self.repetition,
-            "task_success": self.task_success,
-            "predicate_score": self.predicate_score,
-            "silent_invalid": self.silent_invalid,
-        }
+        return self.model_dump(mode="json")
 
 
-@dataclass(frozen=True)
-class ArchiveOverview:
+class ArchiveOverview(BaseModel):
     """Typed summary returned by :func:`experiment.services.archive.inspect_archive`."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     run_id: str
     stage: str
-    schema_version: str
+    schema_version: int
     model: str | None
     model_digest: str | None
     trial_count: int
@@ -226,24 +219,13 @@ class ArchiveOverview:
     trials: tuple[TrialOverview, ...]
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "run_id": self.run_id,
-            "stage": self.stage,
-            "schema_version": self.schema_version,
-            "model": self.model,
-            "model_digest": self.model_digest,
-            "trial_count": self.trial_count,
-            "task_success_count": self.task_success_count,
-            "task_success_rate": self.task_success_rate,
-            "mean_predicate_score": self.mean_predicate_score,
-            "has_summary": self.has_summary,
-            "trials": [trial.to_dict() for trial in self.trials],
-        }
+        return self.model_dump(mode="json")
 
 
-@dataclass(frozen=True)
-class CompletenessReport:
+class CompletenessReport(BaseModel):
     """Typed harvest completeness & oracle gate table parsed from ``summary.json``."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     expected_cells: tuple[str, ...]
     logged_cells: tuple[str, ...]

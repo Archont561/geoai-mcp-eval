@@ -11,12 +11,12 @@ import os
 import secrets
 import sys
 from collections.abc import Mapping
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO
 
 import requests
+from pydantic import BaseModel, ConfigDict
 
 
 def _escape_command_data(text: str) -> str:
@@ -27,8 +27,9 @@ def _escape_command_property(text: str) -> str:
     return _escape_command_data(text).replace(":", "%3A").replace(",", "%2C")
 
 
-@dataclass(frozen=True)
-class _GitHubApiContext:
+class _GitHubApiContext(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     api_base: str
     repo: str
     headers: dict[str, str]

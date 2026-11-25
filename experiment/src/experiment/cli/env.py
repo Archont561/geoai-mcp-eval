@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import json
 from pathlib import Path
 
@@ -138,7 +137,7 @@ def backend_check(  # noqa: CC102
         typer.echo(f"HINT: {exc.hint}", err=True)
         raise typer.Exit(code=backend_check_exit_code(exc.kind)) from exc
     backend_check_service.emit_github_outputs(result)
-    typer.echo(json.dumps(dataclasses.asdict(result), indent=2, sort_keys=True))
+    typer.echo(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True))
 
 
 @app.command("mcp-ops")

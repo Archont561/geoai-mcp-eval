@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict
 
 from experiment.adapters import backends
 from experiment.adapters.harness_io import DRIVERS
@@ -22,9 +23,10 @@ class RunSpecError(ValueError):
     """A run cannot start with the requested driver, arm, or backend."""
 
 
-@dataclass(frozen=True)
-class RunSpecInput:
+class RunSpecInput(BaseModel):
     """Raw CLI/caller inputs validated into a :class:`RunSpec`."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     driver: str = "scripted"
     model: str | None = None

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 import typer
+from pydantic import BaseModel, ConfigDict
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -84,26 +84,19 @@ CELL_CACHE_OPT = typer.Option(
 )
 
 
-@dataclass(frozen=True)
-class _RunTarget:
+class _RunOptions(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     arms: str
     task: str
     root: Path
     output_dir: Path | None
     enforce: str = "none"
     repetitions: int = 1
-
-
-@dataclass(frozen=True)
-class _RunBackend:
     driver: str
     backend: str
     model: str | None
     host: str | None
-
-
-@dataclass(frozen=True)
-class _RunLimits:
     max_cell_tokens: int | None
     use_cache: bool
     cache_dir: Path | None
@@ -141,34 +134,52 @@ def _run_with_progress(root: Path, spec: RunSpec, out: Path) -> runs.RunSummary:
     return summary
 
 
-def _execute_run(target: _RunTarget, backend: _RunBackend, limits: _RunLimits) -> None:
+def _execute_run(opts: _RunOptions) -> None:
     try:
         spec = runs.parse_run_spec(
             runs.RunSpecInput(
-                driver=backend.driver,
-                model=backend.model,
-                host=backend.host,
-                arm=target.arms,
-                task=target.task,
-                backend=backend.backend,
-                max_cell_tokens=limits.max_cell_tokens,
-                use_cache=limits.use_cache,
-                cache_dir=limits.cache_dir,
-                enforce=target.enforce,
-                repetitions=target.repetitions,
+                driver=opts.driver,
+                model=opts.model,
+                host=opts.host,
+                arm=opts.arms,
+                task=opts.task,
+                backend=opts.backend,
+                max_cell_tokens=opts.max_cell_tokens,
+                use_cache=opts.use_cache,
+                cache_dir=opts.cache_dir,
+                enforce=opts.enforce,
+                repetitions=opts.repetitions,
             )
         )
     except runs.RunSpecError as exc:
         raise typer.BadParameter(str(exc)) from exc
-    out = resolve_output_dir(target.output_dir)
+    out = resolve_output_dir(opts.output_dir)
     console.print(_run_banner(spec, out))
-    summary = _run_with_progress(target.root, spec, out)
+    summary = _run_with_progress(opts.root, spec, out)
     print_score_table(console, summary)
-    if limits.pack_zip:
+    if opts.pack_zip:
         _, zip_path = archive_service.pack_archive(archive_service.PackOptions(source_dir=out))
         console.print(Text(f"Archive written: {zip_path}", style="green"))
     if any(cell.status != "ok" for cell in summary.cells):
         raise typer.Exit(code=1)
+
+
+_RUN_FIELDS = (
+    "arms",
+    "task",
+    "root",
+    "output_dir",
+    "enforce",
+    "repetitions",
+    "driver",
+    "backend",
+    "model",
+    "host",
+    "max_cell_tokens",
+    "use_cache",
+    "cache_dir",
+    "pack_zip",
+)
 
 
 def _register_enforced_cmd(name: str, arms: str, help_text: str) -> None:
@@ -188,10 +199,10 @@ def _register_enforced_cmd(name: str, arms: str, help_text: str) -> None:
         cache_dir: Path | None = CACHE_DIR_OPTION,
         pack_zip: bool = PACK_ZIP_OPTION,
     ) -> None:
-        target = _RunTarget(arms, task, root, output_dir, enforce, repetitions)
-        be = _RunBackend(driver, backend, model, host)
-        limits = _RunLimits(max_cell_tokens, use_cache, cache_dir, pack_zip)
-        _execute_run(target, be, limits)
+        t1 = (arms, task, root, output_dir, enforce, repetitions)
+        t2 = (driver, backend, model, host)
+        t3 = (max_cell_tokens, use_cache, cache_dir, pack_zip)
+        _execute_run(_RunOptions.model_validate(dict(zip(_RUN_FIELDS, t1 + t2 + t3, strict=True))))
 
 
 _register_enforced_cmd("mcp", "A", "Run Arm A (typed MCP paradigm) trials.")
@@ -214,10 +225,10 @@ def run_codegen(  # noqa: CC102
     pack_zip: bool = PACK_ZIP_OPTION,
 ) -> None:
     """Run Arm B (free Python/PyQGIS codegen paradigm) trials (enforcement fixed to none)."""
-    target = _RunTarget("B", task, root, output_dir, repetitions=repetitions)
-    be = _RunBackend(driver, backend, model, host)
-    limits = _RunLimits(max_cell_tokens, use_cache, cache_dir, pack_zip)
-    _execute_run(target, be, limits)
+    t1 = ("B", task, root, output_dir, "none", repetitions)
+    t2 = (driver, backend, model, host)
+    t3 = (max_cell_tokens, use_cache, cache_dir, pack_zip)
+    _execute_run(_RunOptions.model_validate(dict(zip(_RUN_FIELDS, t1 + t2 + t3, strict=True))))
 
 
 @app.command("cell")

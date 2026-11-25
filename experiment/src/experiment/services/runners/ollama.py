@@ -51,6 +51,7 @@ _TOOL_RESULT_CAP = 12000
 _TRANSCRIPT_USER_CAP = 2000
 
 
+# Kept as dataclass (not BaseModel): binds CellRequest with non-serializable HarnessPorts.
 @dataclass(frozen=True)
 class _CellContext:
     """Bundled request and injected ports for executing one cell."""

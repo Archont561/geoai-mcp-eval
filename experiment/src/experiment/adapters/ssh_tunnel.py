@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 import paramiko
 import sshtunnel
+from pydantic import BaseModel, ConfigDict, Field
 
 TunnelErrorKind = Literal["ssh-unreachable", "tunnel-dead"]
 DEFAULT_SSH_PORT = 22
@@ -26,20 +26,22 @@ class TunnelProbeError(RuntimeError):
         super().__init__(f"[{kind}] {detail}. Next step: {hint}")
 
 
-@dataclass(frozen=True)
-class SshTarget:
+class SshTarget(BaseModel):
     """Parsed SSH connection target (optional user, hostname, and TCP port)."""
 
-    username: str | None
-    host: str
-    port: int = DEFAULT_SSH_PORT
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    username: str | None = None
+    host: str = Field(min_length=1)
+    port: int = Field(default=DEFAULT_SSH_PORT, ge=1, le=65535)
 
 
-@dataclass(frozen=True)
-class TunnelSpec:
+class TunnelSpec(BaseModel):
     """Configuration for one managed ``sshtunnel.SSHTunnelForwarder`` instance."""
 
-    ssh_host: str
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    ssh_host: str = Field(min_length=1)
     remote_bind_address: tuple[str, int] = DEFAULT_REMOTE_OLLAMA_BIND
     local_bind_address: tuple[str, int] = ("127.0.0.1", 0)
     ssh_pkey: Path | None = None

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from experiment import oracle
 from experiment.adapters import run_store
@@ -26,11 +27,12 @@ from experiment.domain.task import Task
 from experiment.oracle._base import DeterminismReport
 
 
-@dataclass(frozen=True)
-class TrialMeasurementOptions:
+class TrialMeasurementOptions(BaseModel):
     """Optional provenance/economics context passed when measuring one trial."""
 
-    wall_seconds: float | None = None
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    wall_seconds: float | None = Field(default=None, ge=0.0)
     token_usage: TokenUsage | None = None
     determinism: DeterminismReport | None = None
 

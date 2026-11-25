@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic.dataclasses import dataclass
+from pydantic import BaseModel, ConfigDict
 
 SUPPORTED_ORACLE_TYPES = frozenset(
     {
@@ -51,9 +51,10 @@ ORACLE_ASSERTION_FIELDS: dict[str, set[str]] = {
 }
 
 
-@dataclass(frozen=True)
-class ValidationIssue:
+class ValidationIssue(BaseModel):
     """One actionable task-suite validation error."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     path: str
     message: str
@@ -62,9 +63,10 @@ class ValidationIssue:
         return f"{self.path}: {self.message}"
 
 
-@dataclass(frozen=True)
-class ValidationReport:
+class ValidationReport(BaseModel):
     """Summary of a task-suite validation run."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     task_count: int
     traps_found: frozenset[str]
@@ -78,14 +80,18 @@ class ValidationReport:
 def validate_fixture_document(task_id: str, relative: str, data: object) -> ValidationIssue | None:
     """Validate that a parsed GeoJSON fixture is a FeatureCollection with unique ``ISO_A3`` IDs."""
     if not isinstance(data, dict):
-        return ValidationIssue(task_id, f"fixture is not a GeoJSON FeatureCollection: {relative}")
+        return ValidationIssue(
+            path=task_id, message=f"fixture is not a GeoJSON FeatureCollection: {relative}"
+        )
     features = data.get("features")
     if data.get("type") != "FeatureCollection" or not isinstance(features, list):
-        return ValidationIssue(task_id, f"fixture is not a GeoJSON FeatureCollection: {relative}")
+        return ValidationIssue(
+            path=task_id, message=f"fixture is not a GeoJSON FeatureCollection: {relative}"
+        )
     feature_ids = [feature.get("properties", {}).get("ISO_A3") for feature in features]
     if None in feature_ids or len(feature_ids) != len(set(feature_ids)):
         return ValidationIssue(
-            task_id, f"fixture ISO_A3 values must be present and unique: {relative}"
+            path=task_id, message=f"fixture ISO_A3 values must be present and unique: {relative}"
         )
     return None
 
@@ -100,14 +106,15 @@ def _assertion_value_issues(
     ):
         issues.append(
             ValidationIssue(
-                task_id, f"oracle assertion {assertion_id!r} has unsupported relation name"
+                path=task_id,
+                message=f"oracle assertion {assertion_id!r} has unsupported relation name",
             )
         )
     if oracle_type == "jenks_classification" and type(assertion.get("class_count")) is not int:
         issues.append(
             ValidationIssue(
-                task_id,
-                f"oracle assertion {assertion_id!r} class_count must be an integer",
+                path=task_id,
+                message=f"oracle assertion {assertion_id!r} class_count must be an integer",
             )
         )
     return issues
@@ -120,14 +127,12 @@ def validate_assertion_semantics(task_id: str, assertion: Any) -> list[Validatio
     assertion_id = assertion.get("id", "<unnamed>")
     oracle_type = assertion.get("type")
     if not isinstance(oracle_type, str) or oracle_type not in SUPPORTED_ORACLE_TYPES:
-        return [
-            ValidationIssue(
-                task_id,
-                f"oracle assertion {assertion_id!r} uses unimplemented type {oracle_type!r}",
-            )
-        ]
+        msg = f"oracle assertion {assertion_id!r} uses unimplemented type {oracle_type!r}"
+        return [ValidationIssue(path=task_id, message=msg)]
     issues = [
-        ValidationIssue(task_id, f"oracle assertion {assertion_id!r} is missing {field!r}")
+        ValidationIssue(
+            path=task_id, message=f"oracle assertion {assertion_id!r} is missing {field!r}"
+        )
         for field in sorted(ORACLE_ASSERTION_FIELDS[oracle_type] - assertion.keys())
     ]
     issues.extend(_assertion_value_issues(task_id, assertion_id, oracle_type, assertion))
@@ -163,8 +168,8 @@ def _task_id_issue(
         return None
     if task_id in identifiers:
         return ValidationIssue(
-            filename,
-            f"duplicate task ID {task_id!r}; first used by {identifiers[task_id]}",
+            path=filename,
+            message=f"duplicate task ID {task_id!r}; first used by {identifiers[task_id]}",
         )
     identifiers[task_id] = filename
     return None
@@ -172,7 +177,7 @@ def _task_id_issue(
 
 def _required_trap_issues(suite_label: str, traps_found: set[str]) -> list[ValidationIssue]:
     return [
-        ValidationIssue(suite_label, f"required pilot trap is not covered: {missing}")
+        ValidationIssue(path=suite_label, message=f"required pilot trap is not covered: {missing}")
         for missing in sorted(REQUIRED_PILOT_TRAPS - traps_found)
     ]
 
@@ -184,7 +189,7 @@ def _family_coverage_issues(
         task.get("family") for _, task in tasks if isinstance(task.get("family"), str)
     }
     return [
-        ValidationIssue(suite_label, f"pilot suite is missing task family {missing}")
+        ValidationIssue(path=suite_label, message=f"pilot suite is missing task family {missing}")
         for missing in sorted(REQUIRED_TASK_FAMILIES - found_families)
     ]
 

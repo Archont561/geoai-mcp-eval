@@ -3,22 +3,25 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict, Field
 
-@dataclass(frozen=True)
-class AssertionResult:
+
+class AssertionResult(BaseModel):
     """Result of one task oracle assertion."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     assertion_id: str
     passed: bool
     message: str
 
 
-@dataclass(frozen=True)
-class OracleVerdict:
+class OracleVerdict(BaseModel):
     """Stable result for a complete task oracle evaluation."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     passed: bool
     checks: tuple[AssertionResult, ...]
@@ -30,27 +33,22 @@ class OracleVerdict:
         )
 
     def to_dict(self) -> dict[str, object]:
-        return {"passed": self.passed, "checks": [asdict(check) for check in self.checks]}
+        return self.model_dump(mode="json")
 
 
-@dataclass(frozen=True)
-class DeterminismReport:
+class DeterminismReport(BaseModel):
     """Three-pass oracle gate report."""
 
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
     passed: bool
-    required_runs: int
+    required_runs: int = Field(ge=0)
     consistent: bool
     run_results: tuple[dict[str, object], ...]
     issues: tuple[str, ...]
 
     def to_dict(self) -> dict[str, object]:
-        return {
-            "passed": self.passed,
-            "required_runs": self.required_runs,
-            "consistent": self.consistent,
-            "run_results": list(self.run_results),
-            "issues": list(self.issues),
-        }
+        return self.model_dump(mode="json")
 
 
 def safe_path(root: Path, relative: str) -> Path:
