@@ -16,8 +16,8 @@ from typing import Any
 from experiment.adapters import backends
 from experiment.adapters.harness_io import (
     FilesystemCellWorkspace,
-    HttpChatGateway,
     SubprocessCodeSandbox,
+    create_chat_gateway,
 )
 from experiment.adapters.llm_cache import CompletionCache
 from experiment.adapters.mcp.client import McpToolSession
@@ -65,7 +65,7 @@ def _build_default_ports(req: CellRequest) -> HarnessPorts:
         CompletionCache(req.cache_dir) if (req.use_cache and req.model_digest) else None
     )
     return HarnessPorts(
-        chat=HttpChatGateway(profile),
+        chat=create_chat_gateway(profile),
         open_tools=McpToolSession,
         sandbox=SubprocessCodeSandbox(),
         workspace=FilesystemCellWorkspace(),

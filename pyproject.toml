@@ -39,6 +39,7 @@ source_modules = ["experiment.domain"]
 forbidden_modules = [
   "typer", "rich", "requests", "yaml", "jsonschema", "mcp", "subprocess",
   "pathlib", "tomllib", "os", "zipfile",
+  "sshtunnel", "paramiko", "ollama", "openrouter", "httpx",
   "experiment.adapters", "experiment.cli", "experiment.oracle", "experiment.gis_ops",
 ]
 
@@ -78,7 +79,7 @@ type = "forbidden"
 source_modules = ["experiment.services"]
 forbidden_modules = [
   "requests", "urllib", "subprocess", "sqlite3", "tomllib", "mcp", "zipfile",
-  "os", "qgis", "osgeo",
+  "os", "qgis", "osgeo", "sshtunnel", "paramiko", "ollama", "openrouter", "httpx",
 ]
 allow_indirect_imports = true
 
@@ -86,7 +87,10 @@ allow_indirect_imports = true
 name = "CLI never performs transport or subprocess I/O directly"
 type = "forbidden"
 source_modules = ["experiment.cli"]
-forbidden_modules = ["requests", "urllib", "subprocess", "sqlite3", "tomllib", "mcp", "zipfile"]
+forbidden_modules = [
+  "requests", "urllib", "subprocess", "sqlite3", "tomllib", "mcp", "zipfile",
+  "sshtunnel", "paramiko", "ollama", "openrouter", "httpx",
+]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]

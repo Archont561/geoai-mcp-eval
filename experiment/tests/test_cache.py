@@ -91,7 +91,9 @@ def test_cell_cache_hit_miss_digest_change_and_no_cache(
             "usage": {"prompt_tokens": 40, "completion_tokens": 10, "total_tokens": 50},
         }
 
-    monkeypatch.setattr(backends, "chat_completions", fake_chat)
+    from experiment.adapters import _ollama_chat
+
+    monkeypatch.setattr(_ollama_chat, "chat_completions_sdk", fake_chat)
     profile = backends.fallback_profile("http://127.0.0.1:11434/v1", "qwen2.5:3b")
 
     def run_once(name: str, *, digest: str | None, use_cache: bool) -> dict:
@@ -154,7 +156,9 @@ def test_http_errors_are_never_cached(monkeypatch: pytest.MonkeyPatch, tmp_path:
     def fail_chat(*_args, **_kwargs) -> dict:
         raise backends.BackendError("http-500", "server error")
 
-    monkeypatch.setattr(backends, "chat_completions", fail_chat)
+    from experiment.adapters import _ollama_chat
+
+    monkeypatch.setattr(_ollama_chat, "chat_completions_sdk", fail_chat)
     cell = tmp_path / "err"
     cell.mkdir()
     req = runs.CellRequest(

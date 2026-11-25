@@ -1,7 +1,7 @@
 ---
 id: GEO-022
 title: Adopt sshtunnel, ollama, and openrouter Python libraries in transport adapters
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-25T00:00:00Z'
 labels:
@@ -49,13 +49,13 @@ Replace hand-rolled SSH CLI subprocess probing and raw REST/CLI transport plumbi
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `sshtunnel`, `ollama`, and `openrouter` are declared under `[feature.experiment.pypi-dependencies]` in `pixi.toml` and locked across all workspace platforms (`linux-64`, `osx-arm64`, `win-64`) with `lock guard` / `relock` passing and Python 3.12–3.13 compatibility (`paramiko`, `pydantic>=2.11.2,<3`, `httpx>=0.28.1`) verified.
-- [ ] #2 `experiment/src/experiment/adapters/ssh_tunnel.py` uses `sshtunnel.SSHTunnelForwarder` behind `TunnelProbe` (supporting managed tunnel lifecycle and reachability verification without shelling out to `ssh`), translating transport errors into structured `TunnelProbeError` kinds.
-- [ ] #3 `experiment/src/experiment/adapters/ollama.py` and `adapters/backend_probe.py` use `ollama.Client` for model listing, digest resolution, model pulling, and smoke/preflight/chat calls on Ollama profiles (`local`, `remote-ollama`).
-- [ ] #4 OpenRouter profiles (`free-open` / `openrouter.ai`) use the official `openrouter` Python SDK behind `ChatGateway` and `BackendProbe`, preserving domain `ChatTurn`/`ToolCall` mapping, exact nullable token usage accounting, 4xx no-retry / 429-5xx retry guarantees, and zero secret leakage.
-- [ ] #5 `[tool.importlinter]` contracts in `pyproject.toml` forbid `sshtunnel`, `paramiko`, `ollama`, `openrouter`, and `httpx` inside `experiment.services` and `experiment.cli`; `experiment.domain` remains 100% pure.
-- [ ] #6 Unit tests cover `sshtunnel`, `ollama.Client`, and `openrouter.OpenRouter` adapters (success, tool calls, nullable usage, 4xx no-retry, 429/5xx retry, unreachable host, dead tunnel, teardown) with mocked SDK clients and without requiring live network access.
-- [ ] #7 `pixi run tools run check`, `md`, and `links` pass with `0` `clean_code` violations, all `import-linter` contracts kept, and `>=90%` test coverage.
+- [x] #1 `sshtunnel`, `ollama`, and `openrouter` are declared under `[feature.experiment.pypi-dependencies]` in `pixi.toml` and locked across all workspace platforms (`linux-64`, `osx-arm64`, `win-64`) with `lock guard` / `relock` passing and Python 3.12–3.13 compatibility (`paramiko`, `pydantic>=2.11.2,<3`, `httpx>=0.28.1`) verified.
+- [x] #2 `experiment/src/experiment/adapters/ssh_tunnel.py` uses `sshtunnel.SSHTunnelForwarder` behind `TunnelProbe` (supporting managed tunnel lifecycle and reachability verification without shelling out to `ssh`), translating transport errors into structured `TunnelProbeError` kinds.
+- [x] #3 `experiment/src/experiment/adapters/ollama.py` and `adapters/backend_probe.py` use `ollama.Client` for model listing, digest resolution, model pulling, and smoke/preflight/chat calls on Ollama profiles (`local`, `remote-ollama`).
+- [x] #4 OpenRouter profiles (`free-open` / `openrouter.ai`) use the official `openrouter` Python SDK behind `ChatGateway` and `BackendProbe`, preserving domain `ChatTurn`/`ToolCall` mapping, exact nullable token usage accounting, 4xx no-retry / 429-5xx retry guarantees, and zero secret leakage.
+- [x] #5 `[tool.importlinter]` contracts in `pyproject.toml` forbid `sshtunnel`, `paramiko`, `ollama`, `openrouter`, and `httpx` inside `experiment.services` and `experiment.cli`; `experiment.domain` remains 100% pure.
+- [x] #6 Unit tests cover `sshtunnel`, `ollama.Client`, and `openrouter.OpenRouter` adapters (success, tool calls, nullable usage, 4xx no-retry, 429/5xx retry, unreachable host, dead tunnel, teardown) with mocked SDK clients and without requiring live network access.
+- [x] #7 `pixi run tools run check`, `md`, and `links` pass with `0` `clean_code` violations, all `import-linter` contracts kept, and `>=90%` test coverage.
 <!-- AC:END -->
 
 ## Implementation Plan

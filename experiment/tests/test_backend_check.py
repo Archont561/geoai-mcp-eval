@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import sshtunnel
 
 from experiment.adapters import backends
 from experiment.adapters import ollama as ollama_adapter
@@ -79,8 +79,19 @@ class _StubSession:
         return None
 
 
-def _ok_cmd(cmd: list[str], **_kw: Any) -> SimpleNamespace:
-    return SimpleNamespace(returncode=0, stdout="Master running (pid=1234)\n", stderr="")
+class _FakeForwarder:
+    def __init__(self, *, active: bool = True, start_exc: Exception | None = None) -> None:
+        self.is_active = active
+        self.local_bind_port = 54321
+        self._start_exc = start_exc
+        self.stopped = False
+
+    def start(self) -> None:
+        if self._start_exc is not None:
+            raise self._start_exc
+
+    def stop(self) -> None:
+        self.stopped = True
 
 
 def _cfg(tmp_path: Path, **overrides: Any) -> BackendCheckConfig:
@@ -105,7 +116,7 @@ def _http_probe(cfg: BackendCheckConfig, session: _StubSession) -> HttpBackendPr
 
 
 def _ok_tunnel() -> SshTunnelAdapter:
-    return SshTunnelAdapter(run_cmd=_ok_cmd)
+    return SshTunnelAdapter(forwarder_factory=lambda **_kw: _FakeForwarder(active=True))
 
 
 def test_ollama_adapter_no_longer_exposes_create_session() -> None:
@@ -148,15 +159,15 @@ def test_ready_exits_with_pinned_digest_only_after_tiny_completion(tmp_path: Pat
 
 
 def test_ssh_unreachable_produces_distinct_error(tmp_path: Path) -> None:
-    def fail_ssh(cmd: list[str], **_kw: Any) -> SimpleNamespace:
-        if "-O" in cmd:
-            return SimpleNamespace(returncode=0, stdout="Master running\n", stderr="")
-        return SimpleNamespace(returncode=255, stdout="", stderr="ssh: Could not resolve hostname")
+    def fail_ssh(**_kw: Any) -> _FakeForwarder:
+        return _FakeForwarder(
+            start_exc=sshtunnel.BaseSSHTunnelForwarderError("Could not resolve hostname")
+        )
 
     with pytest.raises(BackendCheckError) as exc_info:
         run_backend_check(
             _cfg(tmp_path),
-            tunnel_probe=SshTunnelAdapter(run_cmd=fail_ssh),
+            tunnel_probe=SshTunnelAdapter(forwarder_factory=fail_ssh),
             sleep=lambda _s: None,
         )
     assert exc_info.value.kind == "ssh-unreachable"
@@ -165,15 +176,13 @@ def test_ssh_unreachable_produces_distinct_error(tmp_path: Path) -> None:
 
 
 def test_dead_controlmaster_tunnel_produces_distinct_error(tmp_path: Path) -> None:
-    def dead_tunnel(cmd: list[str], **_kw: Any) -> SimpleNamespace:
-        if "-O" in cmd:
-            return SimpleNamespace(returncode=255, stdout="", stderr="Control socket connect: dead")
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+    def dead_tunnel(**_kw: Any) -> _FakeForwarder:
+        return _FakeForwarder(active=False)
 
     with pytest.raises(BackendCheckError) as exc_info:
         run_backend_check(
             _cfg(tmp_path),
-            tunnel_probe=SshTunnelAdapter(run_cmd=dead_tunnel),
+            tunnel_probe=SshTunnelAdapter(forwarder_factory=dead_tunnel),
             sleep=lambda _s: None,
         )
     assert exc_info.value.kind == "tunnel-dead"
