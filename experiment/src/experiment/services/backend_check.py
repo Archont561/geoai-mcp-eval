@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
+from tenacity import Retrying, retry_if_result, stop_after_delay, wait_fixed
 
 from experiment.adapters import backends
 from experiment.adapters.backend_probe import BackendProbeError, create_backend_probe
@@ -127,18 +128,23 @@ def _poll_model_and_digest(
     probe: BackendProbe,
     sleep: Callable[[float], None],
 ) -> str:
-    deadline = time.monotonic() + max(0.0, cfg.poll_timeout_s)
-    while True:
-        digest, reason = _check_digest_once(cfg, profile, probe)
-        if digest is not None:
-            return digest
-        if time.monotonic() >= deadline:
-            raise BackendCheckError(
-                "model-absent",
-                reason,
-                f"pull/pin `{profile.model}` on the remote Ollama host and retry",
-            )
-        sleep(cfg.poll_interval_s)
+    retrying = Retrying(
+        stop=stop_after_delay(max(0.0, cfg.poll_timeout_s)),
+        wait=wait_fixed(cfg.poll_interval_s),
+        retry=retry_if_result(lambda pair: pair[0] is None),
+        retry_error_callback=lambda state: (
+            state.outcome.result() if state.outcome else (None, "poll timed out")
+        ),
+        sleep=sleep,
+    )
+    digest, reason = retrying(_check_digest_once, cfg, profile, probe)
+    if digest is not None:
+        return digest
+    raise BackendCheckError(
+        "model-absent",
+        reason,
+        f"pull/pin `{profile.model}` on the remote Ollama host and retry",
+    )
 
 
 def emit_github_outputs(

@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO
 
-import requests
+import httpx
 from pydantic import BaseModel, ConfigDict
 
 
@@ -205,7 +205,7 @@ class GitHubWorkflowAdapter:
             repo=repo,
             headers=self._api_headers(token),
         )
-        client = session if session is not None else requests.Session()
+        client = session if session is not None else httpx.Client()
         own_client = session is None
         try:
             artifacts = self._list_run_artifacts(client, ctx, target_run)

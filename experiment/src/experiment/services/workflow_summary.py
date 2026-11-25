@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+from tabulate import tabulate
+
 from experiment.adapters import run_store
 from experiment.adapters.github_workflow import GitHubWorkflowAdapter
 from experiment.services.reports import CompletenessReport
@@ -20,18 +22,20 @@ def _completeness_report(harvest: Path) -> CompletenessReport | None:
 
 
 def _header_lines(rid: str, pins: dict[str, str]) -> list[str]:
+    pin_rows = [
+        ("repo_sha", f"`{pins.get('repo_sha', 'n/a')}`"),
+        ("pixi_lock_sha256", f"`{pins.get('pixi_lock_sha256', 'n/a')}`"),
+        ("python", f"`{pins.get('python', 'n/a')}`"),
+        ("ollama", f"`{pins.get('ollama', 'n/a')}`"),
+        ("qgis", f"`{pins.get('qgis', 'n/a')}`"),
+    ]
+    table = tabulate(pin_rows, headers=("Item", "Value"), tablefmt="github")
     return [
         f"# Experiment run `{rid}`",
         "",
         "**NOT a study result** — pre-freeze scaffolding, for pipeline verification only.",
         "",
-        "| Item | Value |",
-        "|---|---|",
-        f"| repo_sha | `{pins.get('repo_sha', 'n/a')}` |",
-        f"| pixi_lock_sha256 | `{pins.get('pixi_lock_sha256', 'n/a')}` |",
-        f"| python | `{pins.get('python', 'n/a')}` |",
-        f"| ollama | `{pins.get('ollama', 'n/a')}` |",
-        f"| qgis | `{pins.get('qgis', 'n/a')}` |",
+        *table.splitlines(),
         "",
         "## Where the artefacts are",
         "",
@@ -50,12 +54,9 @@ def _artifact_lines(run_url: str, rid: str) -> list[str]:
 
 
 def _oracle_table_lines(oracle_rows: tuple[tuple[str, str], ...]) -> list[str]:
-    lines = ["### Oracle verdicts", "", "| Cell | Gate |", "|---|---|"]
-    if oracle_rows:
-        lines += [f"| `{cell}` | {verdict} |" for cell, verdict in oracle_rows]
-    else:
-        lines += ["| _none recorded_ | |"]
-    return lines
+    rows = [(f"`{cell}`", verdict) for cell, verdict in oracle_rows] or [("_none recorded_", "")]
+    table = tabulate(rows, headers=("Cell", "Gate"), tablefmt="github")
+    return ["### Oracle verdicts", "", *table.splitlines()]
 
 
 def _what_happened_lines(report: CompletenessReport | None) -> list[str]:

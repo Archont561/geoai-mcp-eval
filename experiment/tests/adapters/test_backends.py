@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
-import requests
 from fakes import make_mock_response
 
 from experiment.adapters import backends
@@ -128,11 +128,16 @@ def test_chat_completions_success(fake_http_session: MagicMock) -> None:
     assert kwargs["json"]["max_tokens"] == 77
     assert kwargs["json"]["temperature"] == 0.0
     assert "options" not in kwargs["json"]
-    assert kwargs["timeout"] == profile.timeout
+    assert kwargs["timeout"] == httpx.Timeout(
+        connect=profile.connect_timeout_s,
+        read=profile.read_timeout_s,
+        write=profile.read_timeout_s,
+        pool=profile.connect_timeout_s,
+    )
 
 
 def test_chat_completions_connection_error(fake_http_session: MagicMock) -> None:
-    fake_http_session.post.side_effect = requests.exceptions.ConnectionError("refused")
+    fake_http_session.post.side_effect = httpx.ConnectError("refused")
     profile = backends.BackendProfile(base_url="http://h/v1", model="m")
     with pytest.raises(backends.BackendError) as excinfo:
         backends.chat_completions(fake_http_session, profile, [])
@@ -140,7 +145,7 @@ def test_chat_completions_connection_error(fake_http_session: MagicMock) -> None
 
 
 def test_chat_completions_read_timeout(fake_http_session: MagicMock) -> None:
-    fake_http_session.post.side_effect = requests.exceptions.ReadTimeout("slow")
+    fake_http_session.post.side_effect = httpx.ReadTimeout("slow")
     profile = backends.BackendProfile(base_url="http://h/v1", model="m")
     with pytest.raises(backends.BackendError) as excinfo:
         backends.chat_completions(fake_http_session, profile, [])
@@ -196,5 +201,5 @@ def test_resolve_model_digest_matches_exact_and_latest_and_handles_failures(
     fake_http_session.get.return_value = make_mock_response(200, ValueError("not json"))
     assert backends.resolve_model_digest(fake_http_session, profile) is None
 
-    fake_http_session.get.side_effect = requests.exceptions.ConnectionError("down")
+    fake_http_session.get.side_effect = httpx.ConnectError("down")
     assert backends.resolve_model_digest(fake_http_session, profile) is None

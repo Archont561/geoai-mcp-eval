@@ -6,8 +6,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
-import requests
 from pydantic import ValidationError
 
 from experiment.adapters import ollama
@@ -78,7 +78,7 @@ def test_ollama_adapter_probes_retries_and_daemon_lifecycle(
     assert owner.log_handle.closed is True
 
     def broken_call(*_a: Any, **_kw: Any) -> Any:
-        raise requests.exceptions.ConnectionError("refused")
+        raise httpx.ConnectError("refused")
 
     with pytest.raises(ollama.HttpTransportError):
         ollama.request_with_retry(

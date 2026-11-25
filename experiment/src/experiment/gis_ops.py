@@ -20,7 +20,7 @@ from shapely import make_valid, relate
 from shapely.geometry import Point, mapping, shape
 from shapely.ops import unary_union
 
-from experiment.domain.jenks import fisher_jenks_breaks
+from experiment.adapters.jenks import fisher_jenks_breaks
 from experiment.domain.task_validation import De9imRelation
 
 GeoJSON = dict[str, Any]

@@ -11,6 +11,12 @@ dependencies = [
     "pydantic-settings>=2.10,<3",
     "rich>=15,<16",
     "shapely>=2,<3",
+    "diskcache>=5.6,<6",
+    "tenacity>=9,<10",
+    "httpx>=0.28,<1",
+    "jenkspy>=0.4,<1",
+    "tabulate>=0.9,<1",
+    "filelock>=3.16,<4",
 ]
 
 [project.scripts]

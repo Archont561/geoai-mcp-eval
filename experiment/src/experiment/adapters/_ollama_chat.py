@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 import ollama
+from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential
 
 from experiment.adapters import backends
 from experiment.adapters import ollama as ollama_adapter
@@ -163,6 +164,10 @@ def _send_ollama_chat(
     return normalize_ollama_chat_response(response)
 
 
+def _is_retryable_ollama_error(exc: BaseException) -> bool:
+    return isinstance(exc, ollama.ResponseError) and int(exc.status_code) in _RETRYABLE_STATUSES
+
+
 def chat_completions_sdk(
     profile: BackendProfile,
     messages: list[dict[str, Any]],
@@ -171,7 +176,7 @@ def chat_completions_sdk(
     client: Any | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
-    """Execute one chat turn through ``ollama.Client.chat()`` with 429/5xx-only retries."""
+    """Execute one chat turn through ``ollama.Client.chat()`` with ``tenacity`` 429/5xx retries."""
     timeout = httpx.Timeout(profile.read_timeout_s, connect=profile.connect_timeout_s)
     active = (
         client
@@ -179,17 +184,17 @@ def chat_completions_sdk(
         else ollama_adapter.build_client(profile.api_root, timeout=timeout)
     )
     ollama_messages = normalize_messages_for_ollama(messages)
-    attempts = profile.retries + 1
-    for attempt in range(attempts):
-        try:
-            return _send_ollama_chat(active, profile, ollama_messages, tools)
-        except ollama.ResponseError as exc:
-            if int(exc.status_code) not in _RETRYABLE_STATUSES or attempt + 1 >= attempts:
-                raise _translate_ollama_error(exc, profile) from exc
-            sleep(ollama_adapter.DEFAULT_RETRY_BACKOFF_S * (2**attempt))
-        except (ollama.RequestError, httpx.HTTPError, OSError) as exc:
-            raise _translate_ollama_error(exc, profile) from exc
-    raise BackendError("transport", f"chat completion failed against {profile.base_url}")
+    retrying = Retrying(
+        stop=stop_after_attempt(profile.retries + 1),
+        wait=wait_exponential(multiplier=ollama_adapter.DEFAULT_RETRY_BACKOFF_S, exp_base=2),
+        retry=retry_if_exception(_is_retryable_ollama_error),
+        reraise=True,
+        sleep=sleep,
+    )
+    try:
+        return retrying(_send_ollama_chat, active, profile, ollama_messages, tools)
+    except (ollama.ResponseError, ollama.RequestError, httpx.HTTPError, OSError) as exc:
+        raise _translate_ollama_error(exc, profile) from exc
 
 
 class OllamaChatGateway:

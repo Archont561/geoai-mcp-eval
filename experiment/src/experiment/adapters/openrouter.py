@@ -13,6 +13,7 @@ import httpx
 from openrouter import OpenRouter
 from openrouter.errors import OpenRouterError
 from openrouter.utils.retries import BackoffStrategy, RetryConfig
+from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential
 
 from experiment.adapters import backends
 from experiment.adapters import ollama as ollama_adapter
@@ -158,6 +159,10 @@ def _translate_transport_error(
     return BackendError("transport", f"{exc.__class__.__name__}: {redacted}")
 
 
+def _is_retryable_openrouter_error(exc: BaseException) -> bool:
+    return isinstance(exc, OpenRouterError) and _error_status(exc) in _RETRYABLE_STATUSES
+
+
 def call_with_retry(
     operation: Callable[[], Any],
     profile: BackendProfile,
@@ -165,21 +170,21 @@ def call_with_retry(
     secret: str,
     sleep: Callable[[float], None],
 ) -> Any:
-    """Invoke an OpenRouter SDK call with 429/5xx-only retries and redacted transport errors."""
-    attempts = profile.retries + 1
-    for attempt in range(attempts):
-        try:
-            return operation()
-        except OpenRouterError as exc:
-            if _error_status(exc) not in _RETRYABLE_STATUSES or attempt + 1 >= attempts:
-                raise
-            sleep(ollama_adapter.DEFAULT_RETRY_BACKOFF_S * (2**attempt))
-        except (httpx.HTTPError, ConnectionError, OSError) as exc:
-            redacted = _redact(str(exc), secret)
-            raise _translate_transport_error(
-                exc, str(profile.base_url), profile.read_timeout_s, redacted
-            ) from exc
-    raise BackendError("transport", f"OpenRouter request failed against {profile.base_url}")
+    """Invoke an OpenRouter SDK call with ``tenacity`` 429/5xx retries and redacted errors."""
+    retrying = Retrying(
+        stop=stop_after_attempt(profile.retries + 1),
+        wait=wait_exponential(multiplier=ollama_adapter.DEFAULT_RETRY_BACKOFF_S, exp_base=2),
+        retry=retry_if_exception(_is_retryable_openrouter_error),
+        reraise=True,
+        sleep=sleep,
+    )
+    try:
+        return retrying(operation)
+    except (httpx.HTTPError, ConnectionError, OSError) as exc:
+        redacted = _redact(str(exc), secret)
+        raise _translate_transport_error(
+            exc, str(profile.base_url), profile.read_timeout_s, redacted
+        ) from exc
 
 
 def _translate_chat_error(

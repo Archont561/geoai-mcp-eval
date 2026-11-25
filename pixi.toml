@@ -48,6 +48,13 @@ jsonschema = ">=4.26,<5"
 pydantic = ">=2.11.2,<3"
 pydantic-settings = ">=2.10,<3"
 rich = ">=15,<16"
+# Runtime utility libraries replacing hand-rolled infrastructure boilerplate (GEO-028):
+diskcache = ">=5.6,<6"
+tenacity = ">=9,<10"
+httpx = ">=0.28,<1"
+jenkspy = ">=0.4,<1"
+tabulate = ">=0.9,<1"
+filelock = ">=3.16,<4"
 # Transport SDKs used inside `experiment.adapters` behind Clean Architecture ports:
 # - `sshtunnel` manages programmatic SSH port-forwarding behind `TunnelProbe`
 # - `ollama` (PyPI client SDK, distinct from the linux-64 conda-forge server binary)
@@ -55,9 +62,6 @@ rich = ">=15,<16"
 sshtunnel = ">=0.5,<0.6"
 ollama = ">=0.6,<0.7"
 openrouter = ">=1.3,<2"
-# Generic OpenAI-compatible HTTP endpoints still fall back to `requests` + `urllib3`.
-requests = ">=2.32,<3"
-urllib3 = ">=2,<3"
 # `analyze.py` imports pandas directly. It reaches the default environment only
 # through geopandas, which is a linux-64 target dependency; declare it so the
 # analysis path resolves on every platform the workspace claims.

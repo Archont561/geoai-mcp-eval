@@ -1,15 +1,12 @@
-"""Pure domain logic: algorithms and values that touch no files, no network.
+"""Pure experiment logic: no files, no network, no frameworks.
 
-Modules here are importable without a GIS stack, a framework, or a filesystem.
-They are the leaves of the import graph: everything else may import them, they
-import nothing from ``experiment`` outside this package.
-
-The boundary is enforced by import-linter contracts in ``pyproject.toml``
-(``pixi run tools run architecture``), not by convention.
+Modules in this package take plain values and return plain values. Anything that
+reads a file, starts a process, or talks over HTTP belongs in
+:mod:`experiment.adapters` or :mod:`experiment.services`.
 """
 
 from __future__ import annotations
 
-from experiment.domain.jenks import fisher_jenks_breaks as fisher_jenks_breaks  # noqa: F401
+from experiment.domain.jenks import validate_jenks_inputs as validate_jenks_inputs  # noqa: F401
 
-__all__ = ["fisher_jenks_breaks"]
+__all__ = ["validate_jenks_inputs"]

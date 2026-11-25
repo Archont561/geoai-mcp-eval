@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-import requests
+import httpx
 from pydantic import ValidationError
 
 from experiment.adapters import config as config_adapter
@@ -100,8 +100,8 @@ def fallback_profile(host: str, model: str) -> BackendProfile:
     return BackendProfile(base_url=normalize_host(host), model=model)
 
 
-def build_session(profile: BackendProfile) -> requests.Session:
-    """Session carrying auth (if any) and the retry policy for PROFILE."""
+def build_session(profile: BackendProfile) -> httpx.Client:
+    """``httpx.Client`` carrying auth (if any) and the retry policy for PROFILE."""
     require_api_key(profile)
     headers = (
         {"Authorization": f"Bearer {os.environ[profile.api_key_env]}"}
@@ -111,9 +111,9 @@ def build_session(profile: BackendProfile) -> requests.Session:
     return ollama_adapter.build_retry_session(profile.retries, headers=headers)
 
 
-def resolve_model_digest(session: requests.Session, profile: BackendProfile) -> str | None:
-    """Resolve the pinned model digest via ``ollama.Client`` (or injected session)."""
-    if ollama_adapter.is_ollama_profile(profile) and type(session) is requests.Session:
+def resolve_model_digest(session: Any, profile: BackendProfile) -> str | None:
+    """Resolve the pinned model digest via ``ollama.Client`` (or injected ``httpx.Client``)."""
+    if ollama_adapter.is_ollama_profile(profile) and type(session) is httpx.Client:
         return ollama_adapter.resolve_model_digest_sdk(profile.api_root, profile.model)
     return ollama_adapter.resolve_model_digest(
         session,
@@ -124,22 +124,28 @@ def resolve_model_digest(session: requests.Session, profile: BackendProfile) -> 
 
 
 def _post_chat(
-    session: requests.Session,
+    session: Any,
     profile: BackendProfile,
     body: dict[str, Any],
-) -> requests.Response:
+) -> Any:
+    timeout = httpx.Timeout(
+        connect=profile.connect_timeout_s,
+        read=profile.read_timeout_s,
+        write=profile.read_timeout_s,
+        pool=profile.connect_timeout_s,
+    )
     try:
-        return session.post(profile.chat_url, json=body, timeout=profile.timeout)
-    except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError) as exc:
+        return session.post(profile.chat_url, json=body, timeout=timeout)
+    except (httpx.ConnectTimeout, httpx.ConnectError, ConnectionError) as exc:
         raise BackendError("connection", f"cannot reach {profile.base_url}: {exc}") from exc
-    except requests.exceptions.ReadTimeout as exc:
+    except httpx.ReadTimeout as exc:
         msg = f"no response within {profile.read_timeout_s}s from {profile.base_url}"
         raise BackendError("timeout", msg) from exc
-    except requests.exceptions.RequestException as exc:
+    except (httpx.HTTPError, OSError) as exc:
         raise BackendError("transport", f"{exc.__class__.__name__}: {exc}") from exc
 
 
-def _parse_chat_response(resp: requests.Response, profile: BackendProfile) -> dict[str, Any]:
+def _parse_chat_response(resp: Any, profile: BackendProfile) -> dict[str, Any]:
     if resp.status_code == 429:
         retry_after = resp.headers.get("Retry-After", "unspecified")
         detail = f"HTTP 429 after {profile.retries} retries (Retry-After: {retry_after})"
@@ -153,7 +159,7 @@ def _parse_chat_response(resp: requests.Response, profile: BackendProfile) -> di
 
 
 def chat_completions(
-    session: requests.Session,
+    session: Any,
     profile: BackendProfile,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
