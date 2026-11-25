@@ -48,6 +48,21 @@ _ENFORCE_TO_LEVEL: dict[str, EnforcementLevel] = {
     "N3": "semantic_repair",
     "N4": "transactional",
 }
+ENFORCEMENT_LEVELS: tuple[EnforcementLevel, ...] = (
+    "none",
+    "declarative",
+    "syntactic",
+    "semantic_repair",
+    "transactional",
+)
+_ENFORCEMENT_BY_NAME: dict[str, EnforcementLevel] = {lvl: lvl for lvl in ENFORCEMENT_LEVELS}
+_EXECUTION_STATUS_BY_NAME: dict[str, ExecutionStatus] = {
+    "ok": "ok",
+    "aborted": "aborted",
+    "error": "error",
+    "smoke": "smoke",
+    "mock-smoke": "smoke",
+}
 
 
 def arm_to_paradigm(arm: str) -> Paradigm:
@@ -66,3 +81,21 @@ def enforce_code_to_level(code: str) -> EnforcementLevel:
             f"unknown enforcement code {code!r}; expected one of {sorted(_ENFORCE_TO_LEVEL)}"
         )
     return _ENFORCE_TO_LEVEL[key]
+
+
+def parse_enforcement_level(raw: str) -> EnforcementLevel:
+    """Parse an English enforcement level name or legacy N0..N4 code."""
+    cleaned = raw.strip()
+    by_name = _ENFORCEMENT_BY_NAME.get(cleaned.lower())
+    if by_name is not None:
+        return by_name
+    return enforce_code_to_level(cleaned)
+
+
+def parse_execution_status(raw: object, *, default: ExecutionStatus = "ok") -> ExecutionStatus:
+    """Normalize a raw status token (including ``mock-smoke``) to :data:`ExecutionStatus`."""
+    if isinstance(raw, str):
+        found = _EXECUTION_STATUS_BY_NAME.get(raw.strip().lower())
+        if found is not None:
+            return found
+    return default

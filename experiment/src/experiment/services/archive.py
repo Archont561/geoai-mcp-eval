@@ -18,8 +18,8 @@ from experiment.domain.run import (
     CostAndProcessMetrics,
     EnforcementLevel,
     EnvironmentPin,
-    ExecutionStatus,
     ExperimentRun,
+    MeasurementContext,
     ModelPin,
     RunProvenance,
     RunStage,
@@ -28,10 +28,12 @@ from experiment.domain.run import (
     TrialMeasurement,
     TrialRecord,
     arm_to_paradigm,
-    enforce_code_to_level,
+    parse_enforcement_level,
+    parse_execution_status,
 )
 from experiment.services import archive_notices, workflow, workflow_summary
 from experiment.services.measurement import TrialMeasurementOptions, measure_trial
+from experiment.services.reports import ArchiveOverview, TrialOverview
 
 
 @dataclass(frozen=True)
@@ -106,31 +108,13 @@ def _discover_harvest_cells(source_dir: Path) -> list[tuple[str, str, int, Path]
     return sorted(found)
 
 
-def _execution_status(raw: object) -> ExecutionStatus:
-    valid: tuple[ExecutionStatus, ...] = ("ok", "error", "aborted", "smoke")
-    if isinstance(raw, str) and raw in valid:
-        return raw  # type: ignore[return-value]
-    if raw == "mock-smoke":
-        return "smoke"
-    return "ok"
-
-
 def _trial_enforcement(arm: str, raw: object) -> EnforcementLevel:
-    if arm != "A":
+    if arm != "A" or not isinstance(raw, str):
         return "none"
-    if isinstance(raw, str):
-        levels: tuple[EnforcementLevel, ...] = (
-            "none",
-            "declarative",
-            "syntactic",
-            "semantic_repair",
-            "transactional",
-        )
-        if raw in levels:
-            return raw  # type: ignore[return-value]
-        if raw in ("N0", "N1", "N2", "N3", "N4"):
-            return enforce_code_to_level(raw)
-    return "none"
+    try:
+        return parse_enforcement_level(raw)
+    except ValueError:
+        return "none"
 
 
 def _existing_measurement(cell_dir: Path) -> TrialMeasurement | None:
@@ -159,7 +143,7 @@ def _resolve_measurement(
     return TrialMeasurement.build(
         key=record.key,
         assertions=(),
-        economics=CostAndProcessMetrics(wall_seconds=wall_s),
+        context=MeasurementContext(economics=CostAndProcessMetrics(wall_seconds=wall_s)),
     )
 
 
@@ -181,7 +165,7 @@ def _build_trial_record(
         driver=driver,
         model_tag=_opt_str(manifest, "model"),
         model_digest=_opt_str(manifest, "model_digest"),
-        status=_execution_status(manifest.get("status")),
+        status=parse_execution_status(manifest.get("status")),
         error=_opt_str(manifest, "error"),
         abort_reason=_opt_str(manifest, "abort_reason"),
         artifacts=build_artifact_refs(payloads),
@@ -199,7 +183,7 @@ def _build_trial_key(
     )
     return TrialKey(
         task_id=task_id,
-        paradigm=arm_to_paradigm(arm),  # type: ignore[arg-type]
+        paradigm=arm_to_paradigm(arm),
         enforcement_level=_trial_enforcement(arm, enforce_raw),
         repetition=rep,
     )
@@ -284,42 +268,49 @@ def pack_archive(opts: PackOptions) -> tuple[ExperimentRun, Path]:
     return run, output_zip
 
 
-def _trial_overview_row(m: TrialMeasurement) -> dict[str, Any]:
-    return {
-        "trial_id": m.key.slug,
-        "task_id": m.key.task_id,
-        "paradigm": m.key.paradigm,
-        "enforcement_level": m.key.enforcement_level,
-        "repetition": m.key.repetition,
-        "task_success": m.outcomes.task_success,
-        "predicate_score": m.outcomes.predicate_score,
-        "silent_invalid": m.outcomes.silent_invalid,
-    }
+def _trial_overview_row(m: TrialMeasurement) -> TrialOverview:
+    return TrialOverview(
+        trial_id=m.key.slug,
+        task_id=m.key.task_id,
+        paradigm=m.key.paradigm,
+        enforcement_level=m.key.enforcement_level,
+        repetition=m.key.repetition,
+        task_success=m.outcomes.task_success,
+        predicate_score=m.outcomes.predicate_score,
+        silent_invalid=m.outcomes.silent_invalid,
+    )
 
 
-def inspect_archive(archive_path: Path) -> dict[str, Any]:
+def _archive_metrics(items: list[TrialMeasurement], n_trials: int) -> tuple[int, float, float]:
+    n_passed = sum(1 for m in items if m.outcomes.task_success)
+    scores = [m.outcomes.predicate_score for m in items]
+    mps = round((sum(scores) / len(scores)) if scores else 0.0, 4)
+    tsr = (n_passed / n_trials) if n_trials else 0.0
+    return n_passed, tsr, mps
+
+
+def inspect_archive(archive_path: Path) -> ArchiveOverview:
     """Validate and return a structured overview of a ``RunArchive`` zip."""
     with RunArchive.open(archive_path) as archive:
         run = archive.run
         items = list(run.measurements.values())
         n_trials = len(run.trials)
-        n_passed = sum(1 for m in items if m.outcomes.task_success)
-        scores = [m.outcomes.predicate_score for m in items]
-        mps = (sum(scores) / len(scores)) if scores else 0.0
+        n_passed, tsr, mps = _archive_metrics(items, n_trials)
         model_pin = run.provenance.model
-        return {
-            "run_id": run.run_id,
-            "stage": run.stage,
-            "schema_version": run.schema_version,
-            "model": model_pin.tag if model_pin else None,
-            "model_digest": model_pin.digest if model_pin else None,
-            "trial_count": n_trials,
-            "task_success_count": n_passed,
-            "task_success_rate": (n_passed / n_trials) if n_trials else 0.0,
-            "mean_predicate_score": round(mps, 4),
-            "has_summary": archive.summary_markdown() is not None,
-            "trials": [_trial_overview_row(m) for m in items],
-        }
+        trial_rows = tuple(_trial_overview_row(m) for m in items)
+        return ArchiveOverview(
+            run_id=run.run_id,
+            stage=run.stage,
+            schema_version=run.schema_version,
+            model=model_pin.tag if model_pin else None,
+            model_digest=model_pin.digest if model_pin else None,
+            trial_count=n_trials,
+            task_success_count=n_passed,
+            task_success_rate=tsr,
+            mean_predicate_score=mps,
+            has_summary=archive.summary_markdown() is not None,
+            trials=trial_rows,
+        )
 
 
 def render_summary(target: Path, run_id: str = "") -> str:
@@ -331,11 +322,11 @@ def render_summary(target: Path, run_id: str = "") -> str:
                 return cached
         overview = inspect_archive(target)
         return (
-            f"# Experiment run `{overview['run_id']}`\n\n"
-            f"- Stage: `{overview['stage']}`\n"
-            f"- Trials: {overview['trial_count']}\n"
-            f"- Task Success Rate (TSR): {overview['task_success_rate']:.2%}\n"
-            f"- Mean Predicate Score (MPS): {overview['mean_predicate_score']:.4f}\n"
+            f"# Experiment run `{overview.run_id}`\n\n"
+            f"- Stage: `{overview.stage}`\n"
+            f"- Trials: {overview.trial_count}\n"
+            f"- Task Success Rate (TSR): {overview.task_success_rate:.2%}\n"
+            f"- Mean Predicate Score (MPS): {overview.mean_predicate_score:.4f}\n"
         )
     return workflow_summary.render_summary(harvest_dir=target, run_id=run_id)
 

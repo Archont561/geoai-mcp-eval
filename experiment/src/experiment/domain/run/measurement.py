@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -181,6 +182,15 @@ def compute_outcome_metrics(
     )
 
 
+@dataclass(frozen=True)
+class MeasurementContext:
+    """Optional contextual signals attached when constructing a :class:`TrialMeasurement`."""
+
+    deliverable_readable: bool | None = None
+    determinism: DeterminismAudit | None = None
+    economics: CostAndProcessMetrics | None = None
+
+
 class TrialMeasurement(BaseModel):
     """Derived Measurement DTO for one trial — shared across agent paradigms and human runs."""
 
@@ -207,32 +217,30 @@ class TrialMeasurement(BaseModel):
         return cls.build(
             key=key,
             assertions=assertions,
-            determinism=determinism,
-            economics=economics,
+            context=MeasurementContext(determinism=determinism, economics=economics),
         )
 
     @classmethod
-    def build(  # noqa: CC102
+    def build(
         cls,
         *,
         key: TrialKey,
         assertions: Sequence[AssertionResult],
-        deliverable_readable: bool | None = None,
-        determinism: DeterminismAudit | None = None,
-        economics: CostAndProcessMetrics | None = None,
+        context: MeasurementContext | None = None,
     ) -> TrialMeasurement:
         """Build a TrialMeasurement DTO with optional explicit deliverable readability signal."""
+        ctx = context or MeasurementContext()
         assertion_list = list(assertions)
         outcomes = compute_outcome_metrics(
-            assertion_list, deliverable_readable=deliverable_readable
+            assertion_list, deliverable_readable=ctx.deliverable_readable
         )
         return cls(
             trial_id=key.slug,
             key=key,
             assertions=assertion_list,
             outcomes=outcomes,
-            determinism=determinism,
-            economics=economics or CostAndProcessMetrics(),
+            determinism=ctx.determinism,
+            economics=ctx.economics or CostAndProcessMetrics(),
         )
 
     def with_annotations(self, annotations: BehavioralAnnotations) -> TrialMeasurement:

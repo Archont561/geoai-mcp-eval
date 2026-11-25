@@ -7,20 +7,16 @@ from pathlib import Path
 
 from experiment.adapters import run_store
 from experiment.adapters.github_workflow import GitHubWorkflowAdapter
+from experiment.services.reports import CompletenessReport
 from experiment.services.workflow import find_repo_root
 
 
-def _summary_payload(harvest: Path) -> dict[str, object]:
+def _completeness_report(harvest: Path) -> CompletenessReport | None:
     path = run_store.find_first(harvest, "summary.json")
     if path is None:
-        return {}
-    return run_store.read_json_mapping(path) or {}
-
-
-def _oracle_rows(payload: dict[str, object]) -> list[tuple[str, str]]:
-    oracle = payload.get("oracle")
-    rows = oracle if isinstance(oracle, dict) else {}
-    return sorted((str(k), str(v)) for k, v in rows.items())
+        return None
+    payload = run_store.read_json_mapping(path)
+    return CompletenessReport.from_mapping(payload or {})
 
 
 def _header_lines(rid: str, pins: dict[str, str]) -> list[str]:
@@ -53,7 +49,7 @@ def _artifact_lines(run_url: str, rid: str) -> list[str]:
     ]
 
 
-def _oracle_table_lines(oracle_rows: list[tuple[str, str]]) -> list[str]:
+def _oracle_table_lines(oracle_rows: tuple[tuple[str, str], ...]) -> list[str]:
     lines = ["### Oracle verdicts", "", "| Cell | Gate |", "|---|---|"]
     if oracle_rows:
         lines += [f"| `{cell}` | {verdict} |" for cell, verdict in oracle_rows]
@@ -62,32 +58,27 @@ def _oracle_table_lines(oracle_rows: list[tuple[str, str]]) -> list[str]:
     return lines
 
 
-def _what_happened_lines(
-    completeness: dict[str, object], oracle_rows: list[tuple[str, str]]
-) -> list[str]:
+def _what_happened_lines(report: CompletenessReport | None) -> list[str]:
     lines = ["## What happened", ""]
-    if not completeness:
+    if report is None:
         lines.append(
             "Preflight-only dispatch (or harvest artifact missing): no cells were "
             "expected and none were run. Re-dispatch with `stage=smoke` to exercise "
             "the pipeline end-to-end."
         )
         return lines
-    missing = list(completeness.get("missing", []))  # type: ignore[arg-type]
-    logged = list(completeness.get("logged_cells", []))  # type: ignore[arg-type]
-    expected = list(completeness.get("expected_cells", []))  # type: ignore[arg-type]
-    label = "complete" if completeness.get("complete") else "INCOMPLETE"
+    label = "complete" if report.complete else "INCOMPLETE"
     lines += [
-        f"- Expected cells: {len(expected)}",
-        f"- Logged cells (manifest.json lines): {len(logged)}",
+        f"- Expected cells: {len(report.expected_cells)}",
+        f"- Logged cells (manifest.json lines): {len(report.logged_cells)}",
         f"- Completeness: {label}",
         "",
     ]
-    if missing:
+    if report.missing:
         lines += ["### Missing runs (never imputed)", ""]
-        lines += [f"- `{cell}`" for cell in missing]
+        lines += [f"- `{cell}`" for cell in report.missing]
         lines += [""]
-    lines += _oracle_table_lines(oracle_rows)
+    lines += _oracle_table_lines(report.oracle_rows)
     return lines
 
 
@@ -122,10 +113,10 @@ def render_summary(
     repo_root = find_repo_root()
     harvest = harvest_dir if harvest_dir.is_absolute() else (repo_root / harvest_dir)
     rid = adapter.resolve_run_id(run_id, fallback_local=False)
-    payload = _summary_payload(harvest)
+    report = _completeness_report(harvest)
     lines = _header_lines(rid, run_store.read_env_pins(harvest))
     lines += _artifact_lines(adapter.run_url(), rid)
-    lines += _what_happened_lines(payload, _oracle_rows(payload))
+    lines += _what_happened_lines(report)
     lines += _model_lines(harvest)
     lines += [
         "",

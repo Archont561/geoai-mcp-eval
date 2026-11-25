@@ -122,26 +122,26 @@ def inspect(archive_path: Path = ARCHIVE_ARG) -> None:
     """Validate RunArchive integrity and print a Rich overview of trials and scores."""
     overview = archive_service.inspect_archive(archive_path)
     table = Table(
-        title=f"RunArchive · {overview['run_id']} ({overview['stage']})",
+        title=f"RunArchive · {overview.run_id} ({overview.stage})",
         header_style="bold cyan",
     )
     for col in ("trial_id", "paradigm", "enforcement", "rep", "TSR", "MPS"):
         table.add_column(col)
-    for row in overview["trials"]:
-        tsr_cell = "1" if row["task_success"] else "0"
-        mps_cell = f"{row['predicate_score']:.2f}"
+    for row in overview.trials:
+        tsr_cell = "1" if row.task_success else "0"
+        mps_cell = f"{row.predicate_score:.2f}"
         table.add_row(
-            row["trial_id"],
-            row["paradigm"],
-            row["enforcement_level"],
-            str(row["repetition"]),
+            row.trial_id,
+            row.paradigm,
+            row.enforcement_level,
+            str(row.repetition),
             tsr_cell,
             mps_cell,
         )
     console.print(table)
-    trials = overview["trial_count"]
-    tsr = f"{overview['task_success_rate']:.2%}"
-    mps = f"{overview['mean_predicate_score']:.4f}"
+    trials = overview.trial_count
+    tsr = f"{overview.task_success_rate:.2%}"
+    mps = f"{overview.mean_predicate_score:.4f}"
     console.print(Text(f"trials={trials}  TSR={tsr}  MPS={mps}", style="bold green"))
 
 

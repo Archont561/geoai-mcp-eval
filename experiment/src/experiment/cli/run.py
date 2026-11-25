@@ -109,7 +109,7 @@ def _run_banner(spec: RunSpec, out: Path) -> Panel:
     )
 
 
-def _run_with_progress(root: Path, spec: RunSpec, out: Path) -> dict:
+def _run_with_progress(root: Path, spec: RunSpec, out: Path) -> runs.RunSummary:
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -125,16 +125,18 @@ def _run_with_progress(root: Path, spec: RunSpec, out: Path) -> dict:
 def _execute_run(target: _RunTarget, backend: _RunBackend, limits: _RunLimits) -> None:
     try:
         spec = runs.parse_run_spec(
-            backend.driver,
-            backend.model,
-            backend.host,
-            target.arms,
-            target.task,
-            backend.backend,
-            max_cell_tokens=limits.max_cell_tokens,
-            use_cache=not limits.no_cache,
-            cache_dir=limits.cache_dir,
-            enforce=target.enforce,
+            runs.RunSpecInput(
+                driver=backend.driver,
+                model=backend.model,
+                host=backend.host,
+                arm=target.arms,
+                task=target.task,
+                backend=backend.backend,
+                max_cell_tokens=limits.max_cell_tokens,
+                use_cache=not limits.no_cache,
+                cache_dir=limits.cache_dir,
+                enforce=target.enforce,
+            )
         )
     except runs.RunSpecError as exc:
         raise typer.BadParameter(str(exc)) from exc
@@ -145,7 +147,7 @@ def _execute_run(target: _RunTarget, backend: _RunBackend, limits: _RunLimits) -
     if limits.pack_zip:
         _, zip_path = archive_service.pack_archive(archive_service.PackOptions(source_dir=out))
         console.print(Text(f"Archive written: {zip_path}", style="green"))
-    if any(cell["status"] != "ok" for cell in summary["cells"]):
+    if any(cell.status != "ok" for cell in summary.cells):
         raise typer.Exit(code=1)
 
 

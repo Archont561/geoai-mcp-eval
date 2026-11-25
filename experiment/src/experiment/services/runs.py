@@ -24,7 +24,12 @@ from experiment.adapters.harness_io import (
 )
 from experiment.adapters.task_repository import discover_task_files, load_task
 from experiment.domain.cache_key import CacheStats
-from experiment.domain.run import EnforcementLevel, TrialKey, arm_to_paradigm, enforce_code_to_level
+from experiment.domain.run import (
+    EnforcementLevel,
+    TrialKey,
+    arm_to_paradigm,
+    parse_enforcement_level,
+)
 from experiment.domain.task import Task
 from experiment.domain.usage import (
     TokenCapExceededError,
@@ -32,6 +37,7 @@ from experiment.domain.usage import (
     aggregate_run_usage,
 )
 from experiment.services.measurement import TrialMeasurementOptions, measure_trial
+from experiment.services.reports import CellSummary, RunSummary
 from experiment.services.runners import ollama as drivers
 from experiment.services.runners import scripted
 from experiment.services.runners.ports import CellRequest, RunSpec
@@ -42,6 +48,8 @@ __all__ = [
     "CellRequest",
     "RunSpec",
     "RunSpecError",
+    "RunSpecInput",
+    "RunSummary",
     "discover_tasks",
     "model_label",
     "parse_run_spec",
@@ -53,6 +61,22 @@ __all__ = [
 
 class RunSpecError(ValueError):
     """A run cannot start with the requested driver, arm, or backend."""
+
+
+@dataclass(frozen=True)
+class RunSpecInput:
+    """Raw CLI/caller inputs validated into a :class:`RunSpec`."""
+
+    driver: str = "scripted"
+    model: str | None = None
+    host: str | None = None
+    arm: str = "both"
+    task: str = "all"
+    backend: str = "local"
+    max_cell_tokens: int | None = None
+    use_cache: bool = True
+    cache_dir: Path | None = None
+    enforce: str = "semantic_repair"
 
 
 @dataclass(frozen=True)
@@ -96,22 +120,9 @@ def _resolve_backend_profile(
     return profile
 
 
-_ENFORCEMENT_LEVELS: tuple[EnforcementLevel, ...] = (
-    "none",
-    "declarative",
-    "syntactic",
-    "semantic_repair",
-    "transactional",
-)
-
-
 def _parse_enforce(raw: str) -> EnforcementLevel:
-    cleaned = raw.strip()
-    lower = cleaned.lower()
-    if lower in _ENFORCEMENT_LEVELS:
-        return lower  # type: ignore[return-value]
     try:
-        return enforce_code_to_level(cleaned)
+        return parse_enforcement_level(raw)
     except ValueError as exc:
         raise RunSpecError(str(exc)) from exc
 
@@ -123,34 +134,22 @@ def _validate_run_inputs(driver: str, max_cell_tokens: int | None) -> None:
         raise RunSpecError("--max-cell-tokens must be a positive integer")
 
 
-def parse_run_spec(  # noqa: CC102
-    driver: str,
-    model: str | None,
-    host: str | None,
-    arm: str,
-    task: str,
-    backend: str,
-    *,
-    max_cell_tokens: int | None = None,
-    use_cache: bool = True,
-    cache_dir: Path | None = None,
-    enforce: str = "semantic_repair",
-) -> RunSpec:
+def parse_run_spec(raw: RunSpecInput) -> RunSpec:
     """Resolve the backend and validate a requested run before creating output."""
-    _validate_run_inputs(driver, max_cell_tokens)
-    profile = _resolve_backend_profile(driver, backend, host, model)
+    _validate_run_inputs(raw.driver, raw.max_cell_tokens)
+    profile = _resolve_backend_profile(raw.driver, raw.backend, raw.host, raw.model)
     return RunSpec(
-        driver=driver,
+        driver=raw.driver,
         model=profile.model,
         host=str(profile.base_url),
-        arms=_parse_arms(arm),
-        task_ids=_parse_tasks(task),
+        arms=_parse_arms(raw.arm),
+        task_ids=_parse_tasks(raw.task),
         profile=profile,
-        max_cell_tokens=max_cell_tokens,
-        backend_id=backend,
-        use_cache=use_cache,
-        cache_dir=cache_dir,
-        enforce=_parse_enforce(enforce),
+        max_cell_tokens=raw.max_cell_tokens,
+        backend_id=raw.backend,
+        use_cache=raw.use_cache,
+        cache_dir=raw.cache_dir,
+        enforce=_parse_enforce(raw.enforce),
     )
 
 
@@ -338,30 +337,31 @@ def _write_manifest(
     return manifest
 
 
-def _write_summary(ctx: _RunContext, cells: list[dict[str, Any]]) -> dict[str, Any]:
+def _write_summary(ctx: _RunContext, cells: list[dict[str, Any]]) -> RunSummary:
     generated_at = datetime.now(UTC).isoformat()
     run_usage = aggregate_run_usage([cell.get("usage") or {} for cell in cells])
-    summary = {
-        "run_id": ctx.output_root.name,
-        "prototype": True,
-        "driver": ctx.spec.driver,
-        "backend_id": ctx.spec.backend_id,
-        "model": model_label(ctx.spec.driver, ctx.spec.model),
-        "model_digest": ctx.model_digest,
-        "use_cache": ctx.spec.use_cache,
-        "generated_at": generated_at,
-        "max_cell_tokens": ctx.spec.max_cell_tokens,
-        "usage": run_usage,
-        "cells": cells,
-        "passed": sum(1 for c in cells if c["oracle_passed"]),
-        "total": len(cells),
-    }
-    run_store.write_json(ctx.output_root / "summary.json", summary)
+    typed_cells = tuple(CellSummary.from_mapping(cell) for cell in cells)
+    summary = RunSummary(
+        run_id=ctx.output_root.name,
+        prototype=True,
+        driver=ctx.spec.driver,
+        backend_id=ctx.spec.backend_id,
+        model=model_label(ctx.spec.driver, ctx.spec.model),
+        model_digest=ctx.model_digest,
+        use_cache=ctx.spec.use_cache,
+        generated_at=generated_at,
+        max_cell_tokens=ctx.spec.max_cell_tokens,
+        usage=run_usage,
+        cells=typed_cells,
+        passed=sum(1 for cell in typed_cells if cell.oracle_passed),
+        total=len(typed_cells),
+    )
+    run_store.write_json(ctx.output_root / "summary.json", summary.to_dict())
     _write_manifest(ctx, cells, run_usage, generated_at)
     return summary
 
 
-def run_experiment(task_root: Path, spec: RunSpec, output_root: Path) -> dict[str, Any]:
+def run_experiment(task_root: Path, spec: RunSpec, output_root: Path) -> RunSummary:
     ctx = _RunContext(spec=spec, output_root=output_root, model_digest=_resolve_run_digest(spec))
     cells: list[dict[str, Any]] = []
     for task_path in discover_tasks(task_root):
