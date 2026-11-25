@@ -2,10 +2,80 @@
 
 from __future__ import annotations
 
+from enum import IntEnum, StrEnum
+
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
 DEFAULT_MODEL = "qwen2.5-coder:0.5b"
 LOCAL_BACKEND = "local"
+
+
+class TunnelErrorKind(StrEnum):
+    """Semantic failure categories for SSH reachability and tunnel checks."""
+
+    SSH_UNREACHABLE = "ssh-unreachable"
+    TUNNEL_DEAD = "tunnel-dead"
+
+
+class BackendProbeErrorKind(StrEnum):
+    """Semantic failure categories for backend preflight checks."""
+
+    SSH_UNREACHABLE = "ssh-unreachable"
+    TUNNEL_DEAD = "tunnel-dead"
+    MODEL_ABSENT = "model-absent"
+    AUTH_ERROR = "auth-error"
+    CLIENT_ERROR = "client-error"
+    TOKEN_LIMIT = "token-limit"
+    COMPLETION_REJECTED = "completion-rejected"
+
+    def exit_code(self) -> BackendCheckExitCode:
+        """Return the documented CLI exit status for this preflight error category."""
+        return BackendCheckExitCode.from_error_kind(self)
+
+
+class BackendCheckExitCode(IntEnum):
+    """Process exit codes emitted by ``experiment env backend-check``."""
+
+    READY = 0
+    SSH_UNREACHABLE = 10
+    TUNNEL_DEAD = 11
+    MODEL_ABSENT = 12
+    AUTH_CLIENT = 13
+    TOKEN_LIMIT = 14
+    COMPLETION_REJECTED = 15
+
+    @classmethod
+    def from_error_kind(cls, kind: BackendProbeErrorKind | str) -> BackendCheckExitCode:
+        """Map a preflight error kind to its CLI exit code."""
+        mapping: dict[str, BackendCheckExitCode] = {
+            BackendProbeErrorKind.SSH_UNREACHABLE: cls.SSH_UNREACHABLE,
+            BackendProbeErrorKind.TUNNEL_DEAD: cls.TUNNEL_DEAD,
+            BackendProbeErrorKind.MODEL_ABSENT: cls.MODEL_ABSENT,
+            BackendProbeErrorKind.AUTH_ERROR: cls.AUTH_CLIENT,
+            BackendProbeErrorKind.CLIENT_ERROR: cls.AUTH_CLIENT,
+            BackendProbeErrorKind.TOKEN_LIMIT: cls.TOKEN_LIMIT,
+            BackendProbeErrorKind.COMPLETION_REJECTED: cls.COMPLETION_REJECTED,
+        }
+        return mapping.get(str(kind), cls.COMPLETION_REJECTED)
+
+
+class RetryableHttpStatus(IntEnum):
+    """HTTP status codes considered transient and eligible for retry/backoff."""
+
+    TOO_MANY_REQUESTS = 429
+    INTERNAL_SERVER_ERROR = 500
+    BAD_GATEWAY = 502
+    SERVICE_UNAVAILABLE = 503
+    GATEWAY_TIMEOUT = 504
+
+    @classmethod
+    def contains(cls, status_code: int) -> bool:
+        """Return True when ``status_code`` is a retryable transient HTTP status."""
+        try:
+            cls(status_code)
+            return True
+        except ValueError:
+            return False
 
 
 class BackendError(Exception):

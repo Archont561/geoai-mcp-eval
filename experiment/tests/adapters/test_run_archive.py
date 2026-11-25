@@ -14,9 +14,11 @@ from experiment.adapters.run_archive import (
     collect_dir_files,
 )
 from experiment.domain.run import (
+    EnforcementLevel,
     EnvironmentPin,
     ExperimentRun,
     ModelPin,
+    Paradigm,
     RunProvenance,
     Treatment,
     TrialKey,
@@ -112,11 +114,15 @@ def test_run_archive_merge_archives_packs_fragments_into_one_zip(
     sample_archive_trial: tuple[TrialRecord, TrialMeasurement, dict[str, bytes]],
 ) -> None:
     trial_a, meas_a, files_a = sample_archive_trial
-    key_b = trial_a.key.model_copy(update={"paradigm": "codegen", "enforcement_level": "none"})
+    key_b = trial_a.key.model_copy(
+        update={"paradigm": Paradigm.CODEGEN, "enforcement_level": EnforcementLevel.NONE}
+    )
     trial_b = trial_a.model_copy(
         update={
             "key": key_b,
-            "treatment": Treatment(paradigm="codegen", enforcement_level="none"),
+            "treatment": Treatment(
+                paradigm=Paradigm.CODEGEN, enforcement_level=EnforcementLevel.NONE
+            ),
         }
     )
     meas_b = meas_a.model_copy(update={"key": key_b, "trial_id": key_b.slug})

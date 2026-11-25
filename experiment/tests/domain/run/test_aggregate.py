@@ -14,10 +14,12 @@ from experiment.domain.run import (
     BehavioralAnnotations,
     CostAndProcessMetrics,
     DeterminismAudit,
+    EnforcementLevel,
     EnvironmentPin,
     ExperimentRun,
     InstrumentAudit,
     ModelPin,
+    Paradigm,
     RunMergeError,
     RunProvenance,
     TokenUsage,
@@ -80,11 +82,15 @@ def test_experiment_run_merge_combines_parallel_fragments_deterministically(
         trials={trial_a.trial_id: trial_a},
         measurements={meas_a.trial_id: meas_a},
     )
-    key_b = sample_trial.key.model_copy(update={"paradigm": "codegen", "enforcement_level": "none"})
+    key_b = sample_trial.key.model_copy(
+        update={"paradigm": Paradigm.CODEGEN, "enforcement_level": EnforcementLevel.NONE}
+    )
     trial_b = sample_trial.model_copy(
         update={
             "key": key_b,
-            "treatment": Treatment(paradigm="codegen", enforcement_level="none"),
+            "treatment": Treatment(
+                paradigm=Paradigm.CODEGEN, enforcement_level=EnforcementLevel.NONE
+            ),
         }
     )
     cell_b = ExperimentRun(

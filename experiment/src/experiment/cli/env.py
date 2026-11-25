@@ -12,6 +12,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from experiment.domain.backend import BackendCheckExitCode
 from experiment.services import backend_check as backend_check_service
 from experiment.services import mcp_selftest as mcp_selftest_service
 from experiment.services import qgis as qgis_service
@@ -57,28 +58,18 @@ SCRIPT_ARG = typer.Argument(..., help="PyQGIS script to run in the scrubbed sand
 ARTIFACTS_DIR_OPTION = typer.Option(Path("."), "--artifacts-dir", help="cwd for the script")
 TIMEOUT_OPTION = typer.Option(120, "--timeout", help="Wall-clock timeout in seconds")
 
-EXIT_READY = 0
-EXIT_SSH_UNREACHABLE = 10
-EXIT_TUNNEL_DEAD = 11
-EXIT_MODEL_ABSENT = 12
-EXIT_AUTH_CLIENT = 13
-EXIT_TOKEN_LIMIT = 14
-EXIT_COMPLETION_REJECTED = 15
-
-_BACKEND_CHECK_EXIT_CODES: dict[str, int] = {
-    "ssh-unreachable": EXIT_SSH_UNREACHABLE,
-    "tunnel-dead": EXIT_TUNNEL_DEAD,
-    "model-absent": EXIT_MODEL_ABSENT,
-    "auth-error": EXIT_AUTH_CLIENT,
-    "client-error": EXIT_AUTH_CLIENT,
-    "token-limit": EXIT_TOKEN_LIMIT,
-    "completion-rejected": EXIT_COMPLETION_REJECTED,
-}
+EXIT_READY: BackendCheckExitCode = BackendCheckExitCode.READY
+EXIT_SSH_UNREACHABLE: BackendCheckExitCode = BackendCheckExitCode.SSH_UNREACHABLE
+EXIT_TUNNEL_DEAD: BackendCheckExitCode = BackendCheckExitCode.TUNNEL_DEAD
+EXIT_MODEL_ABSENT: BackendCheckExitCode = BackendCheckExitCode.MODEL_ABSENT
+EXIT_AUTH_CLIENT: BackendCheckExitCode = BackendCheckExitCode.AUTH_CLIENT
+EXIT_TOKEN_LIMIT: BackendCheckExitCode = BackendCheckExitCode.TOKEN_LIMIT
+EXIT_COMPLETION_REJECTED: BackendCheckExitCode = BackendCheckExitCode.COMPLETION_REJECTED
 
 
 def backend_check_exit_code(kind: str) -> int:
     """Map a semantic :class:`BackendCheckError` kind to its CLI exit status."""
-    return _BACKEND_CHECK_EXIT_CODES.get(kind, EXIT_COMPLETION_REJECTED)
+    return int(BackendCheckExitCode.from_error_kind(kind))
 
 
 @app.command()

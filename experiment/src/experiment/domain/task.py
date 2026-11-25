@@ -21,16 +21,56 @@ type, in a layer that must not know about evaluators.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 _STRICT = ConfigDict(extra="forbid", frozen=True)
 
-TaskFamily = Literal["P", "A", "C"]
-Expressibility = Literal["low", "medium", "high"]
-Contamination = Literal["inherited", "constructed"]
-BaselineStatus = Literal["pending", "complete"]
+
+class TaskFamily(StrEnum):
+    """Pilot and study GIS task family code."""
+
+    P = "P"
+    A = "A"
+    C = "C"
+
+    def display_name(self) -> str:
+        """Return the full English family name for reports and summaries."""
+        labels: dict[TaskFamily, str] = {
+            TaskFamily.P: "Prepare",
+            TaskFamily.A: "Analyze",
+            TaskFamily.C: "Cartography",
+        }
+        return labels[self]
+
+    @classmethod
+    def required_pilot_families(cls) -> frozenset[TaskFamily]:
+        """Return the set of task families that a valid pilot suite must cover."""
+        return frozenset(cls)
+
+
+class Expressibility(StrEnum):
+    """How expressible a task is through typed GIS tools."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class Contamination(StrEnum):
+    """Provenance contamination stratum of a task."""
+
+    INHERITED = "inherited"
+    CONSTRUCTED = "constructed"
+
+
+class BaselineStatus(StrEnum):
+    """Completion state of the task's human reference baseline."""
+
+    PENDING = "pending"
+    COMPLETE = "complete"
 
 
 class DifficultyRubric(BaseModel):

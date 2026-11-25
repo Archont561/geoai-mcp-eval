@@ -7,7 +7,15 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from experiment.domain.backend import BackendError, BackendProfile, normalize_host
+from experiment.domain.backend import (
+    BackendCheckExitCode,
+    BackendError,
+    BackendProbeErrorKind,
+    BackendProfile,
+    RetryableHttpStatus,
+    TunnelErrorKind,
+    normalize_host,
+)
 
 
 def test_profile_defaults() -> None:
@@ -73,3 +81,32 @@ def test_normalize_host_strips_trailing_slashes_idempotently(host: str, slashes:
 def test_backend_error_formats_message() -> None:
     err = BackendError("transport", "boom")
     assert "boom" in str(err)
+
+
+@given(kind=st.sampled_from(list(BackendProbeErrorKind)))
+def test_backend_probe_error_kind_maps_to_nonzero_exit_code(kind: BackendProbeErrorKind) -> None:
+    code = kind.exit_code()
+    assert isinstance(code, BackendCheckExitCode)
+    assert code is BackendCheckExitCode.from_error_kind(kind)
+    assert code >= 10
+    assert BackendCheckExitCode.from_error_kind("unrecognized-kind") is (
+        BackendCheckExitCode.COMPLETION_REJECTED
+    )
+
+
+@given(tunnel_kind=st.sampled_from(list(TunnelErrorKind)))
+def test_tunnel_error_kinds_are_valid_backend_probe_error_kinds(
+    tunnel_kind: TunnelErrorKind,
+) -> None:
+    assert BackendProbeErrorKind(tunnel_kind.value).exit_code() in (
+        BackendCheckExitCode.SSH_UNREACHABLE,
+        BackendCheckExitCode.TUNNEL_DEAD,
+    )
+
+
+@given(status_code=st.integers(min_value=100, max_value=599))
+def test_retryable_http_status_contains_matches_documented_transient_codes(
+    status_code: int,
+) -> None:
+    expected = status_code in {429, 500, 502, 503, 504}
+    assert RetryableHttpStatus.contains(status_code) is expected

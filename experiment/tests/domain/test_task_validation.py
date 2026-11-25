@@ -7,7 +7,11 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
+from experiment.domain.run import AssertionTier
 from experiment.domain.task_validation import (
+    De9imRelation,
+    OracleAssertionType,
+    PilotTrap,
     ValidationIssue,
     ValidationReport,
     extract_fixture_paths,
@@ -96,3 +100,22 @@ def test_validation_report_passed_iff_no_issues_and_roundtrips(
 def test_validation_issue_forbids_extra_fields() -> None:
     with pytest.raises(ValidationError):
         ValidationIssue(path="x", message="y", extra=1)  # type: ignore[call-arg]
+
+
+@given(oracle_type=st.sampled_from(list(OracleAssertionType)))
+def test_oracle_assertion_type_has_required_fields_and_default_tier(
+    oracle_type: OracleAssertionType,
+) -> None:
+    assert oracle_type.required_fields()
+    assert oracle_type.default_tier() in set(AssertionTier)
+
+
+@given(relation=st.sampled_from(list(De9imRelation)))
+def test_de9im_relation_matrix_override(relation: De9imRelation) -> None:
+    expected = "T*F**FFF*" if relation is De9imRelation.EQUALS else None
+    assert relation.matrix_override() == expected
+
+
+@given(trap=st.sampled_from(list(PilotTrap)))
+def test_pilot_trap_enum_roundtrips(trap: PilotTrap) -> None:
+    assert PilotTrap(trap.value) is trap

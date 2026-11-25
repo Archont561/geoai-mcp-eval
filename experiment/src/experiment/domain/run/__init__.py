@@ -5,8 +5,10 @@ from __future__ import annotations
 from experiment.domain.run._common import (
     ENFORCEMENT_LEVELS,
     STRICT_MODEL,
+    Arm,
     ArtifactKind,
     AssertionTier,
+    Driver,
     EnforcementLevel,
     ExecutionStatus,
     FailureClass,
@@ -44,6 +46,7 @@ from experiment.domain.run.trial import (
 __all__ = [
     "ENFORCEMENT_LEVELS",
     "STRICT_MODEL",
+    "Arm",
     "ArtifactKind",
     "ArtifactRef",
     "AssertionResult",
@@ -51,6 +54,7 @@ __all__ = [
     "BehavioralAnnotations",
     "CostAndProcessMetrics",
     "DeterminismAudit",
+    "Driver",
     "EnforcementLevel",
     "EnvironmentPin",
     "ExecutionStatus",

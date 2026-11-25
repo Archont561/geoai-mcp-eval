@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Literal
 
 import typer
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
+from experiment.domain.run import RunStage
 from experiment.services import archive as archive_service
 
 app = typer.Typer(help="Pack, summarize, inspect, and prune RunArchive zip bundles.")
@@ -50,7 +50,7 @@ HARVEST_FLAG_OPT = typer.Option(
     help="Run harvest completeness/determinism gate before zipping",
 )
 STAGE_OPT = typer.Option(
-    "pilot",
+    RunStage.PILOT,
     "--stage",
     envvar="EXPERIMENT_STAGE",
     help="Run stage (preflight|smoke|pilot|study)",
@@ -90,7 +90,7 @@ def pack(  # noqa: CC102
     fail_on_missing: bool = FAIL_MISSING_OPT,
     skip_oracle: bool = SKIP_ORACLE_OPT,
     run_harvest: bool = HARVEST_FLAG_OPT,
-    stage: Literal["preflight", "smoke", "pilot", "study"] = STAGE_OPT,
+    stage: RunStage = STAGE_OPT,
 ) -> None:
     """Merge cell outputs into one validated RunArchive zip and render summary."""
     parsed_arms = tuple(p.strip() for p in arms.split(",") if p.strip()) or ("A", "B")

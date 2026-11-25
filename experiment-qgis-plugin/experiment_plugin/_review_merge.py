@@ -92,7 +92,7 @@ def load_recorded_executions(
     for raw in raw_study.get("processing_executions") or []:
         execution = _to_recorded_execution(raw)
         if execution is not None:
-            recorded.append((execution, "host:processing"))
+            recorded.append((execution, metrics.TrajectoryOrigin.HOST_PROCESSING))
     return recorded
 
 
@@ -117,7 +117,7 @@ def load_recorded_manual_groups(
     for raw in raw_study.get("manual_action_groups") or []:
         group = _to_recorded_manual_group(raw)
         if group is not None:
-            recorded.append((group, "session_manual"))
+            recorded.append((group, metrics.TrajectoryOrigin.SESSION_MANUAL))
     return recorded
 
 

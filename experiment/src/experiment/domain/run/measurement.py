@@ -109,38 +109,9 @@ class BehavioralAnnotations(BaseModel):
     semantic_judge_notes: str | None = None
 
 
-TIER_TRIVIAL: AssertionTier = "trivial"
-TIER_SPATIAL: AssertionTier = "spatial"
-TIER_VALUE: AssertionTier = "value"
-
-_TIER_ALIASES: dict[str, AssertionTier] = {
-    "a": TIER_TRIVIAL,
-    "b": TIER_SPATIAL,
-    "c": TIER_VALUE,
-    "trivial": TIER_TRIVIAL,
-    "spatial": TIER_SPATIAL,
-    "value": TIER_VALUE,
-}
-_TYPE_TO_TIER: dict[str, AssertionTier] = {
-    "file_exists": TIER_TRIVIAL,
-    "ogr_readable": TIER_TRIVIAL,
-    "feature_count": TIER_TRIVIAL,
-    "geojson_feature_count": TIER_TRIVIAL,
-    "raster_shape": TIER_TRIVIAL,
-    "nodata_ok": TIER_TRIVIAL,
-    "fields_present": TIER_TRIVIAL,
-    "crs_equals": TIER_SPATIAL,
-    "axis_order_ok": TIER_SPATIAL,
-    "geom_type_in": TIER_SPATIAL,
-    "geometry_valid": TIER_SPATIAL,
-    "de9im_relation": TIER_SPATIAL,
-    "representative_point_matches": TIER_SPATIAL,
-    "extent_within_tol": TIER_SPATIAL,
-    "buffer_distance": TIER_SPATIAL,
-    "attr_stats": TIER_VALUE,
-    "jenks_classification": TIER_VALUE,
-    "min_dist_to": TIER_VALUE,
-}
+TIER_TRIVIAL: AssertionTier = AssertionTier.TRIVIAL
+TIER_SPATIAL: AssertionTier = AssertionTier.SPATIAL
+TIER_VALUE: AssertionTier = AssertionTier.VALUE
 
 
 def infer_assertion_tier(
@@ -148,11 +119,7 @@ def infer_assertion_tier(
     explicit_tier: str | None = None,
 ) -> AssertionTier | None:
     """Resolve an assertion's English complexity tier from an explicit tag or type name."""
-    if explicit_tier is not None:
-        mapped = _TIER_ALIASES.get(explicit_tier.strip().lower())
-        if mapped is not None:
-            return mapped
-    return _TYPE_TO_TIER.get(assertion_type.strip().lower())
+    return AssertionTier.infer(assertion_type, explicit_tier=explicit_tier)
 
 
 def compute_outcome_metrics(

@@ -18,10 +18,10 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from experiment.adapters import run_store
-from experiment.domain.backend import BackendProfile
+from experiment.domain.backend import BackendProfile, RetryableHttpStatus
 
 DEFAULT_BASE_URL = "http://127.0.0.1:11434"
-RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
+RETRYABLE_STATUSES: frozenset[RetryableHttpStatus] = frozenset(RetryableHttpStatus)
 DEFAULT_RETRY_BACKOFF_S = 1.0
 DEFAULT_READY_ATTEMPTS = 60
 DEFAULT_READY_SLEEP_S = 2.0
@@ -131,7 +131,7 @@ def request_with_retry(
             resp = method(url, **kwargs)
         except requests.exceptions.RequestException as exc:
             raise HttpTransportError(f"HTTP transport error reaching {url}: {exc}") from exc
-        if resp.status_code not in RETRYABLE_STATUSES:
+        if not RetryableHttpStatus.contains(resp.status_code):
             return resp
         last_resp = resp
         if attempt + 1 < attempts:

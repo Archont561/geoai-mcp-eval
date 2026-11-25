@@ -21,16 +21,20 @@ from shapely.geometry import Point, mapping, shape
 from shapely.ops import unary_union
 
 from experiment.domain.jenks import fisher_jenks_breaks
+from experiment.domain.task_validation import De9imRelation
 
 GeoJSON = dict[str, Any]
 
 _PROPS = "properties"
 
 _DE9IM_PREDICATES = ["equals", "touches", "within", "contains", "crosses", "overlaps", "intersects"]
-# Matrix literals that decide a predicate before the GEOS predicate is consulted.
-# equals: unioned multipart geometries can report equality through the matrix even
-# when the equals predicate disagrees, so the matrix is trusted first.
-_DE9IM_MATRIX_OVERRIDES = {"equals": "T*F**FFF*"}
+
+
+def _matrix_override(predicate: str) -> str | None:
+    try:
+        return De9imRelation(predicate).matrix_override()
+    except ValueError:
+        return None
 
 
 def _ensure_feature_maps(features: object) -> list[dict[str, Any]]:
@@ -263,7 +267,7 @@ def relate_de9im(geojson_a: GeoJSON, geojson_b: GeoJSON) -> dict[str, Any]:
     matrix = relate(a, b)
     name = "disjoint"
     for predicate in _DE9IM_PREDICATES:
-        override = _DE9IM_MATRIX_OVERRIDES.get(predicate)
+        override = _matrix_override(predicate)
         matches = (override is not None and str(matrix) == override) or getattr(a, predicate)(b)
         if matches:
             name = predicate

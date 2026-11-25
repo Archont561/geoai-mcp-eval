@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Sequence
+from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -18,7 +19,14 @@ DEFAULT_WORKFLOW = "experiment.yml"
 ARTIFACT_GLOB = "experiment-run-*.zip"
 ARTIFACT_PATTERN = "experiment-run-*"
 
-CachePolicy = Literal["use", "refresh"]
+
+class CachePolicy(StrEnum):
+    """Local artifact cache behavior when loading workflow runs."""
+
+    USE = "use"
+    REFRESH = "refresh"
+
+
 CommandRunner = Callable[[Sequence[str]], CommandResult]
 
 

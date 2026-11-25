@@ -8,6 +8,15 @@ from hypothesis import strategies as st
 
 from experiment.domain.run import (
     ENFORCEMENT_LEVELS,
+    Arm,
+    ArtifactKind,
+    AssertionTier,
+    Driver,
+    EnforcementLevel,
+    FailureClass,
+    Paradigm,
+    RunStage,
+    TrajectoryClass,
     arm_to_paradigm,
     enforce_code_to_level,
     infer_assertion_tier,
@@ -75,3 +84,63 @@ def test_infer_assertion_tier_maps_legacy_letters_and_types() -> None:
     assert infer_assertion_tier("custom_type", explicit_tier="C") == "value"
     assert infer_assertion_tier("custom_type", explicit_tier="spatial") == "spatial"
     assert infer_assertion_tier("unknown_type") is None
+
+
+@given(level=st.sampled_from(list(EnforcementLevel)))
+def test_enforcement_level_legacy_code_roundtrips(level: EnforcementLevel) -> None:
+    code = level.legacy_code()
+    assert EnforcementLevel.from_code(code) is level
+    assert EnforcementLevel.parse(code.lower()) is level
+
+
+@given(arm=st.sampled_from(list(Arm)))
+def test_arm_expand_and_to_paradigm_are_consistent(arm: Arm) -> None:
+    assert Arm.expand(arm.value.lower()) == (arm,)
+    assert Arm.expand("both") == (Arm.A, Arm.B)
+    assert arm.to_paradigm() is Paradigm.from_arm(arm)
+
+
+@given(
+    driver=st.sampled_from(list(Driver)),
+    model=st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789:-.", min_size=1, max_size=24),
+)
+def test_driver_parse_and_model_label(driver: Driver, model: str) -> None:
+    assert Driver.parse(f" {driver.value.upper()} ") is driver
+    expected = model if driver is Driver.OLLAMA else "scripted-canned"
+    assert driver.model_label(model) == expected
+    with pytest.raises(ValueError, match="--driver"):
+        Driver.parse("unsupported-driver")
+
+
+@given(paradigm=st.sampled_from(list(Paradigm)))
+def test_paradigm_allows_enforcement_excludes_codegen_and_human(paradigm: Paradigm) -> None:
+    expected = paradigm not in (Paradigm.CODEGEN, Paradigm.HUMAN_GUI)
+    assert paradigm.allows_enforcement() is expected
+
+
+@given(
+    stem=st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789_-", min_size=1, max_size=16),
+    ext=st.sampled_from([".gpkg", ".log", ".py", ".bin"]),
+)
+def test_artifact_kind_from_filename_classifies_known_and_unknown_suffixes(
+    stem: str, ext: str
+) -> None:
+    kind = ArtifactKind.from_filename(f"nested/{stem}{ext}")
+    expected = {
+        ".gpkg": ArtifactKind.DELIVERABLE,
+        ".log": ArtifactKind.LOG,
+        ".py": ArtifactKind.SCRIPT,
+        ".bin": ArtifactKind.OTHER,
+    }[ext]
+    assert kind is expected
+    assert ArtifactKind.from_filename("oracle-passes.json") is ArtifactKind.ORACLE_PASSES
+    assert ArtifactKind.from_filename("transcript.jsonl") is ArtifactKind.TRANSCRIPT
+
+
+@given(
+    enum_cls=st.sampled_from([RunStage, TrajectoryClass, FailureClass, AssertionTier]),
+)
+def test_run_str_enums_roundtrip_by_value(enum_cls: type[RunStage]) -> None:
+    for member in enum_cls:
+        assert enum_cls(member.value) is member
+        assert str(member) == member.value
