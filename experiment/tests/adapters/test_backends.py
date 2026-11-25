@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import httpx
 import pytest
+import respx
 from fakes import make_mock_response
 
 from experiment.adapters import backends
@@ -203,3 +205,32 @@ def test_resolve_model_digest_matches_exact_and_latest_and_handles_failures(
 
     fake_http_session.get.side_effect = httpx.ConnectError("down")
     assert backends.resolve_model_digest(fake_http_session, profile) is None
+
+
+def test_backends_with_respx_mocked_httpx_routes(
+    respx_mock: respx.MockRouter,
+    backend_profile_factory: Any,
+) -> None:
+    profile = backend_profile_factory.build(
+        base_url="https://llm.example.invalid/v1",
+        model="qwen2.5:3b",
+    )
+    chat_route = respx_mock.post("https://llm.example.invalid/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200,
+            json={"choices": [{"message": {"role": "assistant", "content": "OK"}}]},
+        )
+    )
+    tags_route = respx_mock.get("https://llm.example.invalid/api/tags").mock(
+        return_value=httpx.Response(
+            200,
+            json={"models": [{"name": "qwen2.5:3b", "digest": "sha256:respx123"}]},
+        )
+    )
+    with httpx.Client() as client:
+        reply = backends.chat_completions(client, profile, [{"role": "user", "content": "hi"}])
+        digest = backends.resolve_model_digest(client, profile)
+    assert chat_route.called
+    assert tags_route.called
+    assert reply["choices"][0]["message"]["content"] == "OK"
+    assert digest == "sha256:respx123"

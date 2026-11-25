@@ -25,19 +25,23 @@ from fakes import (  # noqa: F401
 )
 from fixtures import (  # noqa: F401
     backend_check_config,
+    backend_profile_factory,
     copied_task_suite,
     de9im_fixture,
     de9im_task,
     de9im_task_path,
     expected_artifacts_dir,
+    experiment_run_factory,
     ollama_profile,
     openrouter_profile,
     packed_pilot_zip,
     pilot_task_paths,
+    run_provenance_factory,
     sample_archive_trial,
     sample_cache_key_spec,
     sample_cell_request,
     sample_task,
     sample_task_document,
     sample_trial,
+    trial_record_factory,
 )

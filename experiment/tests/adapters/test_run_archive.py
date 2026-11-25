@@ -6,6 +6,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from dirty_equals import IsPartialDict, IsPositiveInt, IsStr
 
 from experiment.adapters.run_archive import (
     ArchiveIntegrityError,
@@ -54,7 +55,7 @@ def test_run_archive_round_trip_and_lazy_hydration(
         assert archive.run == run
         assert archive.summary_markdown() == "# Run 100\n"
         schema = archive.schema_json()
-        assert schema is not None and schema["title"] == "ExperimentRun"
+        assert schema == IsPartialDict(title="ExperimentRun", type="object")
 
         handle = archive.trial(trial.trial_id)
         assert handle.loaded_members == frozenset()
@@ -62,15 +63,19 @@ def test_run_archive_round_trip_and_lazy_hydration(
         entries = handle.transcript
         assert len(entries) == 2
         assert entries[0].role == "meta"
-        assert entries[0].extra_fields["custom_tag"] == "keep-me"
+        assert entries[0].extra_fields == IsPartialDict(custom_tag="keep-me")
         assert entries[1].content == "final answer"
         assert "transcript.jsonl" in handle.loaded_members
         assert "result.json" not in handle.loaded_members
         assert handle.transcript is entries
 
-        assert handle.deliverable == {"relation": "touches", "passed": True}
-        assert handle.oracle_passes == {"passes": 3, "consistent": True}
+        assert handle.deliverable == IsPartialDict(relation="touches", passed=True)
+        assert handle.oracle_passes == IsPartialDict(passes=3, consistent=True)
         assert handle.read_text("ollama-serve.log") == "ollama ready\n"
+        assert [ref.model_dump(mode="json") for ref in trial.artifacts][0] == IsPartialDict(
+            sha256=IsStr(min_length=64, max_length=64),
+            bytes=IsPositiveInt,
+        )
         archive.verify_all()
 
 

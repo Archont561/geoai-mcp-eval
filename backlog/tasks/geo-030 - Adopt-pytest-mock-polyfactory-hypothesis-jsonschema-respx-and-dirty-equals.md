@@ -1,9 +1,10 @@
 ---
 id: GEO-030
 title: Adopt pytest-mock, polyfactory, hypothesis-jsonschema, respx, and dirty-equals in the test suite
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-24T00:00:00Z'
+updated_date: '2026-11-25T00:00:00Z'
 labels:
   - testing
   - dependencies
@@ -49,12 +50,12 @@ Eliminate remaining test-fixture, mock-patching, JSON-schema strategy, HTTP-mock
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `pytest-mock`, `polyfactory`, `hypothesis-jsonschema`, `respx`, and `dirty-equals` are added to `[feature.python.pypi-dependencies]` in `pixi.toml` (not runtime dependencies) and `pixi.lock` is refreshed cleanly.
-- [ ] #2 `experiment/tests/fixtures.py` uses `polyfactory` `ModelFactory` fixtures for core Pydantic domain models (`Task`, `ExperimentRun`, `TrialMeasurement`, `BackendProfile`, etc.), reducing manual sample-construction boilerplate.
-- [ ] #3 `experiment/tests/fakes.py` and BDD step modules use `pytest-mock` (`mocker`) and `respx` (for `httpx`-backed backend preflight and GitHub artifact download routes) instead of manual session/response monkeypatching.
-- [ ] #4 Hypothesis schema tests use `hypothesis-jsonschema.from_schema(...)` against `schema-v1.json` and `ExperimentRun.model_json_schema()` to fuzz-test schema/model parity automatically.
-- [ ] #5 Provenance, manifest, and archive tests use `dirty-equals` matchers where appropriate to eliminate verbose timestamp/UUID/partial-dict boilerplate.
-- [ ] #6 `pixi run tools run check`, `md`, and `links` pass with `0` `clean_code` violations, all `import-linter` contracts kept, `97/97` `alint` rules passing, and `>=90%` test coverage.
+- [x] #1 `pytest-mock`, `polyfactory`, `hypothesis-jsonschema`, `respx`, and `dirty-equals` are added to `[feature.python.pypi-dependencies]` in `pixi.toml` (not runtime dependencies) and `pixi.lock` is refreshed cleanly.
+- [x] #2 `experiment/tests/fixtures.py` uses `polyfactory` `ModelFactory` fixtures for core Pydantic domain models (`Task`, `ExperimentRun`, `TrialMeasurement`, `BackendProfile`, etc.), reducing manual sample-construction boilerplate.
+- [x] #3 `experiment/tests/fakes.py` and BDD step modules use `pytest-mock` (`mocker`) and `respx` (for `httpx`-backed backend preflight and GitHub artifact download routes) instead of manual session/response monkeypatching.
+- [x] #4 Hypothesis schema tests use `hypothesis-jsonschema.from_schema(...)` against `schema-v1.json` and `ExperimentRun.model_json_schema()` to fuzz-test schema/model parity automatically.
+- [x] #5 Provenance, manifest, and archive tests use `dirty-equals` matchers where appropriate to eliminate verbose timestamp/UUID/partial-dict boilerplate.
+- [x] #6 `pixi run tools run check`, `md`, and `links` pass with `0` `clean_code` violations, all `import-linter` contracts kept, `97/97` `alint` rules passing, and `>=90%` test coverage.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -66,3 +67,15 @@ Eliminate remaining test-fixture, mock-patching, JSON-schema strategy, HTTP-mock
 4. **Add `hypothesis-jsonschema` fuzz tests and `dirty-equals` matchers:** Fuzz-test `schema-v1.json` and `ExperimentRun.model_json_schema()` with `from_schema(...)` and simplify partial provenance/manifest assertions with `dirty-equals`.
 5. **Run full verification gates:** Pass `pixi run tools run fmt`, `check`, `md`, and `links` with `>=90%` coverage and zero lint/architecture regressions.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Completed in Step 5 (`GEO-030`):
+
+- **Dev-only test dependencies (`pixi.toml`)**: Added `pytest-mock`, `polyfactory`, `hypothesis-jsonschema`, `respx`, and `dirty-equals` strictly under `[feature.python.pypi-dependencies]` (zero impact on runtime `experiment`, `docs`, or `experiment-qgis-plugin/` dependencies).
+- **`polyfactory` (`experiment/tests/fixtures.py` & `conftest.py`)**: Added deterministic seeded `ModelFactory` classes (`BackendProfileFactory`, `CacheKeySpecFactory`, `EnvironmentPinFactory`, `ModelPinFactory`, `RunProvenanceFactory`, `TrialKeyFactory`, `TreatmentFactory`, `TrialRecordFactory`, `ExperimentRunFactory`), wired baseline fixtures onto them, and exposed factory fixtures (`backend_profile_factory`, `run_provenance_factory`, `trial_record_factory`, `experiment_run_factory`) via pytest DI.
+- **`pytest-mock` & `respx` (`fakes.py`, `test_backends.py`, `test_backend_probe.py`, `test_github_client.py`)**: Migrated shared fake fixtures in `fakes.py` to `mocker: MockerFixture` and added declarative `respx` route tests exercising real `httpx.Client` calls across `adapters/backends.py`, `adapters/backend_probe.py`, and `analysis/github_client.py` (including real `httpx` cross-host `Authorization` header stripping on 302 artifact redirects).
+- **`hypothesis-jsonschema` (`test_task.py`, `test_aggregate.py`)**: Added `from_schema(schema-v1.json)` and `from_schema(ExperimentRun.model_json_schema())` Hypothesis fuzz tests proving schema/model parity and JSON round-tripping.
+- **`dirty-equals` (`test_run_archive.py`, `test_provenance.py`, `test_aggregate.py`)**: Adopted `IsPartialDict`, `IsStr`, `IsPositiveInt`, and `IsDatetime(iso_string=True)` for concise partial assertions on archive manifests, schemas, artifacts, and provenance payloads.
+<!-- SECTION:NOTES:END -->

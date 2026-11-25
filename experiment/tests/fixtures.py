@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 import yaml
 from cli_harness import _TASK_CONTEXT, TASK_ROOT, UTF8
+from polyfactory.factories.pydantic_factory import ModelFactory
 from shapely.geometry import shape
 
 from experiment.adapters import harness_io, task_repository
@@ -24,6 +25,13 @@ from experiment.domain.cache_key import CacheKeySpec, CacheStats
 from experiment.domain.run import (
     ArtifactRef,
     AssertionResult,
+    EnforcementLevel,
+    EnvironmentPin,
+    ExecutionStatus,
+    ExperimentRun,
+    ModelPin,
+    Paradigm,
+    RunProvenance,
     Treatment,
     TrialKey,
     TrialMeasurement,
@@ -36,6 +44,118 @@ from experiment.services.backend_check import BackendCheckConfig
 from experiment.services.runners.ports import CellRequest
 
 VALID_SHA = "a" * 64
+
+
+class BackendProfileFactory(ModelFactory[BackendProfile]):
+    """Deterministic ``polyfactory`` factory for ``BackendProfile``."""
+
+    __random_seed__ = 42
+    base_url = "http://127.0.0.1:11434/v1"
+    model = "qwen2.5:3b"
+    api_key_env = None
+    max_tokens = 1024
+    temperature = 0.0
+    connect_timeout_s = 10.0
+    read_timeout_s = 120.0
+    retries = 2
+
+
+class CacheKeySpecFactory(ModelFactory[CacheKeySpec]):
+    """Deterministic ``polyfactory`` factory for ``CacheKeySpec``."""
+
+    __random_seed__ = 42
+    backend_id = "local"
+    model_digest = "sha256:aaaa"
+    messages = [{"role": "user", "content": "hi"}]
+    tools = None
+    temperature = 0.0
+    max_tokens = 512
+
+
+class EnvironmentPinFactory(ModelFactory[EnvironmentPin]):
+    """Deterministic ``polyfactory`` factory for ``EnvironmentPin``."""
+
+    __random_seed__ = 42
+
+
+class ModelPinFactory(ModelFactory[ModelPin]):
+    """Deterministic ``polyfactory`` factory for ``ModelPin``."""
+
+    __random_seed__ = 42
+
+
+class RunProvenanceFactory(ModelFactory[RunProvenance]):
+    """Deterministic ``polyfactory`` factory for ``RunProvenance``."""
+
+    __random_seed__ = 42
+
+
+class TrialKeyFactory(ModelFactory[TrialKey]):
+    """Deterministic ``polyfactory`` factory for ``TrialKey``."""
+
+    __random_seed__ = 42
+    task_id = "analysis-de9im-001"
+    paradigm = Paradigm.TYPED_MCP
+    enforcement_level = EnforcementLevel.SEMANTIC_REPAIR
+    repetition = 1
+
+
+class TreatmentFactory(ModelFactory[Treatment]):
+    """Deterministic ``polyfactory`` factory for ``Treatment``."""
+
+    __random_seed__ = 42
+    paradigm = Paradigm.TYPED_MCP
+    enforcement_level = EnforcementLevel.SEMANTIC_REPAIR
+    catalogue_hash = VALID_SHA
+
+
+class TrialRecordFactory(ModelFactory[TrialRecord]):
+    """Deterministic ``polyfactory`` factory for ``TrialRecord``."""
+
+    __random_seed__ = 42
+    driver = "ollama"
+    model_tag = "qwen2.5:3b"
+    model_digest = "sha256:abc"
+    status = ExecutionStatus.OK
+    error = None
+    abort_reason = None
+    cache_hits = 0
+    cache_misses = 0
+    artifacts = []
+
+
+class ExperimentRunFactory(ModelFactory[ExperimentRun]):
+    """Deterministic ``polyfactory`` factory for ``ExperimentRun``."""
+
+    __random_seed__ = 42
+    trials = {}
+    measurements = {}
+
+
+@pytest.fixture
+def backend_profile_factory() -> type[BackendProfileFactory]:
+    """``polyfactory`` ``ModelFactory`` for constructing custom ``BackendProfile`` variants."""
+    return BackendProfileFactory
+
+
+@pytest.fixture
+def run_provenance_factory() -> type[RunProvenanceFactory]:
+    """``polyfactory`` ``ModelFactory`` for constructing ``RunProvenance`` variants."""
+    return RunProvenanceFactory
+
+
+@pytest.fixture
+def trial_record_factory() -> type[TrialRecordFactory]:
+    """``polyfactory`` ``ModelFactory`` for constructing ``TrialRecord`` variants."""
+    return TrialRecordFactory
+
+
+@pytest.fixture
+def experiment_run_factory() -> type[ExperimentRunFactory]:
+    """``polyfactory`` ``ModelFactory`` for constructing ``ExperimentRun`` variants."""
+    return ExperimentRunFactory
+
+
 EXPECTED_JENKS_BREAKS = [44385155.0, 126264931.0, 328239523.0, 1397715000.0]
 EXPECTED_JENKS_CLASSES = {
     "LTU": 1,
@@ -55,55 +175,34 @@ EXPECTED_JENKS_CLASSES = {
 
 @pytest.fixture
 def ollama_profile() -> BackendProfile:
-    """Local Ollama ``BackendProfile`` with deterministic sampling."""
-    return BackendProfile(base_url="http://127.0.0.1:11434/v1", model="qwen2.5:3b", retries=2)
+    """Local Ollama ``BackendProfile`` built via ``BackendProfileFactory``."""
+    return BackendProfileFactory.build()
 
 
 @pytest.fixture
 def openrouter_profile() -> BackendProfile:
-    """OpenRouter ``BackendProfile`` referencing ``OPENROUTER_API_KEY``."""
-    return BackendProfile(
+    """OpenRouter ``BackendProfile`` built via ``BackendProfileFactory``."""
+    return BackendProfileFactory.build(
         base_url="https://openrouter.ai/api/v1",
         model="qwen/qwen-2.5-coder-32b-instruct:free",
         api_key_env="OPENROUTER_API_KEY",
-        retries=2,
     )
 
 
 @pytest.fixture
 def sample_cache_key_spec() -> CacheKeySpec:
-    """Baseline ``CacheKeySpec`` for cache-key tests (use ``model_copy`` for variants)."""
-    return CacheKeySpec(
-        backend_id="local",
-        model_digest="sha256:aaaa",
-        messages=[{"role": "user", "content": "hi"}],
-        tools=None,
-        temperature=0.0,
-        max_tokens=512,
-    )
+    """Baseline ``CacheKeySpec`` built via ``CacheKeySpecFactory``."""
+    return CacheKeySpecFactory.build()
 
 
 @pytest.fixture
 def sample_trial() -> TrialRecord:
-    """Baseline ``TrialRecord`` (use ``model_copy(update=...)`` for variants)."""
-    key = TrialKey(
-        task_id="analysis-de9im-001",
-        paradigm="typed_mcp",
-        enforcement_level="semantic_repair",
-        repetition=1,
-    )
-    treatment = Treatment(
-        paradigm="typed_mcp",
-        enforcement_level="semantic_repair",
-        catalogue_hash=VALID_SHA,
-    )
-    return TrialRecord(
+    """Baseline ``TrialRecord`` built via ``TrialRecordFactory``."""
+    key = TrialKeyFactory.build()
+    treatment = TreatmentFactory.build()
+    return TrialRecordFactory.build(
         key=key,
         treatment=treatment,
-        driver="ollama",
-        model_tag="qwen2.5:3b",
-        model_digest="sha256:abc",
-        status="ok",
         artifacts=[
             ArtifactRef(
                 path="result.json",
@@ -130,19 +229,12 @@ def sample_archive_trial() -> tuple[TrialRecord, TrialMeasurement, dict[str, byt
         "oracle-passes.json": json.dumps({"passes": 3, "consistent": True}).encode(UTF8),
         "ollama-serve.log": b"ollama ready\n",
     }
-    key = TrialKey(
-        task_id=task_id,
-        paradigm="typed_mcp",
-        enforcement_level="semantic_repair",
-        repetition=1,
-    )
-    treatment = Treatment(paradigm="typed_mcp", enforcement_level="semantic_repair")
-    trial = TrialRecord(
+    key = TrialKeyFactory.build(task_id=task_id)
+    treatment = TreatmentFactory.build(catalogue_hash=None)
+    trial = TrialRecordFactory.build(
         key=key,
         treatment=treatment,
-        driver="ollama",
-        model_tag="qwen2.5:3b",
-        status="ok",
+        model_digest=None,
         artifacts=build_artifact_refs(files),
     )
     measurement = TrialMeasurement.from_assertions(

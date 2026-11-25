@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 
 import httpx
 import pytest
+from pytest_mock import MockerFixture
 
 from experiment.adapters import backends
 from experiment.adapters.ssh_tunnel import SshTunnelAdapter
@@ -55,9 +56,9 @@ def make_mock_response(
 
 
 @pytest.fixture
-def fake_ollama_sdk_client() -> MagicMock:
+def fake_ollama_sdk_client(mocker: MockerFixture) -> MagicMock:
     """Mock Ollama SDK client with ``.chat``, ``.list``, ``.show``, ``.ps``, ``.pull``."""
-    client = MagicMock(name="ollama_sdk_client")
+    client = mocker.MagicMock(name="ollama_sdk_client")
     client.list.return_value = {"models": []}
     client.chat.return_value = {
         "message": {"role": "assistant", "content": "OK"},
@@ -67,13 +68,13 @@ def fake_ollama_sdk_client() -> MagicMock:
 
 
 @pytest.fixture
-def fake_openrouter_sdk_client() -> MagicMock:
+def fake_openrouter_sdk_client(mocker: MockerFixture) -> MagicMock:
     """Mock OpenRouter SDK client supporting ``chat.send``, ``models.list``, and context exit."""
-    client = MagicMock(name="openrouter_sdk_client")
+    client = mocker.MagicMock(name="openrouter_sdk_client")
     client.__enter__.return_value = client
     client.__exit__.return_value = None
-    client.chat = MagicMock(name="openrouter_chat")
-    client.models = MagicMock(name="openrouter_models")
+    client.chat = mocker.MagicMock(name="openrouter_chat")
+    client.models = mocker.MagicMock(name="openrouter_models")
     client.chat.send.return_value = {
         "choices": [{"message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}]
     }
@@ -88,9 +89,9 @@ def fake_http_response() -> MagicMock:
 
 
 @pytest.fixture
-def fake_http_session(fake_http_response: MagicMock) -> MagicMock:
+def fake_http_session(mocker: MockerFixture, fake_http_response: MagicMock) -> MagicMock:
     """``MagicMock(spec=httpx.Client)`` wired with default ``get``/``post`` responses."""
-    session = MagicMock(spec=httpx.Client)
+    session = mocker.MagicMock(spec=httpx.Client)
     session.__enter__.return_value = session
     session.__exit__.return_value = None
     session.get.return_value = fake_http_response
@@ -99,9 +100,9 @@ def fake_http_session(fake_http_response: MagicMock) -> MagicMock:
 
 
 @pytest.fixture
-def fake_ssh_forwarder() -> MagicMock:
+def fake_ssh_forwarder(mocker: MockerFixture) -> MagicMock:
     """``MagicMock`` SSH tunnel forwarder tracking ``start``/``stop`` and active state."""
-    forwarder = MagicMock(name="ssh_forwarder")
+    forwarder = mocker.MagicMock(name="ssh_forwarder")
     forwarder.is_active = True
     forwarder.local_bind_port = 44556
     return forwarder

@@ -34,6 +34,12 @@ typer = "*"
 # are executable specifications: pytest-bdd binds each scenario to a pytest test.
 # Version 9 is the first line that supports pytest 9, which this workspace pins.
 pytest-bdd = ">=9,<10"
+# Dev-only test utilities (GEO-030):
+pytest-mock = ">=3.14,<4"
+polyfactory = ">=3,<4"
+hypothesis-jsonschema = ">=0.23,<1"
+respx = ">=0.22,<1"
+dirty-equals = ">=0.9,<1"
 
 # THE EXPERIMENT RUNTIME — QGIS plugin development stack.
 # qgis-sdk provides declarative plugin authoring (native dialogs, typed actions,
