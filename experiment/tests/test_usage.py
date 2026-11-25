@@ -9,9 +9,9 @@ import pytest
 import yaml
 
 from experiment.adapters import backends, harness_io, task_repository
+from experiment.adapters.mcp.client import McpToolSession
 from experiment.domain import usage as usage_domain
 from experiment.services import runs
-from experiment.services.runners import ollama as drivers
 
 TASK_ROOT = harness_io.TASK_ROOT
 
@@ -136,7 +136,7 @@ def test_ollama_arm_a_sums_multiturn_usage_and_aborts_on_token_cap(
     monkeypatch.setattr(backends, "chat_completions", responder_ok)
     cell_ok = tmp_path / "ok"
     cell_ok.mkdir()
-    req_ok = harness_io.CellRequest(
+    req_ok = runs.CellRequest(
         task_path=task_path,
         task=task,
         arm="A",
@@ -156,15 +156,15 @@ def test_ollama_arm_a_sums_multiturn_usage_and_aborts_on_token_cap(
     # 2. Cap exceeded on turn 1 -> aborts BEFORE calling MCP tool
     tool_invoked = {"called": False}
 
-    async def fail_if_called(*_args, **_kwargs):
+    def fail_if_called(*_args, **_kwargs):
         tool_invoked["called"] = True
         raise AssertionError("MCP tool must not execute after token cap is exceeded")
 
-    monkeypatch.setattr(drivers.mcp_client, "call_tool", fail_if_called)
+    monkeypatch.setattr(McpToolSession, "call_tool", fail_if_called)
     calls["n"] = 0
     cell_cap = tmp_path / "cap"
     cell_cap.mkdir()
-    req_cap = harness_io.CellRequest(
+    req_cap = runs.CellRequest(
         task_path=task_path,
         task=task,
         arm="A",

@@ -7,7 +7,6 @@ import the repository — and must stay that way.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,11 +14,8 @@ from typing import Any
 
 from experiment.adapters import run_store
 from experiment.adapters.harness_io import (
-    _K_CONTENT,
-    _K_ROLE,
     RESULT_GEOJSON,
     RESULT_JSON,
-    CellRequest,
     append_transcript,
     extract_iso,
     fixture_fc,
@@ -27,7 +23,8 @@ from experiment.adapters.harness_io import (
     stage_fixture_input,
     write_deliverable,
 )
-from experiment.adapters.mcp import client as mcp_client
+from experiment.adapters.mcp.client import McpToolSession
+from experiment.services.runners.ports import CellRequest, ToolSession
 
 
 class _CallLog:
@@ -42,21 +39,19 @@ class _CallLog:
             self.cell,
             {
                 "step": self.step,
-                _K_ROLE: "assistant",
+                "role": "assistant",
                 "tool_call": {"name": name, "arguments": arguments},
             },
         )
         append_transcript(
-            self.cell, {"step": self.step + 1, _K_ROLE: "tool", "name": name, _K_CONTENT: result}
+            self.cell, {"step": self.step + 1, "role": "tool", "name": name, "content": result}
         )
         self.step += 2
 
 
-def _filter_pol(fixture: dict[str, Any], log: _CallLog) -> dict[str, Any]:
-    pol = asyncio.run(
-        mcp_client.call_tool(
-            "filter_features", {"geojson": fixture, "property": "ISO_A3", "equals": "POL"}
-        )
+def _filter_pol(tools: ToolSession, fixture: dict[str, Any], log: _CallLog) -> dict[str, Any]:
+    pol = tools.call_tool(
+        "filter_features", {"geojson": fixture, "property": "ISO_A3", "equals": "POL"}
     )
     log(
         "filter_features",
@@ -75,23 +70,20 @@ class _PlanContext:
     req: CellRequest
     fixture: dict[str, Any]
     log: _CallLog
+    tools: ToolSession
 
 
 def _scripted_de9im(ctx: _PlanContext) -> None:
-    pol = _filter_pol(ctx.fixture, ctx.log)
-    cze = asyncio.run(
-        mcp_client.call_tool(
-            "filter_features", {"geojson": ctx.fixture, "property": "ISO_A3", "equals": "CZE"}
-        )
+    pol = _filter_pol(ctx.tools, ctx.fixture, ctx.log)
+    cze = ctx.tools.call_tool(
+        "filter_features", {"geojson": ctx.fixture, "property": "ISO_A3", "equals": "CZE"}
     )
     ctx.log(
         "filter_features",
         {"property": "ISO_A3", "equals": "CZE"},
         {"feature_count": len(cze["features"])},
     )
-    relation = asyncio.run(
-        mcp_client.call_tool("relate_de9im", {"geojson_a": pol, "geojson_b": cze})
-    )
+    relation = ctx.tools.call_tool("relate_de9im", {"geojson_a": pol, "geojson_b": cze})
     ctx.log("relate_de9im", {"geojson_a": "<pol>", "geojson_b": "<cze>"}, relation)
     _write_json(
         ctx.req.cell, RESULT_JSON, {"relation": relation["relation"], "de9im": relation["de9im"]}
@@ -102,7 +94,7 @@ def _scripted_jenks(ctx: _PlanContext) -> None:
     features = ctx.fixture["features"]
     values = [f["properties"]["POP_EST"] for f in features]
     isos = extract_iso(features)
-    jb = asyncio.run(mcp_client.call_tool("jenks_breaks", {"values": values, "class_count": 4}))
+    jb = ctx.tools.call_tool("jenks_breaks", {"values": values, "class_count": 4})
     ctx.log("jenks_breaks", {"values": f"<{len(values)} values>", "class_count": 4}, jb)
     _write_json(
         ctx.req.cell,
@@ -117,8 +109,8 @@ def _scripted_jenks(ctx: _PlanContext) -> None:
 
 
 def _scripted_axis_order(ctx: _PlanContext) -> None:
-    pol = _filter_pol(ctx.fixture, ctx.log)
-    rep = asyncio.run(mcp_client.call_tool("representative_point", {"geojson": pol}))
+    pol = _filter_pol(ctx.tools, ctx.fixture, ctx.log)
+    rep = ctx.tools.call_tool("representative_point", {"geojson": pol})
     ctx.log("representative_point", {"geojson": "<pol>"}, rep)
     _write_json(ctx.req.cell, RESULT_GEOJSON, rep)
 
@@ -131,16 +123,17 @@ _SCRIPTED_ARM_A_PLANS = {
 
 
 def scripted_arm_a(req: CellRequest) -> None:
-    """Canned plan: call the real MCP server for every step."""
+    """Canned plan: call the real MCP server for every step via one session."""
     fixture = fixture_fc(req.task_path, req.task)
     log = _CallLog(req.cell)
     plan = _SCRIPTED_ARM_A_PLANS.get(req.task.id)
     if plan is None:
         raise ValueError(f"no scripted plan for task {req.task.id}")
-    plan(_PlanContext(req=req, fixture=fixture, log=log))
+    with McpToolSession() as tools:
+        plan(_PlanContext(req=req, fixture=fixture, log=log, tools=tools))
     append_transcript(
         req.cell,
-        {"step": log.step, _K_ROLE: "assistant", _K_CONTENT: "final deliverable written"},
+        {"step": log.step, "role": "assistant", "content": "final deliverable written"},
     )
 
 
@@ -232,9 +225,7 @@ def scripted_arm_b(req: CellRequest) -> None:
     if code is None:
         raise ValueError(f"no scripted plan for task {task.id}")
     stage_fixture_input(task_path, task, cell)
-    append_transcript(
-        req.cell, {_K_ROLE: "assistant", _K_CONTENT: f"```python\n{code.strip()}\n```"}
-    )
+    append_transcript(req.cell, {"role": "assistant", "content": f"```python\n{code.strip()}\n```"})
     completed = run_python_sandboxed(code, cell)
     _record_tool_result(cell, completed)
     if completed.returncode != 0:

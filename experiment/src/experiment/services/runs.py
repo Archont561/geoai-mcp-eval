@@ -15,12 +15,8 @@ from typing import Any
 
 from experiment.adapters import backends, run_store
 from experiment.adapters.harness_io import (
-    _K_CONTENT,
-    _K_ROLE,
     DRIVERS,
     TASK_ROOT,
-    CellRequest,
-    RunSpec,
     append_transcript,
     cell_dir,
     model_label,
@@ -38,10 +34,12 @@ from experiment.domain.usage import (
 from experiment.services.measurement import TrialMeasurementOptions, measure_trial
 from experiment.services.runners import ollama as drivers
 from experiment.services.runners import scripted
+from experiment.services.runners.ports import CellRequest, RunSpec
 from experiment.services.scoring import score_cell
 
 __all__ = [
     "TASK_ROOT",
+    "CellRequest",
     "RunSpec",
     "RunSpecError",
     "discover_tasks",
@@ -174,7 +172,7 @@ def _execute_driver(active_req: CellRequest) -> _CellOutcome:
     driver_fn = _DRIVER_DISPATCH.get((active_req.driver, active_req.arm))
     if driver_fn is None:
         error = f"unknown driver/arm {active_req.driver}/{active_req.arm}"
-        append_transcript(active_req.cell, {_K_ROLE: "harness", _K_CONTENT: f"cell error: {error}"})
+        append_transcript(active_req.cell, {"role": "harness", "content": f"cell error: {error}"})
         return _CellOutcome("error", error, None, round(time.time() - started, 2))
     try:
         driver_fn(active_req)
@@ -182,7 +180,7 @@ def _execute_driver(active_req: CellRequest) -> _CellOutcome:
     except TokenCapExceededError as exc:
         return _CellOutcome("aborted", str(exc), exc.reason, round(time.time() - started, 2))
     except Exception as exc:
-        append_transcript(active_req.cell, {_K_ROLE: "harness", _K_CONTENT: f"cell error: {exc}"})
+        append_transcript(active_req.cell, {"role": "harness", "content": f"cell error: {exc}"})
         return _CellOutcome("error", str(exc), None, round(time.time() - started, 2))
 
 
@@ -233,7 +231,7 @@ def run_cell(req: CellRequest) -> dict[str, Any]:
     usage_summary = accumulator.to_summary()
     append_transcript(
         active_req.cell,
-        {_K_ROLE: "harness", "event": "usage_summary", "usage": usage_summary},
+        {"role": "harness", "event": "usage_summary", "usage": usage_summary},
     )
     score = score_cell(active_req.task_path, active_req.cell)
     meta = _build_cell_meta(active_req, outcome, score, usage_summary)
@@ -266,7 +264,7 @@ def _resolve_run_digest(spec: RunSpec) -> str | None:
 
 def _cell_meta_record(task: Task, arm: str, ctx: _RunContext) -> dict[str, Any]:
     return {
-        _K_ROLE: "meta",
+        "role": "meta",
         "task": task.id,
         "arm": arm,
         "driver": ctx.spec.driver,

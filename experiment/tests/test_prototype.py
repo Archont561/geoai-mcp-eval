@@ -9,9 +9,10 @@ import pytest
 import yaml
 
 from experiment.adapters import backends, harness_io, task_repository
+from experiment.domain.prompts import extract_json_block
 from experiment.domain.task import Task
 from experiment.services import runs
-from experiment.services.runners import ollama as drivers
+from experiment.services.runners.ports import CellRequest
 
 TASK_ROOT = harness_io.TASK_ROOT
 
@@ -102,10 +103,10 @@ FINAL_JSON = '```json\n{"relation": "touches", "de9im": "FF2F11212"}\n```'
 
 def _cell_request(
     task_id: str, arm: str, driver: str, cell: Path, run_id: str = "test"
-) -> harness_io.CellRequest:
+) -> CellRequest:
     task_path = _task_path(task_id)
     task = task_repository.load_task(task_path)
-    return harness_io.CellRequest(
+    return CellRequest(
         task_path=task_path,
         task=task,
         arm=arm,
@@ -226,9 +227,9 @@ def test_cell_error_marks_status(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 
 
 def test_extract_json_block() -> None:
-    assert drivers._extract_json_block('```json\n{"a": 1}\n```') == {"a": 1}
-    assert drivers._extract_json_block('junk {"b": 2}') == {"b": 2}
-    assert drivers._extract_json_block("nothing") is None
+    assert extract_json_block('```json\n{"a": 1}\n```') == {"a": 1}
+    assert extract_json_block('junk {"b": 2}') == {"b": 2}
+    assert extract_json_block("nothing") is None
 
 
 def test_ollama_arm_b_ignores_json_fence(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

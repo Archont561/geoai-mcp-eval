@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tomllib
 from pathlib import Path
@@ -20,6 +21,7 @@ from experiment.domain.backend import (
     BackendsFile,
     normalize_host,
 )
+from experiment.domain.prompts import ChatTurn, ToolCall
 
 DEFAULT_BACKENDS_PATH = backends_path()
 DEFAULT_BASE_URL = ollama_adapter.DEFAULT_BASE_URL
@@ -36,6 +38,7 @@ __all__ = [
     "chat_completions",
     "fallback_profile",
     "load_profiles",
+    "parse_chat_turn",
     "require_api_key",
     "resolve_model_digest",
     "resolve_profile",
@@ -171,3 +174,29 @@ def chat_completions(
         body["tools"] = tools
     resp = _post_chat(session, profile, body)
     return _parse_chat_response(resp, profile)
+
+
+def _parse_tool_call(raw_call: dict[str, Any]) -> ToolCall:
+    func = raw_call.get("function") or {}
+    name = str(func.get("name") or "")
+    raw_args = str(func.get("arguments") or "{}")
+    try:
+        parsed = json.loads(raw_args)
+    except json.JSONDecodeError:
+        parsed = {}
+    arguments = parsed if isinstance(parsed, dict) else {}
+    call_id = str(raw_call.get("id") or name)
+    return ToolCall(call_id=call_id, name=name, arguments=arguments, raw_arguments=raw_args)
+
+
+def parse_chat_turn(reply: dict[str, Any]) -> ChatTurn:
+    """Translate one OpenAI ``/v1/chat/completions`` payload into a domain ``ChatTurn``."""
+    message = dict(reply["choices"][0]["message"])
+    raw_calls = message.get("tool_calls") or []
+    calls = tuple(_parse_tool_call(call) for call in raw_calls if isinstance(call, dict))
+    content = message.get("content")
+    return ChatTurn(
+        content=str(content) if content is not None else None,
+        tool_calls=calls,
+        raw_message=message,
+    )

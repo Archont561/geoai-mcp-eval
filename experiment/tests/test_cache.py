@@ -97,7 +97,7 @@ def test_cell_cache_hit_miss_digest_change_and_no_cache(
     def run_once(name: str, *, digest: str | None, use_cache: bool) -> dict:
         cell = tmp_path / name
         cell.mkdir()
-        req = harness_io.CellRequest(
+        req = runs.CellRequest(
             task_path=task_path,
             task=task,
             arm="B",
@@ -157,7 +157,7 @@ def test_http_errors_are_never_cached(monkeypatch: pytest.MonkeyPatch, tmp_path:
     monkeypatch.setattr(backends, "chat_completions", fail_chat)
     cell = tmp_path / "err"
     cell.mkdir()
-    req = harness_io.CellRequest(
+    req = runs.CellRequest(
         task_path=task_path,
         task=task,
         arm="B",
