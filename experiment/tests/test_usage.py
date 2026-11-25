@@ -184,7 +184,9 @@ def test_ollama_arm_a_sums_multiturn_usage_and_aborts_on_token_cap(
 
 
 def test_scripted_run_writes_manifest_and_explicit_null_usage(tmp_path: Path) -> None:
-    spec = runs.parse_run_spec("scripted", None, None, "B", "analysis-de9im-001", "local")
+    spec = runs.parse_run_spec(
+        runs.RunSpecInput(driver="scripted", arm="B", task="analysis-de9im-001", backend="local")
+    )
     out = tmp_path / "run-scripted"
     out.mkdir()
     summary = runs.run_experiment(TASK_ROOT, spec, out)
@@ -194,7 +196,7 @@ def test_scripted_run_writes_manifest_and_explicit_null_usage(tmp_path: Path) ->
     assert manifest["totals"]["passed"] == 1
     assert manifest["totals"]["usage"]["input_tokens"] is None
     assert manifest["totals"]["usage"]["total_tokens"] is None
-    assert summary["usage"] == manifest["totals"]["usage"]
+    assert summary.usage == manifest["totals"]["usage"]
     transcript_entries = [
         json.loads(line)
         for line in (out / "analysis-de9im-001" / "arm-B" / "transcript.jsonl")

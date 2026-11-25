@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from experiment.domain.run._common import (
+    ENFORCEMENT_LEVELS,
     STRICT_MODEL,
     ArtifactKind,
     AssertionTier,
@@ -14,6 +15,8 @@ from experiment.domain.run._common import (
     TrajectoryClass,
     arm_to_paradigm,
     enforce_code_to_level,
+    parse_enforcement_level,
+    parse_execution_status,
 )
 from experiment.domain.run.aggregate import ExperimentRun, InstrumentAudit, RunMergeError
 from experiment.domain.run.measurement import (
@@ -21,6 +24,7 @@ from experiment.domain.run.measurement import (
     BehavioralAnnotations,
     CostAndProcessMetrics,
     DeterminismAudit,
+    MeasurementContext,
     OutcomeMetrics,
     TokenUsage,
     TrialMeasurement,
@@ -38,6 +42,7 @@ from experiment.domain.run.trial import (
 )
 
 __all__ = [
+    "ENFORCEMENT_LEVELS",
     "STRICT_MODEL",
     "ArtifactKind",
     "ArtifactRef",
@@ -52,6 +57,7 @@ __all__ = [
     "ExperimentRun",
     "FailureClass",
     "InstrumentAudit",
+    "MeasurementContext",
     "ModelPin",
     "OutcomeMetrics",
     "Paradigm",
@@ -70,4 +76,6 @@ __all__ = [
     "enforce_code_to_level",
     "extract_transcript_metrics",
     "infer_assertion_tier",
+    "parse_enforcement_level",
+    "parse_execution_status",
 ]

@@ -117,7 +117,9 @@ def _write_tasks(root: Path) -> Path:
 
 def _build_packed_pilot_zip(tmp_path: Path) -> Path:
     out_dir = tmp_path / "pilot-run"
-    spec = runs.parse_run_spec("scripted", None, None, "both", "all", "local")
+    spec = runs.parse_run_spec(
+        runs.RunSpecInput(driver="scripted", arm="both", task="all", backend="local")
+    )
     runs.run_experiment(REAL_TASKS, spec, out_dir)
     zip_path = tmp_path / "experiment-run-pilot-001.zip"
     archive_service.pack_archive(
@@ -246,7 +248,7 @@ def test_predicates_and_assertions_fail_loudly_on_unknown_assertion() -> None:
         driver="scripted",
         status="ok",
     )
-    meas = TrialMeasurement.build(
+    meas = TrialMeasurement.from_assertions(
         key=key,
         assertions=(
             AssertionResult(

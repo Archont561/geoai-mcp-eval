@@ -15,6 +15,7 @@ from experiment.domain.run import (
     AssertionResult,
     CostAndProcessMetrics,
     DeterminismAudit,
+    MeasurementContext,
     TokenUsage,
     TrialKey,
     TrialMeasurement,
@@ -119,9 +120,11 @@ def measure_trial(
     return TrialMeasurement.build(
         key=key,
         assertions=assertions,
-        deliverable_readable=readable,
-        determinism=audit,
-        economics=economics,
+        context=MeasurementContext(
+            deliverable_readable=readable,
+            determinism=audit,
+            economics=economics,
+        ),
     )
 
 
@@ -195,7 +198,9 @@ def measure_human_reference(
     return TrialMeasurement.build(
         key=key,
         assertions=assertions,
-        deliverable_readable=readable,
-        determinism=audit,
-        economics=_human_economics(record),
+        context=MeasurementContext(
+            deliverable_readable=readable,
+            determinism=audit,
+            economics=_human_economics(record),
+        ),
     )
