@@ -5,7 +5,6 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -97,22 +96,42 @@ def test_subprocess_runner_commands_versions_and_timeout(tmp_path: Path) -> None
 def test_ollama_adapter_probes_retries_and_daemon_lifecycle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import ollama as ollama_sdk
+
+    class _FakeOllamaClient:
+        def __init__(self, *, fail_list: bool = False, fail_pull: bool = False) -> None:
+            self.fail_list = fail_list
+            self.fail_pull = fail_pull
+
+        def list(self) -> dict[str, Any]:
+            if self.fail_list:
+                raise ollama_sdk.RequestError("down")
+            return {"models": [{"model": "qwen2.5:3b", "digest": "sha256:sdk123"}]}
+
+        def pull(self, _model: str, *, stream: bool = False) -> dict[str, Any]:
+            if self.fail_pull:
+                raise ollama_sdk.ResponseError("pull failed", status_code=500)
+            return {"status": "success"}
+
+        def generate(self, **_kw: Any) -> dict[str, Any]:
+            return {"response": "OK"}
+
     # serve_running & wait_ready
-    monkeypatch.setattr(
-        ollama.requests,
-        "get",
-        lambda *_a, **_kw: SimpleNamespace(status_code=200),
-    )
+    monkeypatch.setattr(ollama, "build_client", lambda *_a, **_kw: _FakeOllamaClient())
     assert ollama.serve_running() is True
     assert ollama.wait_ready(attempts=1, sleep_s=0) is True
     assert ollama.start_ollama("/usr/bin/ollama", tmp_path / "serve.log") is None
+    assert ollama.pull_model("/usr/bin/ollama", "qwen2.5:3b") == 0
+    assert ollama.smoke_generate("qwen2.5:3b") == {"response": "OK"}
+    assert ollama.list_model_digest("/usr/bin/ollama", "qwen2.5:3b") == "sha256:sdk123"
 
-    def fail_get(*_a: Any, **_kw: Any) -> Any:
-        raise requests.exceptions.ConnectionError("down")
-
-    monkeypatch.setattr(ollama.requests, "get", fail_get)
+    monkeypatch.setattr(
+        ollama, "build_client", lambda *_a, **_kw: _FakeOllamaClient(fail_list=True, fail_pull=True)
+    )
     assert ollama.serve_running() is False
     assert ollama.wait_ready(attempts=2, sleep_s=0, sleep=lambda _s: None) is False
+    assert ollama.pull_model("/usr/bin/ollama", "qwen2.5:3b") == 1
+    assert ollama.list_model_digest("/usr/bin/ollama", "qwen2.5:3b") == "unavailable"
 
     # start_ollama + stop_ollama lifecycle (including timeout -> kill path)
     events: list[str] = []
@@ -134,29 +153,6 @@ def test_ollama_adapter_probes_retries_and_daemon_lifecycle(
     ollama.stop_ollama(owner)
     assert events == ["terminate", "wait:10", "kill"]
     assert owner.log_handle.closed is True
-
-    # smoke_generate
-    monkeypatch.setattr(
-        ollama.requests,
-        "post",
-        lambda *_a, **_kw: SimpleNamespace(
-            raise_for_status=lambda: None,
-            json=lambda: {"response": "OK"},
-        ),
-    )
-    assert ollama.smoke_generate("qwen2.5:3b") == {"response": "OK"}
-
-    # list_model_digest HTTP-first and CLI fallback
-    monkeypatch.setattr(ollama, "resolve_model_digest", lambda *_a, **_kw: "sha256:http")
-    assert ollama.list_model_digest("/usr/bin/ollama", "qwen2.5:3b") == "sha256:http"
-
-    monkeypatch.setattr(ollama, "resolve_model_digest", lambda *_a, **_kw: None)
-    monkeypatch.setattr(
-        subprocess_runner,
-        "run_command",
-        lambda *_a, **_kw: subprocess_runner.CommandResult(0, "qwen2.5:3b abcdef123\n", ""),
-    )
-    assert ollama.list_model_digest("/usr/bin/ollama", "qwen2.5:3b") == "abcdef123"
 
     # request_with_retry transport error
     def broken_call(*_a: Any, **_kw: Any) -> Any:

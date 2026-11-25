@@ -118,7 +118,9 @@ def build_session(profile: BackendProfile) -> requests.Session:
 
 
 def resolve_model_digest(session: requests.Session, profile: BackendProfile) -> str | None:
-    """Query Ollama ``/api/tags`` for the pinned model digest; return None if unavailable."""
+    """Resolve the pinned model digest via ``ollama.Client`` (or injected session)."""
+    if ollama_adapter.is_ollama_profile(profile) and type(session) is requests.Session:
+        return ollama_adapter.resolve_model_digest_sdk(profile.api_root, profile.model)
     return ollama_adapter.resolve_model_digest(
         session,
         profile.api_root,

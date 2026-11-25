@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Protocol
 
 from experiment.adapters import backends
-from experiment.adapters.backend_probe import BackendProbeError, HttpBackendProbe
+from experiment.adapters.backend_probe import BackendProbeError, create_backend_probe
 from experiment.adapters.github_workflow import GitHubWorkflowAdapter
 from experiment.adapters.ssh_tunnel import SshTunnelAdapter, TunnelProbeError
 from experiment.domain.backend import BackendProfile
@@ -158,12 +158,13 @@ def run_backend_check(
     backend_probe: BackendProbe | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> BackendCheckResult:
-    """Run the full remote-Ollama preflight check and return READY + digest pin."""
+    """Run the full backend preflight check and return READY + digest pin."""
     profile = _resolve_check_profile(cfg)
-    _verify_tunnel(cfg, tunnel_probe or SshTunnelAdapter())
+    if cfg.backend == "remote-ollama" or cfg.ssh_host is not None or tunnel_probe is not None:
+        _verify_tunnel(cfg, tunnel_probe or SshTunnelAdapter())
     owns_probe = backend_probe is None
     active_probe: BackendProbe = (
-        backend_probe if backend_probe is not None else HttpBackendProbe(profile, sleep=sleep)
+        backend_probe if backend_probe is not None else create_backend_probe(profile, sleep=sleep)
     )
     try:
         digest = _poll_model_and_digest(cfg, profile, active_probe, sleep)

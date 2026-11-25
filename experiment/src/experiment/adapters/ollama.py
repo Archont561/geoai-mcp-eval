@@ -1,4 +1,4 @@
-"""Ollama / OpenAI-compatible HTTP transport, digest lookup, and daemon lifecycle."""
+"""Ollama Python SDK (``ollama.Client``) transport, digest lookup, and daemon lifecycle."""
 
 from __future__ import annotations
 
@@ -8,18 +8,23 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO
+from urllib.parse import urlparse
 
+import httpx
+import ollama
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from experiment.adapters import run_store, subprocess_runner
+from experiment.adapters import run_store
+from experiment.domain.backend import BackendProfile
 
 DEFAULT_BASE_URL = "http://127.0.0.1:11434"
 RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
 DEFAULT_RETRY_BACKOFF_S = 1.0
 DEFAULT_READY_ATTEMPTS = 60
 DEFAULT_READY_SLEEP_S = 2.0
+_LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 class HttpTransportError(RuntimeError):
@@ -51,6 +56,29 @@ class OllamaProcess:
                 self.proc.kill()
         finally:
             self.log_handle.close()
+
+
+def is_ollama_profile(profile: BackendProfile) -> bool:
+    """Return True when ``profile`` targets a local or forwarded Ollama daemon."""
+    if profile.api_key_env:
+        return False
+    parsed = urlparse(str(profile.base_url))
+    return (parsed.hostname or "").lower() in _LOCAL_HOSTS or parsed.port == 11434
+
+
+def build_client(
+    base_url: str = DEFAULT_BASE_URL,
+    *,
+    timeout: float | httpx.Timeout | None = None,
+    headers: Mapping[str, str] | None = None,
+) -> ollama.Client:
+    """Construct an official ``ollama.Client`` bound to ``base_url``."""
+    kwargs: dict[str, Any] = {"host": base_url.rstrip("/")}
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    if headers:
+        kwargs["headers"] = dict(headers)
+    return ollama.Client(**kwargs)
 
 
 def build_retry_session(
@@ -108,20 +136,29 @@ def request_with_retry(
     return last_resp
 
 
+def as_mapping(value: Any) -> dict[str, Any]:
+    """Convert an SDK response/model object or mapping into a plain dict."""
+    if isinstance(value, Mapping):
+        return dict(value)
+    dumper = getattr(value, "model_dump", None)
+    if callable(dumper):
+        dumped = dumper(mode="json")
+        return dict(dumped) if isinstance(dumped, Mapping) else {}
+    return {}
+
+
 def _entry_digest(entry: object, candidates: set[str]) -> str | None:
-    if not isinstance(entry, dict):
+    raw = as_mapping(entry)
+    if not ({raw.get("name"), raw.get("model")} & candidates):
         return None
-    if not ({entry.get("name"), entry.get("model")} & candidates):
-        return None
-    digest = entry.get("digest")
+    digest = raw.get("digest")
     return digest.strip() if isinstance(digest, str) and digest.strip() else None
 
 
 def extract_digest_from_tags(payload: object, model: str) -> str | None:
-    """Extract the pinned digest for ``model`` from an Ollama ``/api/tags`` JSON payload."""
-    if not isinstance(payload, dict):
-        return None
-    models = payload.get("models")
+    """Extract the pinned digest for ``model`` from an Ollama ``list()`` / ``/api/tags`` payload."""
+    raw = as_mapping(payload)
+    models = raw.get("models")
     if not isinstance(models, list):
         return None
     candidates = {model, f"{model}:latest"} if ":" not in model else {model}
@@ -132,6 +169,34 @@ def extract_digest_from_tags(payload: object, model: str) -> str | None:
     return None
 
 
+def list_model_entries(
+    base_url: str = DEFAULT_BASE_URL,
+    *,
+    client: Any | None = None,
+    timeout: float = 10.0,
+) -> list[dict[str, Any]]:
+    """List installed models via ``ollama.Client.list()`` as normalized dictionaries."""
+    active = client if client is not None else build_client(base_url, timeout=timeout)
+    payload = as_mapping(active.list())
+    models = payload.get("models")
+    return [as_mapping(entry) for entry in models] if isinstance(models, list) else []
+
+
+def resolve_model_digest_sdk(
+    base_url: str,
+    model: str,
+    *,
+    client: Any | None = None,
+    timeout: float = 10.0,
+) -> str | None:
+    """Resolve ``model`` digest through ``ollama.Client.list()``; return None on errors."""
+    try:
+        entries = list_model_entries(base_url, client=client, timeout=timeout)
+    except (ollama.RequestError, ollama.ResponseError, httpx.HTTPError, OSError):
+        return None
+    return extract_digest_from_tags({"models": entries}, model)
+
+
 def resolve_model_digest(
     session: Any,
     api_root: str,
@@ -139,7 +204,9 @@ def resolve_model_digest(
     *,
     connect_timeout_s: float = 5.0,
 ) -> str | None:
-    """Query Ollama ``/api/tags`` for the pinned model digest; return None if unavailable."""
+    """Query Ollama ``/api/tags`` via a requests session, or ``ollama.Client`` if None."""
+    if session is None or isinstance(session, ollama.Client):
+        return resolve_model_digest_sdk(api_root, model, client=session, timeout=10.0)
     try:
         resp = session.get(f"{api_root.rstrip('/')}/api/tags", timeout=(connect_timeout_s, 10))
     except requests.exceptions.RequestException:
@@ -153,13 +220,14 @@ def resolve_model_digest(
     return extract_digest_from_tags(payload, model)
 
 
-def serve_running(base_url: str = DEFAULT_BASE_URL) -> bool:
-    """Return True if an Ollama server responds HTTP 200 on ``/api/version``."""
+def serve_running(base_url: str = DEFAULT_BASE_URL, *, client: Any | None = None) -> bool:
+    """Return True when ``ollama.Client.list()`` succeeds against ``base_url``."""
+    active = client if client is not None else build_client(base_url, timeout=2.0)
     try:
-        resp = requests.get(f"{base_url.rstrip('/')}/api/version", timeout=2)
-    except requests.exceptions.RequestException:
+        active.list()
+    except (ollama.RequestError, ollama.ResponseError, httpx.HTTPError, OSError):
         return False
-    return resp.status_code == 200
+    return True
 
 
 def wait_ready(
@@ -169,7 +237,7 @@ def wait_ready(
     sleep_s: float = DEFAULT_READY_SLEEP_S,
     sleep: Callable[[float], None] = time.sleep,
 ) -> bool:
-    """Poll ``/api/version`` until Ollama is ready or ``attempts`` are exhausted."""
+    """Poll Ollama via ``ollama.Client`` until ready or ``attempts`` are exhausted."""
     for _ in range(attempts):
         if serve_running(base_url):
             return True
@@ -203,9 +271,21 @@ def stop_ollama(owner: OllamaProcess | None) -> None:
         owner.stop()
 
 
-def pull_model(ollama_bin: str, model: str, *, timeout_s: int = 1800) -> int:
-    """Pull ``model`` via the Ollama CLI and return its exit code."""
-    return subprocess_runner.run_passthrough([ollama_bin, "pull", model], timeout=timeout_s)
+def pull_model(
+    ollama_bin: str,
+    model: str,
+    *,
+    base_url: str = DEFAULT_BASE_URL,
+    timeout_s: int = 1800,
+) -> int:
+    """Pull ``model`` via ``ollama.Client.pull()`` and return 0 on success or 1 on error."""
+    _ = ollama_bin  # Retained in signature for callers that resolve the daemon binary first.
+    active = build_client(base_url, timeout=float(timeout_s))
+    try:
+        active.pull(model, stream=False)
+    except (ollama.RequestError, ollama.ResponseError, httpx.HTTPError, OSError):
+        return 1
+    return 0
 
 
 def smoke_generate(
@@ -214,17 +294,15 @@ def smoke_generate(
     base_url: str = DEFAULT_BASE_URL,
     timeout_s: float = 300.0,
 ) -> dict[str, Any]:
-    """Issue a minimal non-streaming ``/api/generate`` probe against local Ollama."""
-    body = {
-        "model": model,
-        "prompt": "Reply with: OK",
-        "stream": False,
-        "options": {"temperature": 0},
-    }
-    resp = requests.post(f"{base_url.rstrip('/')}/api/generate", json=body, timeout=timeout_s)
-    resp.raise_for_status()
-    payload = resp.json()
-    return payload if isinstance(payload, dict) else {}
+    """Issue a minimal non-streaming ``generate`` probe via ``ollama.Client``."""
+    active = build_client(base_url, timeout=timeout_s)
+    response = active.generate(
+        model=model,
+        prompt="Reply with: OK",
+        stream=False,
+        options={"temperature": 0},
+    )
+    return as_mapping(response)
 
 
 def list_model_digest(
@@ -232,16 +310,9 @@ def list_model_digest(
     model: str,
     *,
     base_url: str = DEFAULT_BASE_URL,
+    client: Any | None = None,
 ) -> str:
-    """Resolve ``model`` digest via ``/api/tags``, falling back to ``ollama list`` CLI."""
-    with requests.Session() as session:
-        digest = resolve_model_digest(session, base_url, model)
-    if digest:
-        return digest
-    result = subprocess_runner.run_command([ollama_bin, "list"], timeout=60)
-    prefix = model.split(":", 1)[0]
-    for line in result.stdout.splitlines():
-        parts = line.split()
-        if parts and (parts[0] == model or parts[0].startswith(prefix)):
-            return parts[1] if len(parts) > 1 else "unavailable"
-    return "unavailable"
+    """Resolve ``model`` digest via ``ollama.Client.list()``, or ``unavailable``."""
+    _ = ollama_bin
+    digest = resolve_model_digest_sdk(base_url, model, client=client)
+    return digest or "unavailable"

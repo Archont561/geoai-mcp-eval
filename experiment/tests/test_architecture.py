@@ -215,10 +215,40 @@ def test_the_shipped_contracts_pass_and_reject_violations(tmp_path: Path) -> Non
             "experiment.services is not allowed to import mcp",
         ),
         (
+            "services",
+            "import sshtunnel\n",
+            svc_io,
+            "experiment.services is not allowed to import sshtunnel",
+        ),
+        (
+            "services",
+            "import ollama\n",
+            svc_io,
+            "experiment.services is not allowed to import ollama",
+        ),
+        (
+            "services",
+            "import openrouter\n",
+            svc_io,
+            "experiment.services is not allowed to import openrouter",
+        ),
+        (
+            "services",
+            "import httpx\n",
+            svc_io,
+            "experiment.services is not allowed to import httpx",
+        ),
+        (
             "cli",
             "import subprocess\n",
             cli_io,
             "experiment.cli is not allowed to import subprocess",
+        ),
+        (
+            "cli",
+            "import openrouter\n",
+            cli_io,
+            "experiment.cli is not allowed to import openrouter",
         ),
         (
             "cli",

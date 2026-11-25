@@ -213,3 +213,14 @@ class HttpChatGateway:
 
     def close(self) -> None:
         self._session.close()
+
+
+def create_chat_gateway(profile: BackendProfile) -> Any:
+    """Select the SDK or HTTP ``ChatGateway`` matching ``profile``."""
+    from experiment.adapters import _ollama_chat, ollama, openrouter
+
+    if openrouter.is_openrouter_profile(profile):
+        return openrouter.OpenRouterChatGateway(profile)
+    if ollama.is_ollama_profile(profile):
+        return _ollama_chat.OllamaChatGateway(profile)
+    return HttpChatGateway(profile)

@@ -194,3 +194,18 @@ class HttpBackendProbe:
         """Close the underlying HTTP session if owned by this adapter."""
         if self._owns_session:
             self._session.close()
+
+
+def create_backend_probe(
+    profile: BackendProfile,
+    *,
+    sleep: Callable[[float], None] = time.sleep,
+) -> Any:
+    """Select the appropriate SDK or HTTP ``BackendProbe`` for ``profile``."""
+    from experiment.adapters import _sdk_probes, openrouter
+
+    if openrouter.is_openrouter_profile(profile):
+        return _sdk_probes.OpenRouterBackendProbe(profile, sleep=sleep)
+    if ollama_adapter.is_ollama_profile(profile):
+        return _sdk_probes.OllamaBackendProbe(profile, sleep=sleep)
+    return HttpBackendProbe(profile, sleep=sleep)
