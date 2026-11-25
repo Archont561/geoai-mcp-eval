@@ -105,7 +105,7 @@ class ExperimentRun(BaseModel):
 
     schema_version: Literal[1] = 1
     run_id: str = Field(min_length=1)
-    stage: RunStage = "pilot"
+    stage: RunStage = RunStage.PILOT
     created_at: datetime = Field(default_factory=_utc_now)
     provenance: RunProvenance = Field(default_factory=RunProvenance)
     trials: dict[str, TrialRecord] = Field(default_factory=dict)

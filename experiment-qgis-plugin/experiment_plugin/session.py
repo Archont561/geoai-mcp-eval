@@ -33,8 +33,11 @@ from experiment_plugin._tasks import (
 )
 from experiment_plugin.metrics import (
     ManualActionGroup,
+    MetricsStatus,
     ProcessingExecution,
     SessionMetricsState,
+    SessionStatus,
+    TrajectoryOrigin,
     normalize_timestamp,
     sanitize_parameters,
 )
@@ -49,6 +52,9 @@ __all__ = [
     "RECORD_VERSION",
     "TEMPLATE_KEYS",
     "HumanBaselineSession",
+    "MetricsStatus",
+    "SessionStatus",
+    "TrajectoryOrigin",
     "abandon_session",
     "discover_task_dir",
     "host_identity",
@@ -90,7 +96,7 @@ class HumanBaselineSession:
     # default to True, which would fabricate an offline session the host never enforced.
     network_disabled: bool | None = None
     metrics: SessionMetricsState = field(default_factory=SessionMetricsState)
-    status: str = "in_progress"
+    status: SessionStatus = SessionStatus.IN_PROGRESS
 
     # -- events -----------------------------------------------------------
 
@@ -200,7 +206,7 @@ class HumanBaselineSession:
         record = template_skeleton()
         record.update(
             {
-                "status": "recorded",
+                "status": SessionStatus.RECORDED,
                 "task_id": self.task_id,
                 "task_file_sha256": sha256_file(self.task_yaml),
                 "fixture_path": str(self.fixture),
@@ -232,7 +238,7 @@ class HumanBaselineSession:
             prefix=".human-reference-record-",
             before_replace=lambda: self.tracker.record("session_end", outputs=len(outputs)),
         )
-        self.status = "recorded"
+        self.status = SessionStatus.RECORDED
         return record_path
 
 
@@ -268,7 +274,7 @@ def abandon_session(session: HumanBaselineSession, reason: str = "user requested
     session.tracker.record("session_abandoned", reason=reason)
     payload = _abandoned_payload(session, utc_now(), reason)
     marker = _session_io.write_abandoned_marker(session.output_dir, payload)
-    session.status = "abandoned"
+    session.status = SessionStatus.ABANDONED
     return marker
 
 

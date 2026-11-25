@@ -107,7 +107,7 @@ def _validate_session_dir(session_dir: Path) -> tuple[Path, Path, dict[str, Any]
             f"unsupported record_version={raw_record.get('record_version')!r} "
             f"(expected {session.RECORD_VERSION})"
         )
-    if raw_record.get("status") != "recorded":
+    if raw_record.get("status") != metrics.SessionStatus.RECORDED:
         raise ReviewError(f"session status is {raw_record.get('status')!r}, expected 'recorded'")
     return record_path, events_path, raw_record
 
@@ -125,7 +125,7 @@ def _merge_processing_log(
         key = _review_merge.execution_dedup_key(item)
         if key not in seen_keys:
             seen_keys.add(key)
-            executions.append((item, "processing_log"))
+            executions.append((item, metrics.TrajectoryOrigin.PROCESSING_LOG))
     return LogMergeSummary(log_path, session.sha256_file(log_path), log_errors)
 
 
@@ -197,7 +197,9 @@ def _build_reviewed_outputs(
     executions = _review_merge.load_recorded_executions(raw_study)
     log_summary = _merge_processing_log(executions, req.processing_log)
     manual_groups = _review_merge.load_recorded_manual_groups(raw_study)
-    manual_groups.extend((group, "post_session_review") for group in added_manual)
+    manual_groups.extend(
+        (group, metrics.TrajectoryOrigin.POST_SESSION_REVIEW) for group in added_manual
+    )
     summary = _review_merge.compute_reviewed_metrics(
         raw_study, executions, manual_groups, log_summary, mark_reviewed=req.mark_reviewed
     )

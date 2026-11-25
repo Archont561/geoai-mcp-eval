@@ -248,7 +248,7 @@ def _metrics_summary_line(
     steps, tools, metrics_status, _detail = session.metrics.build_summary(
         manual_review_complete=manual_review_complete
     )
-    if metrics_status == "reviewed":
+    if metrics_status == baseline.MetricsStatus.REVIEWED:
         tool_text = ", ".join(tools or []) or "none"
         return (
             f"events: {session.tracker.event_count}  steps: {steps}  tools: {tool_text} (reviewed)"

@@ -265,7 +265,7 @@ class SessionPanelDialog(Dialog):
         task_id, participant = self._params()
         previous = _state.ACTIVE[_state.SESSION_KEY]
         result, succeeded = self._dispatch_action("abandon_session")
-        if not succeeded or previous is None or previous.status != "abandoned":
+        if not succeeded or previous is None or previous.status != baseline.SessionStatus.ABANDONED:
             self._after_change(result, "restart failed")
             return
         result = self._call_action(

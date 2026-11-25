@@ -5,13 +5,14 @@ from __future__ import annotations
 import contextlib
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import paramiko
 import sshtunnel
 from pydantic import BaseModel, ConfigDict, Field
 
-TunnelErrorKind = Literal["ssh-unreachable", "tunnel-dead"]
+from experiment.domain.backend import TunnelErrorKind
+
 DEFAULT_SSH_PORT = 22
 DEFAULT_REMOTE_OLLAMA_BIND: tuple[str, int] = ("127.0.0.1", 11434)
 
@@ -53,7 +54,7 @@ def parse_ssh_target(raw: str) -> SshTarget:
     text = raw.strip()
     if not text:
         raise TunnelProbeError(
-            "ssh-unreachable",
+            TunnelErrorKind.SSH_UNREACHABLE,
             "no SSH host configured for remote-ollama preflight",
             "pass --ssh-host <user@host> (or set OLLAMA_SSH_HOST)",
         )
@@ -71,7 +72,7 @@ def parse_ssh_target(raw: str) -> SshTarget:
     host = host_part.strip()
     if not host:
         raise TunnelProbeError(
-            "ssh-unreachable",
+            TunnelErrorKind.SSH_UNREACHABLE,
             f"invalid SSH host target {raw!r}",
             "pass --ssh-host <[user@]host[:port]>",
         )
@@ -97,12 +98,12 @@ def _forwarder_kwargs(spec: TunnelSpec, target: SshTarget) -> dict[str, Any]:
 def _classify_tunnel_exception(ssh_host: str, exc: Exception) -> TunnelProbeError:
     if isinstance(exc, sshtunnel.HandlerSSHTunnelForwarderError):
         return TunnelProbeError(
-            "tunnel-dead",
+            TunnelErrorKind.TUNNEL_DEAD,
             f"SSH port-forwarding handler failed for {ssh_host}: {exc}",
             "verify remote port forwarding is allowed and Ollama is listening on the remote host",
         )
     return TunnelProbeError(
-        "ssh-unreachable",
+        TunnelErrorKind.SSH_UNREACHABLE,
         f"cannot establish SSH tunnel to {ssh_host}: {exc}",
         "verify network/VPN connectivity, SSH config, and key authentication",
     )
@@ -153,7 +154,7 @@ class ManagedSshTunnel:
         if not self.is_active:
             self.stop()
             raise TunnelProbeError(
-                "tunnel-dead",
+                TunnelErrorKind.TUNNEL_DEAD,
                 f"SSH tunnel to {self._spec.ssh_host} started but is not active",
                 f"verify SSH port forwarding to {self._spec.remote_bind_address} on {target.host}",
             )
@@ -194,13 +195,13 @@ class SshTunnelAdapter:
         """Raise :class:`TunnelProbeError` if the SSH host or tunnel cannot be established."""
         if not ssh_host:
             raise TunnelProbeError(
-                "ssh-unreachable",
+                TunnelErrorKind.SSH_UNREACHABLE,
                 "no SSH host configured for remote-ollama preflight",
                 "pass --ssh-host <user@host> (or set OLLAMA_SSH_HOST)",
             )
         if control_path is not None and not control_path.exists():
             raise TunnelProbeError(
-                "tunnel-dead",
+                TunnelErrorKind.TUNNEL_DEAD,
                 f"ControlMaster socket does not exist: {control_path}",
                 "remove --control-path to verify via sshtunnel or re-open the local socket",
             )

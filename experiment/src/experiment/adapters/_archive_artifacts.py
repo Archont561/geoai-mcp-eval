@@ -12,16 +12,6 @@ from experiment.domain.run import ArtifactKind, ArtifactRef, TranscriptEntry
 
 _TRANSCRIPT_KNOWN_FIELDS = frozenset(TranscriptEntry.model_fields) - {"extra_fields"}
 
-_EXACT_KINDS: dict[str, ArtifactKind] = {
-    "transcript.jsonl": "transcript",
-    "result.json": "deliverable",
-    "result.geojson": "deliverable",
-}
-_SUFFIX_KINDS: tuple[tuple[str, ArtifactKind], ...] = (
-    (".gpkg", "deliverable"),
-    (".log", "log"),
-    (".py", "script"),
-)
 _SUFFIX_MEDIA_TYPES: tuple[tuple[str, str], ...] = (
     (".geojson", "application/geo+json"),
     (".json", "application/json"),
@@ -39,16 +29,8 @@ def sha256_bytes(data: bytes) -> str:
 
 
 def infer_artifact_kind(rel_path: str) -> ArtifactKind:
-    """Classify a trial artifact path into an :data:`ArtifactKind`."""
-    name = rel_path.rsplit("/", 1)[-1].lower()
-    if name in _EXACT_KINDS:
-        return _EXACT_KINDS[name]
-    if name.startswith("oracle") and name.endswith(".json"):
-        return "oracle_passes"
-    for suffix, kind in _SUFFIX_KINDS:
-        if name.endswith(suffix):
-            return kind
-    return "other"
+    """Classify a trial artifact path into an :class:`ArtifactKind`."""
+    return ArtifactKind.from_filename(rel_path)
 
 
 def infer_media_type(rel_path: str) -> str | None:

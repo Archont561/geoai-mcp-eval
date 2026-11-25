@@ -10,7 +10,7 @@ import requests
 
 from experiment.adapters import backends
 from experiment.adapters import ollama as ollama_adapter
-from experiment.domain.backend import BackendProfile
+from experiment.domain.backend import BackendProbeErrorKind, BackendProfile
 
 _TOKEN_LIMIT_MARKERS = (
     "token limit",
@@ -25,7 +25,7 @@ _TOKEN_LIMIT_MARKERS = (
 class BackendProbeError(RuntimeError):
     """Structured HTTP backend preflight failure with semantic kind and remediation hint."""
 
-    def __init__(self, kind: str, detail: str, hint: str) -> None:
+    def __init__(self, kind: BackendProbeErrorKind | str, detail: str, hint: str) -> None:
         self.kind = kind
         self.detail = detail
         self.hint = hint
@@ -61,19 +61,19 @@ def _extract_model_ids(payload: Any) -> set[str]:
 def _raise_for_models_http_status(resp: Any, url: str) -> None:
     if resp.status_code in (401, 403):
         raise BackendProbeError(
-            "auth-error",
+            BackendProbeErrorKind.AUTH_ERROR,
             f"HTTP {resp.status_code} from {url}: {resp.text[:200]}",
             "check API credentials or proxy auth configuration (4xx is never retried)",
         )
     if 400 <= resp.status_code < 500:
         raise BackendProbeError(
-            "client-error",
+            BackendProbeErrorKind.CLIENT_ERROR,
             f"HTTP {resp.status_code} from {url}: {resp.text[:200]}",
             "verify backend base_url and OpenAI-compatible /v1/models path",
         )
     if resp.status_code >= 500:
         raise BackendProbeError(
-            "tunnel-dead",
+            BackendProbeErrorKind.TUNNEL_DEAD,
             f"HTTP {resp.status_code} from {url} after retries: {resp.text[:200]}",
             "inspect remote Ollama server logs",
         )
@@ -82,25 +82,25 @@ def _raise_for_models_http_status(resp: Any, url: str) -> None:
 def _validate_completion_response(resp: Any, profile: BackendProfile) -> None:
     if resp.status_code in (401, 403):
         raise BackendProbeError(
-            "auth-error",
+            BackendProbeErrorKind.AUTH_ERROR,
             f"HTTP {resp.status_code} on completion: {resp.text[:200]}",
             "verify credentials; auth errors are never retried",
         )
     if _is_token_limit(resp.status_code, resp.text):
         raise BackendProbeError(
-            "token-limit",
+            BackendProbeErrorKind.TOKEN_LIMIT,
             f"HTTP {resp.status_code} token/context limit: {resp.text[:200]}",
             "reduce max_tokens or check model context window / provider token quota",
         )
     if resp.status_code == 429:
         raise BackendProbeError(
-            "token-limit",
+            BackendProbeErrorKind.TOKEN_LIMIT,
             f"HTTP 429 rate/token limit after {profile.retries} retries: {resp.text[:200]}",
             "wait for quota reset or lower concurrency",
         )
     if resp.status_code >= 400:
         raise BackendProbeError(
-            "completion-rejected",
+            BackendProbeErrorKind.COMPLETION_REJECTED,
             f"HTTP {resp.status_code} completion rejected: {resp.text[:200]}",
             "check model load state and remote Ollama logs",
         )
@@ -111,14 +111,14 @@ def _parse_completion_payload(resp: Any, chat_url: str) -> None:
         payload = resp.json()
     except ValueError as exc:
         raise BackendProbeError(
-            "completion-rejected",
+            BackendProbeErrorKind.COMPLETION_REJECTED,
             f"invalid JSON from {chat_url}",
             "inspect remote proxy/Ollama response",
         ) from exc
     choices = payload.get("choices") if isinstance(payload, dict) else None
     if not isinstance(choices, list) or not choices:
         raise BackendProbeError(
-            "completion-rejected",
+            BackendProbeErrorKind.COMPLETION_REJECTED,
             "completion response contained no choices",
             "check remote Ollama model health",
         )
@@ -155,7 +155,7 @@ class HttpBackendProbe:
             )
         except ollama_adapter.HttpTransportError as exc:
             raise BackendProbeError(
-                "tunnel-dead",
+                BackendProbeErrorKind.TUNNEL_DEAD,
                 str(exc),
                 "verify port forwarding and that Ollama is listening on the remote host",
             ) from exc
@@ -168,7 +168,7 @@ class HttpBackendProbe:
             return _extract_model_ids(resp.json())
         except ValueError as exc:
             raise BackendProbeError(
-                "tunnel-dead",
+                BackendProbeErrorKind.TUNNEL_DEAD,
                 f"non-JSON response from {self._profile.models_url}",
                 "verify the forwarded port actually terminates at Ollama",
             ) from exc

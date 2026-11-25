@@ -19,6 +19,7 @@ from experiment.domain.prompts import (
     ChatTurn,
     SandboxExecution,
 )
+from experiment.domain.run import Arm, Driver
 
 if TYPE_CHECKING:
     from experiment.domain.backend import BackendProfile
@@ -32,12 +33,12 @@ JSON_INDENT = run_store.JSON_INDENT
 
 SANDBOX_FIXTURE_NAME = "input.geojson"
 
-DRIVERS = ("scripted", "ollama")
-ARMS = ("A", "B")
+DRIVERS: tuple[Driver, ...] = tuple(Driver)
+ARMS: tuple[Arm, ...] = tuple(Arm)
 
 
 def model_label(driver: str, model: str) -> str:
-    return model if driver == "ollama" else "scripted-canned"
+    return model if driver == Driver.OLLAMA else "scripted-canned"
 
 
 def fixture_path(task_path: Path, task: Task) -> Path:

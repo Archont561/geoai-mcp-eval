@@ -1,7 +1,7 @@
 ---
 id: GEO-026
 title: Refactor string-based sets and exit codes into typed StrEnum and IntEnum classes with domain methods
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-24T00:00:00Z'
 labels:
@@ -72,13 +72,13 @@ Stringly-typed vocabularies and parallel lookup tables are currently scattered a
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All `experiment/src/experiment/domain/run/` vocabularies (`RunStage`, `Paradigm`, `EnforcementLevel`, `ExecutionStatus`, `AssertionTier`, `ArtifactKind`, `TrajectoryClass`, `FailureClass`) are refactored from `Literal` + raw lookup dicts into `StrEnum` classes with typed parsing/classification methods.
-- [ ] #2 All task, oracle, and geometry vocabularies (`TaskFamily`, `Expressibility`, `Contamination`, `BaselineStatus`, `OracleAssertionType`, `PilotTrap`, `De9imRelation`) are refactored from `Literal` / `frozenset` constants into `StrEnum` classes with typed methods (`required_fields()`, `default_tier()`, `matrix_override()`, etc.).
-- [ ] #3 Execution, transport, CLI, and analysis vocabularies (`Arm`, `Driver`, `TunnelErrorKind`, `BackendProbeErrorKind`, `CachePolicy`) and integer code sets (`BackendCheckExitCode`, `RetryableHttpStatus`) are refactored into `StrEnum` and `IntEnum` classes with typed conversion/predicate methods, eliminating bare `EXIT_*` and `RETRYABLE_STATUSES` raw sets/maps.
-- [ ] #4 Repeated status string sets in `experiment-qgis-plugin/experiment_plugin/` (`MetricsStatus`, `SessionStatus`, `TrajectoryOrigin`) use stdlib `StrEnum` while preserving zero third-party dependencies for QGIS Python compatibility.
-- [ ] #5 Pydantic v2 serialization (`model_dump(mode="json")`), JSON Schema (`ExperimentRun.model_json_schema()` and `schema-v1.json`), Typer CLI flags, and pandas DataFrame column values remain 100% backward compatible, and `mypy` passes with zero errors across all strict enum-typed call sites.
-- [ ] #6 Hypothesis property tests verify enum exhaustion, case/code parsing round-trips, invalid value rejection, and `IntEnum` exit/status code mappings.
-- [ ] #7 `pixi run tools run check`, `md`, and `links` pass with `0` `clean_code` violations, all `import-linter` contracts kept, `97/97` `alint` rules passing, and `>=90%` test coverage.
+- [x] #1 All `experiment/src/experiment/domain/run/` vocabularies (`RunStage`, `Paradigm`, `EnforcementLevel`, `ExecutionStatus`, `AssertionTier`, `ArtifactKind`, `TrajectoryClass`, `FailureClass`) are refactored from `Literal` + raw lookup dicts into `StrEnum` classes with typed parsing/classification methods.
+- [x] #2 All task, oracle, and geometry vocabularies (`TaskFamily`, `Expressibility`, `Contamination`, `BaselineStatus`, `OracleAssertionType`, `PilotTrap`, `De9imRelation`) are refactored from `Literal` / `frozenset` constants into `StrEnum` classes with typed methods (`required_fields()`, `default_tier()`, `matrix_override()`, etc.).
+- [x] #3 Execution, transport, CLI, and analysis vocabularies (`Arm`, `Driver`, `TunnelErrorKind`, `BackendProbeErrorKind`, `CachePolicy`) and integer code sets (`BackendCheckExitCode`, `RetryableHttpStatus`) are refactored into `StrEnum` and `IntEnum` classes with typed conversion/predicate methods, eliminating bare `EXIT_*` and `RETRYABLE_STATUSES` raw sets/maps.
+- [x] #4 Repeated status string sets in `experiment-qgis-plugin/experiment_plugin/` (`MetricsStatus`, `SessionStatus`, `TrajectoryOrigin`) use stdlib `StrEnum` while preserving zero third-party dependencies for QGIS Python compatibility.
+- [x] #5 Pydantic v2 serialization (`model_dump(mode="json")`), JSON Schema (`ExperimentRun.model_json_schema()` and `schema-v1.json`), Typer CLI flags, and pandas DataFrame column values remain 100% backward compatible, and `mypy` passes with zero errors across all strict enum-typed call sites.
+- [x] #6 Hypothesis property tests verify enum exhaustion, case/code parsing round-trips, invalid value rejection, and `IntEnum` exit/status code mappings.
+- [x] #7 `pixi run tools run check`, `md`, and `links` pass with `0` `clean_code` violations, all `import-linter` contracts kept, `97/97` `alint` rules passing, and `>=90%` test coverage.
 <!-- AC:END -->
 
 ## Implementation Plan

@@ -15,8 +15,6 @@ from experiment.domain.run._common import (
     Paradigm,
 )
 
-_UNENFORCED_PARADIGMS = frozenset({"codegen", "human_gui"})
-
 
 class Treatment(BaseModel):
     """Experimental condition applied to a task (paradigm + boundary enforcement)."""
@@ -24,12 +22,15 @@ class Treatment(BaseModel):
     model_config = STRICT_MODEL
 
     paradigm: Paradigm
-    enforcement_level: EnforcementLevel = "none"
+    enforcement_level: EnforcementLevel = EnforcementLevel.NONE
     catalogue_hash: str | None = None
 
     @model_validator(mode="after")
     def _validate_enforcement(self) -> Treatment:
-        if self.paradigm in _UNENFORCED_PARADIGMS and self.enforcement_level != "none":
+        if (
+            not self.paradigm.allows_enforcement()
+            and self.enforcement_level != EnforcementLevel.NONE
+        ):
             raise ValueError(
                 f"enforcement_level must be 'none' for paradigm {self.paradigm!r}, "
                 f"got {self.enforcement_level!r}"
@@ -44,7 +45,7 @@ class TrialKey(BaseModel):
 
     task_id: str = Field(min_length=1)
     paradigm: Paradigm
-    enforcement_level: EnforcementLevel = "none"
+    enforcement_level: EnforcementLevel = EnforcementLevel.NONE
     repetition: int = Field(default=1, ge=1)
 
     @property
@@ -61,7 +62,7 @@ class ArtifactRef(BaseModel):
     path: str = Field(min_length=1)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     bytes: int = Field(ge=0)
-    kind: ArtifactKind = "other"
+    kind: ArtifactKind = ArtifactKind.OTHER
     media_type: str | None = None
 
     @field_validator("path")

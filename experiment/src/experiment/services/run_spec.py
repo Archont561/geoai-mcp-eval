@@ -7,8 +7,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from experiment.adapters import backends
-from experiment.adapters.harness_io import DRIVERS
-from experiment.domain.run import EnforcementLevel, parse_enforcement_level
+from experiment.domain.run import Arm, Driver, EnforcementLevel, parse_enforcement_level
 from experiment.services.runners.ports import RunSpec
 
 __all__ = [
@@ -41,12 +40,11 @@ class RunSpecInput(BaseModel):
     repetitions: int = 1
 
 
-def _parse_arms(raw: str) -> tuple[str, ...]:
-    mapping = {"both": ("A", "B"), "a": ("A",), "b": ("B",)}
-    key = raw.strip().lower()
-    if key not in mapping:
-        raise RunSpecError(f"--arm must be one of both|A|B, got {raw!r}")
-    return mapping[key]
+def _parse_arms(raw: str) -> tuple[Arm, ...]:
+    try:
+        return Arm.expand(raw)
+    except ValueError as exc:
+        raise RunSpecError(str(exc)) from exc
 
 
 def _parse_tasks(raw: str) -> tuple[str, ...] | None:
@@ -60,7 +58,7 @@ def _resolve_backend_profile(
 ) -> backends.BackendProfile:
     try:
         profile = backends.resolve_profile(backend, host=host, model=model)
-        if driver == "ollama":
+        if driver == Driver.OLLAMA:
             backends.require_api_key(profile)
     except backends.BackendError as exc:
         raise RunSpecError(str(exc)) from exc
@@ -76,8 +74,10 @@ def parse_enforce(raw: str) -> EnforcementLevel:
 
 
 def _validate_run_inputs(driver: str, max_cell_tokens: int | None, repetitions: int) -> None:
-    if driver not in DRIVERS:
-        raise RunSpecError(f"--driver must be one of {', '.join(DRIVERS)}")
+    try:
+        Driver.parse(driver)
+    except ValueError as exc:
+        raise RunSpecError(str(exc)) from exc
     if max_cell_tokens is not None and max_cell_tokens < 1:
         raise RunSpecError("--max-cell-tokens must be a positive integer")
     if repetitions < 1:

@@ -31,3 +31,16 @@ def test_metrics_sanitize_parameters() -> None:
     assert sanitized is not None
     assert sanitized["DISTANCE"] == 5
     assert isinstance(sanitized["RAW"], str)
+
+
+@given(
+    enum_cls=st.sampled_from(
+        [metrics.MetricsStatus, metrics.SessionStatus, metrics.TrajectoryOrigin]
+    ),
+)
+def test_plugin_status_str_enums_roundtrip_by_value(
+    enum_cls: type[metrics.MetricsStatus],
+) -> None:
+    for member in enum_cls:
+        assert enum_cls(member.value) is member
+        assert str(member) == member.value

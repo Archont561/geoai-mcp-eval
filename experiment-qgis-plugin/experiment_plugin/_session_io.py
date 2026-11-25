@@ -10,7 +10,11 @@ from typing import Any
 
 from experiment_plugin import _io
 from experiment_plugin._tasks import sha256_file
-from experiment_plugin.metrics import METRICS_STATUS_NOT_STARTED, study_metrics_skeleton
+from experiment_plugin.metrics import (
+    METRICS_STATUS_NOT_STARTED,
+    SessionStatus,
+    study_metrics_skeleton,
+)
 
 RECORD_VERSION = 2
 TEMPLATE_KEYS = (
@@ -42,7 +46,7 @@ def template_skeleton() -> dict[str, Any]:
     """Return a blank v2 human-reference-record payload with null defaults."""
     return {
         "record_version": RECORD_VERSION,
-        "status": "not_started",
+        "status": SessionStatus.NOT_STARTED,
         "task_id": None,
         "task_file_sha256": None,
         "fixture_path": None,

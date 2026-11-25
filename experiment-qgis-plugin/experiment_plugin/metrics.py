@@ -14,11 +14,39 @@ import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
 from typing import Any
 
-METRICS_STATUS_NOT_STARTED = "not_started"
-METRICS_STATUS_PENDING_REVIEW = "pending_review"
-METRICS_STATUS_REVIEWED = "reviewed"
+
+class MetricsStatus(StrEnum):
+    """Review state of derived human-baseline study metrics."""
+
+    NOT_STARTED = "not_started"
+    PENDING_REVIEW = "pending_review"
+    REVIEWED = "reviewed"
+
+
+class SessionStatus(StrEnum):
+    """Lifecycle state of a human-baseline recording session."""
+
+    NOT_STARTED = "not_started"
+    IN_PROGRESS = "in_progress"
+    RECORDED = "recorded"
+    ABANDONED = "abandoned"
+
+
+class TrajectoryOrigin(StrEnum):
+    """Provenance source of a reconstructed human-baseline trajectory step."""
+
+    HOST_PROCESSING = "host:processing"
+    PROCESSING_LOG = "processing_log"
+    SESSION_MANUAL = "session_manual"
+    POST_SESSION_REVIEW = "post_session_review"
+
+
+METRICS_STATUS_NOT_STARTED: MetricsStatus = MetricsStatus.NOT_STARTED
+METRICS_STATUS_PENDING_REVIEW: MetricsStatus = MetricsStatus.PENDING_REVIEW
+METRICS_STATUS_REVIEWED: MetricsStatus = MetricsStatus.REVIEWED
 
 
 def ordered_unique(items: Iterable[str]) -> list[str]:

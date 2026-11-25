@@ -7,47 +7,90 @@ focused strictly on I/O, JSON Schema checks, and path containment.
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-SUPPORTED_ORACLE_TYPES = frozenset(
-    {
-        "de9im_relation",
-        "geojson_feature_count",
-        "jenks_classification",
-        "representative_point_matches",
-    }
-)
-REQUIRED_PILOT_TRAPS = frozenset(
-    {
-        "crs-axis-order",
-        "jenks-classification",
-        "topology-de9im",
-    }
-)
-REQUIRED_TASK_FAMILIES = frozenset({"P", "A", "C"})
-SUPPORTED_DE9IM_RELATIONS = frozenset({"touches", "intersects", "equals", "disjoint"})
-ORACLE_ASSERTION_FIELDS: dict[str, set[str]] = {
-    "geojson_feature_count": {"output", "expected"},
-    "representative_point_matches": {
-        "fixture",
-        "output",
-        "id_field",
-        "feature_id",
-        "preserve_fields",
-        "tolerance_degrees",
-    },
-    "de9im_relation": {
-        "fixture",
-        "output",
-        "id_field",
-        "left_id",
-        "right_id",
-        "expected_relation",
-        "expected_matrix",
-    },
-    "jenks_classification": {"fixture", "output", "id_field", "value_field", "class_count"},
+from experiment.domain.run._common import AssertionTier
+from experiment.domain.task import TaskFamily
+
+
+class OracleAssertionType(StrEnum):
+    """Implemented deterministic oracle assertion types."""
+
+    DE9IM_RELATION = "de9im_relation"
+    GEOJSON_FEATURE_COUNT = "geojson_feature_count"
+    JENKS_CLASSIFICATION = "jenks_classification"
+    REPRESENTATIVE_POINT_MATCHES = "representative_point_matches"
+
+    def required_fields(self) -> frozenset[str]:
+        """Return the keys every assertion of this type must declare in YAML."""
+        return _ORACLE_REQUIRED_FIELDS[self]
+
+    def default_tier(self) -> AssertionTier:
+        """Return the canonical English complexity tier for this assertion type."""
+        tier = AssertionTier.infer(self.value)
+        if tier is None:
+            raise ValueError(f"no tier registered for oracle assertion type {self.value!r}")
+        return tier
+
+
+class PilotTrap(StrEnum):
+    """GIS failure traps required to be covered across the pilot task suite."""
+
+    CRS_AXIS_ORDER = "crs-axis-order"
+    JENKS_CLASSIFICATION = "jenks-classification"
+    TOPOLOGY_DE9IM = "topology-de9im"
+
+
+class De9imRelation(StrEnum):
+    """Named DE-9IM topological relations supported by the oracle."""
+
+    TOUCHES = "touches"
+    INTERSECTS = "intersects"
+    EQUALS = "equals"
+    DISJOINT = "disjoint"
+
+    def matrix_override(self) -> str | None:
+        """Return a DE-9IM matrix override that supersedes the GEOS predicate, if any."""
+        return "T*F**FFF*" if self is De9imRelation.EQUALS else None
+
+
+_ORACLE_REQUIRED_FIELDS: dict[OracleAssertionType, frozenset[str]] = {
+    OracleAssertionType.GEOJSON_FEATURE_COUNT: frozenset({"output", "expected"}),
+    OracleAssertionType.REPRESENTATIVE_POINT_MATCHES: frozenset(
+        {
+            "fixture",
+            "output",
+            "id_field",
+            "feature_id",
+            "preserve_fields",
+            "tolerance_degrees",
+        }
+    ),
+    OracleAssertionType.DE9IM_RELATION: frozenset(
+        {
+            "fixture",
+            "output",
+            "id_field",
+            "left_id",
+            "right_id",
+            "expected_relation",
+            "expected_matrix",
+        }
+    ),
+    OracleAssertionType.JENKS_CLASSIFICATION: frozenset(
+        {"fixture", "output", "id_field", "value_field", "class_count"}
+    ),
+}
+
+SUPPORTED_ORACLE_TYPES: frozenset[OracleAssertionType] = frozenset(OracleAssertionType)
+REQUIRED_PILOT_TRAPS: frozenset[PilotTrap] = frozenset(PilotTrap)
+REQUIRED_TASK_FAMILIES: frozenset[TaskFamily] = TaskFamily.required_pilot_families()
+SUPPORTED_DE9IM_RELATIONS: frozenset[De9imRelation] = frozenset(De9imRelation)
+ORACLE_ASSERTION_FIELDS: dict[OracleAssertionType, set[str]] = {
+    assertion_type: set(assertion_type.required_fields()) for assertion_type in OracleAssertionType
 }
 
 
@@ -97,11 +140,14 @@ def validate_fixture_document(task_id: str, relative: str, data: object) -> Vali
 
 
 def _assertion_value_issues(
-    task_id: str, assertion_id: object, oracle_type: str, assertion: dict[str, Any]
+    task_id: str,
+    assertion_id: object,
+    oracle_type: OracleAssertionType,
+    assertion: dict[str, Any],
 ) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     if (
-        oracle_type == "de9im_relation"
+        oracle_type is OracleAssertionType.DE9IM_RELATION
         and assertion.get("expected_relation") not in SUPPORTED_DE9IM_RELATIONS
     ):
         issues.append(
@@ -110,7 +156,10 @@ def _assertion_value_issues(
                 message=f"oracle assertion {assertion_id!r} has unsupported relation name",
             )
         )
-    if oracle_type == "jenks_classification" and type(assertion.get("class_count")) is not int:
+    if (
+        oracle_type is OracleAssertionType.JENKS_CLASSIFICATION
+        and type(assertion.get("class_count")) is not int
+    ):
         issues.append(
             ValidationIssue(
                 path=task_id,
@@ -125,15 +174,16 @@ def validate_assertion_semantics(task_id: str, assertion: Any) -> list[Validatio
     if not isinstance(assertion, dict):
         return []
     assertion_id = assertion.get("id", "<unnamed>")
-    oracle_type = assertion.get("type")
-    if not isinstance(oracle_type, str) or oracle_type not in SUPPORTED_ORACLE_TYPES:
-        msg = f"oracle assertion {assertion_id!r} uses unimplemented type {oracle_type!r}"
+    raw_type = assertion.get("type")
+    if not isinstance(raw_type, str) or raw_type not in SUPPORTED_ORACLE_TYPES:
+        msg = f"oracle assertion {assertion_id!r} uses unimplemented type {raw_type!r}"
         return [ValidationIssue(path=task_id, message=msg)]
+    oracle_type = OracleAssertionType(raw_type)
     issues = [
         ValidationIssue(
             path=task_id, message=f"oracle assertion {assertion_id!r} is missing {field!r}"
         )
-        for field in sorted(ORACLE_ASSERTION_FIELDS[oracle_type] - assertion.keys())
+        for field in sorted(oracle_type.required_fields() - assertion.keys())
     ]
     issues.extend(_assertion_value_issues(task_id, assertion_id, oracle_type, assertion))
     return issues

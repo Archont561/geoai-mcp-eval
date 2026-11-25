@@ -13,6 +13,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.text import Text
 
 from experiment.cli._render import print_score_table
+from experiment.domain.run import Arm
 from experiment.services import archive as archive_service
 from experiment.services import runs
 from experiment.services import tasks as tasks_service
@@ -233,7 +234,7 @@ def run_codegen(  # noqa: CC102
 
 @app.command("cell")
 def run_cell(  # noqa: CC102
-    arm: Literal["A", "B"] = CELL_ARM_OPT,
+    arm: Arm = CELL_ARM_OPT,
     task_id: str = CELL_TASK_OPT,
     repetition: int = CELL_REP_OPT,
     stage: Literal["smoke", "pilot"] = CELL_STAGE_OPT,

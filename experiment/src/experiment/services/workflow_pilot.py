@@ -11,6 +11,7 @@ from experiment.adapters import backends, paths, run_store
 from experiment.adapters import ollama as ollama_adapter
 from experiment.adapters.harness_io import append_transcript
 from experiment.adapters.task_repository import find_task_file, load_task
+from experiment.domain.run import Arm, Driver
 from experiment.services import runs as runs_service
 from experiment.services.runners.ports import CellRequest
 
@@ -22,7 +23,7 @@ class WorkflowCellSpec(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    arm: Literal["A", "B"]
+    arm: Arm
     task_id: str
     repetition: int = Field(default=1, ge=1)
     stage: Literal["smoke", "pilot"] = "smoke"
@@ -57,7 +58,7 @@ def _build_pilot_request(
         task_path=task_path,
         task=load_task(task_path),
         arm=spec.arm,
-        driver="ollama",
+        driver=Driver.OLLAMA,
         cell=cell_dir,
         model=profile.model,
         host=str(profile.base_url),

@@ -42,7 +42,7 @@ class PackOptions(BaseModel):
     source_dir: Path
     output_zip: Path | None = None
     run_id: str = ""
-    stage: RunStage = "pilot"
+    stage: RunStage = RunStage.PILOT
     arms: tuple[str, ...] = ("A", "B")
     repetitions: int = Field(default=2, ge=1)
     fail_on_missing: bool = False
