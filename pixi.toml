@@ -55,6 +55,8 @@ httpx = ">=0.28,<1"
 jenkspy = ">=0.4,<1"
 tabulate = ">=0.9,<1"
 filelock = ">=3.16,<4"
+PyGithub = ">=2.6,<3"
+pandera = ">=0.23,<1"
 # Transport SDKs used inside `experiment.adapters` behind Clean Architecture ports:
 # - `sshtunnel` manages programmatic SSH port-forwarding behind `TunnelProbe`
 # - `ollama` (PyPI client SDK, distinct from the linux-64 conda-forge server binary)
@@ -122,6 +124,10 @@ altair = "*"
 stackapi = "*"
 diskcache = "*"
 great_tables = "*"
+PyGithub = ">=2.6,<3"
+httpx = ">=0.28,<1"
+filelock = ">=3.16,<4"
+pandera = ">=0.23,<1"
 
 [feature.automation.pypi-dependencies]
 tasknest = "==0.4.0"

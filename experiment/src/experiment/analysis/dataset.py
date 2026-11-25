@@ -1,4 +1,4 @@
-"""DataFrame projections and lazy trial inspection over ``RunArchive`` / ``ExperimentRun``."""
+"""DataFrame projections, Pandera schemas, and lazy trial inspection over ``RunArchive``."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import pandera.pandas as pa
+from pandera.typing import Series
 
 from experiment.adapters.run_archive import LazyTrialHandle, RunArchive
 from experiment.analysis.predicates import load_predicates
@@ -20,66 +22,108 @@ _COL_REPETITION = "repetition"
 
 _GROUP_KEYS: list[str] = [_COL_TASK_ID, _COL_PARADIGM, _COL_ENFORCEMENT]
 
-MEASUREMENT_COLUMNS: tuple[str, ...] = (
-    _COL_RUN_ID,
-    _COL_TRIAL_ID,
-    _COL_TASK_ID,
-    _COL_PARADIGM,
-    _COL_ENFORCEMENT,
-    _COL_REPETITION,
-    "status",
-    "driver",
-    "model_tag",
-    "model_digest",
-    "task_success",
-    "predicate_score",
-    "silent_invalid",
-    "wall_seconds",
-    "llm_calls",
-    "tool_calls",
-    "repair_turns",
-    "schema_violations",
-    "human_steps",
-    "input_tokens",
-    "output_tokens",
-    "total_tokens",
-)
 
-PREDICATE_KEY_COLUMNS: tuple[str, ...] = (
-    _COL_RUN_ID,
-    _COL_TRIAL_ID,
-    _COL_TASK_ID,
-    _COL_PARADIGM,
-    _COL_ENFORCEMENT,
-    _COL_REPETITION,
-)
+class MeasurementTableSchema(pa.DataFrameModel):
+    """Pandera schema for ``RunDataset.measurements_df()`` (one row per measured trial)."""
 
-CELL_SUMMARY_COLUMNS: tuple[str, ...] = (
-    _COL_TASK_ID,
-    _COL_PARADIGM,
-    _COL_ENFORCEMENT,
-    "n_trials",
-    "task_success_rate",
-    "predicate_score_mean",
-    "predicate_score_median",
-    "pass_at_k",
-    "silent_invalid_rate",
-    "wall_seconds_mean",
-)
+    run_id: Series[str]
+    trial_id: Series[str]
+    task_id: Series[str]
+    paradigm: Series[str]
+    enforcement_level: Series[str]
+    repetition: Series[int] = pa.Field(ge=1)
+    status: Series[str]
+    driver: Series[str] = pa.Field(nullable=True)
+    model_tag: Series[str] = pa.Field(nullable=True)
+    model_digest: Series[str] = pa.Field(nullable=True)
+    task_success: Series[int] = pa.Field(isin=[0, 1])
+    predicate_score: Series[float] = pa.Field(ge=0.0, le=1.0)
+    silent_invalid: Series[bool]
+    wall_seconds: Series[float] = pa.Field(ge=0.0, nullable=True)
+    llm_calls: Series[pd.Int64Dtype] = pa.Field(ge=0, nullable=True)
+    tool_calls: Series[pd.Int64Dtype] = pa.Field(ge=0, nullable=True)
+    repair_turns: Series[pd.Int64Dtype] = pa.Field(ge=0, nullable=True)
+    schema_violations: Series[pd.Int64Dtype] = pa.Field(ge=0, nullable=True)
+    human_steps: Series[pd.Int64Dtype] = pa.Field(ge=0, nullable=True)
+    input_tokens: Series[pd.Int64Dtype] = pa.Field(ge=0, nullable=True)
+    output_tokens: Series[pd.Int64Dtype] = pa.Field(ge=0, nullable=True)
+    total_tokens: Series[pd.Int64Dtype] = pa.Field(ge=0, nullable=True)
 
-ASSERTION_COLUMNS: tuple[str, ...] = (
-    _COL_RUN_ID,
-    _COL_TRIAL_ID,
-    _COL_TASK_ID,
-    _COL_PARADIGM,
-    _COL_ENFORCEMENT,
-    _COL_REPETITION,
-    "assertion_id",
-    "predicate",
-    "tier",
-    "passed",
-    "detail",
-)
+    class Config:
+        strict = True
+        coerce = True
+
+
+class PredicateMatrixSchema(pa.DataFrameModel):
+    """Base Pandera schema for ``RunDataset.predicates_df()`` key columns."""
+
+    run_id: Series[str]
+    trial_id: Series[str]
+    task_id: Series[str]
+    paradigm: Series[str]
+    enforcement_level: Series[str]
+    repetition: Series[int] = pa.Field(ge=1)
+
+    class Config:
+        strict = True
+        coerce = True
+
+
+class CellSummarySchema(pa.DataFrameModel):
+    """Pandera schema for ``RunDataset.cell_summary_df()`` aggregate cell rows."""
+
+    task_id: Series[str]
+    paradigm: Series[str]
+    enforcement_level: Series[str]
+    n_trials: Series[int] = pa.Field(ge=1)
+    task_success_rate: Series[float] = pa.Field(ge=0.0, le=1.0)
+    predicate_score_mean: Series[float] = pa.Field(ge=0.0, le=1.0)
+    predicate_score_median: Series[float] = pa.Field(ge=0.0, le=1.0)
+    pass_at_k: Series[bool]
+    silent_invalid_rate: Series[float] = pa.Field(ge=0.0, le=1.0)
+    wall_seconds_mean: Series[float] = pa.Field(ge=0.0, nullable=True)
+
+    class Config:
+        strict = True
+        coerce = True
+
+
+class AssertionTableSchema(pa.DataFrameModel):
+    """Pandera schema for ``RunDataset.assertions_df()`` long-form assertion verdicts."""
+
+    run_id: Series[str]
+    trial_id: Series[str]
+    task_id: Series[str]
+    paradigm: Series[str]
+    enforcement_level: Series[str]
+    repetition: Series[int] = pa.Field(ge=1)
+    assertion_id: Series[str]
+    predicate: Series[str]
+    tier: Series[str] = pa.Field(isin=["trivial", "spatial", "value"])
+    passed: Series[bool]
+    detail: Series[str]
+
+    class Config:
+        strict = True
+        coerce = True
+
+
+# Canonical column tuples derived directly from Pandera schemas (single source of truth).
+MEASUREMENT_COLUMNS: tuple[str, ...] = tuple(MeasurementTableSchema.to_schema().columns)
+PREDICATE_KEY_COLUMNS: tuple[str, ...] = tuple(PredicateMatrixSchema.to_schema().columns)
+CELL_SUMMARY_COLUMNS: tuple[str, ...] = tuple(CellSummarySchema.to_schema().columns)
+ASSERTION_COLUMNS: tuple[str, ...] = tuple(AssertionTableSchema.to_schema().columns)
+
+
+def validate_predicate_matrix(df: pd.DataFrame, predicate_cols: list[str]) -> pd.DataFrame:
+    """Validate ``df`` against ``PredicateMatrixSchema`` plus binary 0/1 predicate columns."""
+    schema = PredicateMatrixSchema.to_schema().add_columns(
+        {
+            slug: pa.Column(int, pa.Check.isin([0, 1]), nullable=False, coerce=True)
+            for slug in predicate_cols
+        }
+    )
+    return schema.validate(df)
 
 
 def _key_fields(run_id: str, m: TrialMeasurement) -> dict[str, Any]:
@@ -87,8 +131,8 @@ def _key_fields(run_id: str, m: TrialMeasurement) -> dict[str, Any]:
         _COL_RUN_ID: run_id,
         _COL_TRIAL_ID: m.trial_id,
         _COL_TASK_ID: m.key.task_id,
-        _COL_PARADIGM: m.key.paradigm,
-        _COL_ENFORCEMENT: m.key.enforcement_level,
+        _COL_PARADIGM: str(m.key.paradigm),
+        _COL_ENFORCEMENT: str(m.key.enforcement_level),
         _COL_REPETITION: m.key.repetition,
     }
 
@@ -102,8 +146,8 @@ def _measurement_row(
     tokens = econ.tokens
     return {
         **_key_fields(run_id, m),
-        "status": trial.status if trial is not None else "ok",
-        "driver": trial.driver if trial is not None else None,
+        "status": str(trial.status) if trial is not None else "ok",
+        "driver": str(trial.driver) if trial is not None and trial.driver is not None else None,
         "model_tag": trial.model_tag if trial is not None else None,
         "model_digest": trial.model_digest if trial is not None else None,
         "task_success": int(m.outcomes.task_success),
@@ -157,7 +201,7 @@ def _assertion_rows(
                 **base,
                 "assertion_id": item.assertion_id,
                 "predicate": predicates[item.assertion_id],
-                "tier": item.tier,
+                "tier": str(item.tier),
                 "passed": bool(item.passed),
                 "detail": item.detail,
             }
@@ -240,36 +284,41 @@ class RunDataset:
         return [self._run.measurements[tid] for tid in sorted(self._run.measurements)]
 
     def measurements_df(self) -> pd.DataFrame:
-        """One row per measured trial with outcomes, economics, and provenance."""
+        """One row per measured trial, validated against ``MeasurementTableSchema``."""
         rows = [
             _measurement_row(self._run.run_id, self._run.trials.get(m.trial_id), m)
             for m in self._ordered_measurements()
         ]
-        return pd.DataFrame(rows, columns=list(MEASUREMENT_COLUMNS))
+        df = pd.DataFrame(rows, columns=list(MEASUREMENT_COLUMNS))
+        return MeasurementTableSchema.validate(df)
 
     def predicates_df(self, tasks_root: Path | None = None) -> pd.DataFrame:
-        """Flat 0/1 predicate matrix preserving strict cross-task zero semantics (no NaN)."""
+        """Flat 0/1 predicate matrix validated against ``PredicateMatrixSchema`` (no NaN)."""
         predicates = load_predicates(tasks_root)
         predicate_cols = sorted(set(predicates.values()))
         rows = [
             _predicate_row(self._run.run_id, m, predicates, predicate_cols)
             for m in self._ordered_measurements()
         ]
-        return pd.DataFrame(rows, columns=[*PREDICATE_KEY_COLUMNS, *predicate_cols])
+        df = pd.DataFrame(rows, columns=[*PREDICATE_KEY_COLUMNS, *predicate_cols])
+        return validate_predicate_matrix(df, predicate_cols)
 
     def cell_summary_df(self) -> pd.DataFrame:
-        """Per ``task_id x paradigm x enforcement_level`` aggregate summary table."""
+        """Per-cell summary table validated against ``CellSummarySchema``."""
         df = self.measurements_df()
         if df.empty:
-            return pd.DataFrame(columns=list(CELL_SUMMARY_COLUMNS))
+            empty = pd.DataFrame(columns=list(CELL_SUMMARY_COLUMNS))
+            return CellSummarySchema.validate(empty)
         grouped = df.groupby(_GROUP_KEYS, sort=True)
         rows = [_aggregate_cell_group(key, group) for key, group in grouped]
-        return pd.DataFrame(rows, columns=list(CELL_SUMMARY_COLUMNS))
+        summary = pd.DataFrame(rows, columns=list(CELL_SUMMARY_COLUMNS))
+        return CellSummarySchema.validate(summary)
 
     def assertions_df(self, tasks_root: Path | None = None) -> pd.DataFrame:
-        """Long-form per-assertion verdicts with predicate slug and assertion tier."""
+        """Long-form per-assertion verdicts validated against ``AssertionTableSchema``."""
         predicates = load_predicates(tasks_root)
         rows: list[dict[str, Any]] = []
         for m in self._ordered_measurements():
             rows.extend(_assertion_rows(self._run.run_id, m, predicates))
-        return pd.DataFrame(rows, columns=list(ASSERTION_COLUMNS))
+        df = pd.DataFrame(rows, columns=list(ASSERTION_COLUMNS))
+        return AssertionTableSchema.validate(df)
