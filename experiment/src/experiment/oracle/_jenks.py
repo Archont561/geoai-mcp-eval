@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from experiment.domain.jenks import fisher_jenks_breaks as fisher_jenks_breaks
+from experiment.adapters.jenks import fisher_jenks_breaks as fisher_jenks_breaks
 
 from ._base import geojson_features
 

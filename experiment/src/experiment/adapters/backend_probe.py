@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-import requests
+import httpx
 
 from experiment.adapters import backends
 from experiment.adapters import ollama as ollama_adapter
@@ -136,7 +136,7 @@ class HttpBackendProbe:
     ) -> None:
         self._profile = profile
         self._owns_session = session is None
-        self._session: Any = session if session is not None else requests.Session()
+        self._session: Any = session if session is not None else httpx.Client()
         self._sleep = sleep
 
     def _request(

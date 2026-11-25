@@ -12,8 +12,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
-import requests
 
 from experiment.adapters import backends
 from experiment.adapters.ssh_tunnel import SshTunnelAdapter
@@ -35,8 +35,8 @@ def make_mock_response(
     text: str = "",
     headers: dict[str, str] | None = None,
 ) -> MagicMock:
-    """Configure a ``MagicMock(spec=requests.Response)`` for HTTP tests."""
-    response = MagicMock(spec=requests.Response)
+    """Configure a ``MagicMock(spec=httpx.Response)`` for HTTP tests."""
+    response = MagicMock(spec=httpx.Response)
     response.status_code = status_code
     response.headers = dict(headers or {})
     if text:
@@ -83,14 +83,14 @@ def fake_openrouter_sdk_client() -> MagicMock:
 
 @pytest.fixture
 def fake_http_response() -> MagicMock:
-    """Default 200 OK ``MagicMock(spec=requests.Response)``."""
+    """Default 200 OK ``MagicMock(spec=httpx.Response)``."""
     return make_mock_response(200, {})
 
 
 @pytest.fixture
 def fake_http_session(fake_http_response: MagicMock) -> MagicMock:
-    """``MagicMock(spec=requests.Session)`` wired with default ``get``/``post`` responses."""
-    session = MagicMock(spec=requests.Session)
+    """``MagicMock(spec=httpx.Client)`` wired with default ``get``/``post`` responses."""
+    session = MagicMock(spec=httpx.Client)
     session.__enter__.return_value = session
     session.__exit__.return_value = None
     session.get.return_value = fake_http_response

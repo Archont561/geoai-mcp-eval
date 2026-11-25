@@ -10,10 +10,12 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import tempfile
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+from filelock import FileLock
 from pydantic import BaseModel, ConfigDict, Field
 
 UTF8 = "utf-8"
@@ -100,6 +102,13 @@ def read_json_mapping(path: Path) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+def file_lock(path: Path) -> FileLock:
+    """Return a cross-process ``FileLock`` stored in temp dir keyed by resolved ``path``."""
+    digest = hashlib.sha256(str(path.resolve()).encode(UTF8)).hexdigest()[:20]
+    lock_path = Path(tempfile.gettempdir()) / f"geoai-mcp-eval-{digest}.lock"
+    return FileLock(str(lock_path))
+
+
 def write_json(
     path: Path,
     payload: Any,
@@ -108,28 +117,30 @@ def write_json(
     sort_keys: bool = True,
     trailing_newline: bool = False,
 ) -> Path:
-    """Serialize ``payload`` as UTF-8 JSON to ``path``."""
+    """Serialize ``payload`` as UTF-8 JSON to ``path`` under a cross-process lock."""
     ensure_dir(path.parent)
     rendered = json.dumps(payload, indent=indent, sort_keys=sort_keys)
     if trailing_newline:
         rendered += "\n"
-    path.write_text(rendered, encoding=UTF8)
+    with file_lock(path):
+        path.write_text(rendered, encoding=UTF8)
     return path
 
 
 def append_jsonl(path: Path, record: Mapping[str, Any]) -> None:
-    """Append one compact, key-sorted JSON object line to ``path``."""
+    """Append one compact, key-sorted JSON object line to ``path`` under a file lock."""
     ensure_dir(path.parent)
     line = json.dumps(dict(record), sort_keys=True, default=str) + "\n"
-    with path.open("a", encoding=UTF8) as handle:
+    with file_lock(path), path.open("a", encoding=UTF8) as handle:
         handle.write(line)
 
 
 def write_jsonl(path: Path, records: Iterable[Mapping[str, Any]]) -> Path:
-    """Overwrite ``path`` with one key-sorted JSON line per record."""
+    """Overwrite ``path`` with one key-sorted JSON line per record under a file lock."""
     ensure_dir(path.parent)
     content = "".join(json.dumps(dict(r), sort_keys=True) + "\n" for r in records)
-    path.write_text(content, encoding=UTF8)
+    with file_lock(path):
+        path.write_text(content, encoding=UTF8)
     return path
 
 

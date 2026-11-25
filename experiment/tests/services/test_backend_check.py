@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
-import requests
 import sshtunnel
 from fakes import make_mock_response
 from hypothesis import given
@@ -303,7 +303,7 @@ def test_backend_check_edge_errors_and_openrouter_ready(
         )
     assert backend_check_exit_code(e2.value.kind) == EXIT_AUTH_CLIENT
 
-    ok_http_session.get.side_effect = requests.exceptions.ConnectionError("refused")
+    ok_http_session.get.side_effect = httpx.ConnectError("refused")
     with pytest.raises(BackendCheckError) as e3:
         run_backend_check(
             backend_check_config,

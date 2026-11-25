@@ -23,9 +23,13 @@ TASKS_DIR = Path(__file__).resolve().parents[2] / "tasks"
 
 def test_model_and_schema_agree_on_every_required_key() -> None:
     schema = json.loads((TASKS_DIR / "schema-v1.json").read_text(encoding="utf-8"))
+    model_schema = Task.model_json_schema()
     required_in_schema = set(schema["required"])
     required_in_model = {name for name, field in Task.model_fields.items() if field.is_required()}
     assert required_in_model == required_in_schema
+    assert set(model_schema["required"]) == required_in_schema
+    assert set(model_schema["properties"]) == set(schema["properties"])
+    assert set(schema["properties"]["family"]["enum"]) == {f.value for f in TaskFamily}
 
 
 def test_model_forbids_unknown_keys_like_the_schema_does() -> None:

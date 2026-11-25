@@ -1,58 +1,33 @@
-"""Unit tests for ``experiment.domain.jenks``."""
+"""Unit and property tests for ``experiment.domain.jenks``."""
 
 from __future__ import annotations
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from pydantic import ValidationError
 
-from experiment.domain.jenks import _SplitSearch, fisher_jenks_breaks
-
-FINITE_VALS = st.floats(min_value=-1e5, max_value=1e5, allow_nan=False, allow_infinity=False)
+from experiment.domain.jenks import validate_jenks_inputs
 
 
 @given(
-    values=st.lists(FINITE_VALS, min_size=1, max_size=40),
-    data=st.data(),
+    values=st.lists(
+        st.floats(min_value=-1e6, max_value=1e6, allow_nan=False, allow_infinity=False),
+        min_size=1,
+        max_size=25,
+    )
 )
-def test_fisher_jenks_breaks_sorted_subset_with_max_endpoint(
-    values: list[float], data: st.DataObject
+def test_validate_jenks_inputs_returns_sorted_floats_and_enforces_bounds(
+    values: list[float],
 ) -> None:
     unique_count = len(set(values))
-    k = data.draw(st.integers(min_value=1, max_value=min(5, unique_count)))
-    breaks = fisher_jenks_breaks(values, k)
-    assert len(breaks) == k
-    assert breaks == sorted(breaks)
-    assert breaks[-1] == max(values)
-    assert set(breaks) <= set(values)
+    result = validate_jenks_inputs(values, unique_count)
+    assert result == sorted(float(v) for v in values)
+    with pytest.raises(ValueError, match="class_count"):
+        validate_jenks_inputs(values, unique_count + 1)
+    with pytest.raises(ValueError, match="class_count"):
+        validate_jenks_inputs(values, 0)
 
 
-def test_fisher_jenks_known_fixture_and_invalid_inputs() -> None:
-    values = [1.0, 2.0, 3.0, 100.0, 101.0, 102.0, 500.0, 501.0]
-    assert fisher_jenks_breaks(values, 3) == [3.0, 102.0, 501.0]
-    assert fisher_jenks_breaks(values, 1) == [501.0]
-    with pytest.raises(ValueError, match="at least one value"):
-        fisher_jenks_breaks([], 2)
-    with pytest.raises(ValueError, match="between 1"):
-        fisher_jenks_breaks(values, 0)
-    with pytest.raises(ValueError, match="unique values"):
-        fisher_jenks_breaks([1.0, 1.0, 1.0], 2)
-
-
-def test_split_search_pydantic_validation() -> None:
-    search = _SplitSearch(
-        totals=[0.0, 1.0],
-        squared_totals=[0.0, 1.0],
-        best=[[0.0, 0.0]],
-        splits=[[0, 0]],
-    )
-    assert search.totals == [0.0, 1.0]
-    with pytest.raises(ValidationError):
-        _SplitSearch(
-            totals=[],
-            squared_totals=[],
-            best=[],
-            splits=[],
-            extra_field=True,  # type: ignore[call-arg]
-        )
+def test_validate_jenks_inputs_rejects_empty() -> None:
+    with pytest.raises(ValueError, match="at least one"):
+        validate_jenks_inputs([], 1)

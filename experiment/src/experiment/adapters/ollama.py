@@ -12,10 +12,14 @@ from urllib.parse import urlparse
 
 import httpx
 import ollama
-import requests
 from pydantic import BaseModel, ConfigDict, Field
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+from tenacity import (
+    Retrying,
+    retry_if_result,
+    stop_after_attempt,
+    wait_exponential,
+    wait_fixed,
+)
 
 from experiment.adapters import run_store
 from experiment.domain.backend import BackendProfile, RetryableHttpStatus
@@ -89,27 +93,21 @@ def build_retry_session(
     *,
     headers: Mapping[str, str] | None = None,
     allowed_methods: frozenset[str] = frozenset({"POST"}),
-) -> requests.Session:
-    """Session configured with optional headers and urllib3 retry policy."""
-    session = requests.Session()
-    session.headers.update({"Accept": "application/json"})
-    if headers:
-        session.headers.update(headers)
-    retry = Retry(
-        total=retries,
-        connect=retries,
-        read=retries,
-        status=retries,
-        backoff_factor=0.8,
-        status_forcelist=tuple(sorted(RETRYABLE_STATUSES)),
-        respect_retry_after_header=True,
-        allowed_methods=set(allowed_methods),
-        raise_on_status=False,
+) -> httpx.Client:
+    """``httpx.Client`` configured with optional headers and connection retries."""
+    _ = allowed_methods
+    merged = {"Accept": "application/json", **(dict(headers) if headers else {})}
+    transport = httpx.HTTPTransport(retries=retries)
+    return httpx.Client(headers=merged, transport=transport)
+
+
+def _httpx_timeout(timeout: tuple[float, float]) -> httpx.Timeout:
+    return httpx.Timeout(
+        connect=timeout[0],
+        read=timeout[1],
+        write=timeout[1],
+        pool=timeout[0],
     )
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-    return session
 
 
 def request_with_retry(
@@ -120,23 +118,25 @@ def request_with_retry(
     sleep: Callable[[float], None] = time.sleep,
     json_body: dict[str, Any] | None = None,
 ) -> Any:
-    """Issue an HTTP call; retry ONLY on 429/5xx according to ``policy``."""
-    attempts = policy.retries + 1
-    kwargs: dict[str, Any] = {"timeout": policy.timeout}
+    """Issue an HTTP call; retry ONLY on 429/5xx via ``tenacity`` according to ``policy``."""
+    kwargs: dict[str, Any] = {"timeout": _httpx_timeout(policy.timeout)}
     if json_body is not None:
         kwargs["json"] = json_body
-    last_resp: Any = None
-    for attempt in range(attempts):
+
+    def _invoke() -> Any:
         try:
-            resp = method(url, **kwargs)
-        except requests.exceptions.RequestException as exc:
+            return method(url, **kwargs)
+        except (httpx.HTTPError, OSError) as exc:
             raise HttpTransportError(f"HTTP transport error reaching {url}: {exc}") from exc
-        if not RetryableHttpStatus.contains(resp.status_code):
-            return resp
-        last_resp = resp
-        if attempt + 1 < attempts:
-            sleep(policy.backoff_s * (2**attempt))
-    return last_resp
+
+    retrying = Retrying(
+        stop=stop_after_attempt(policy.retries + 1),
+        wait=wait_exponential(multiplier=policy.backoff_s, exp_base=2),
+        retry=retry_if_result(lambda resp: RetryableHttpStatus.contains(resp.status_code)),
+        retry_error_callback=lambda state: state.outcome.result() if state.outcome else None,
+        sleep=sleep,
+    )
+    return retrying(_invoke)
 
 
 def as_mapping(value: Any) -> dict[str, Any]:
@@ -207,12 +207,15 @@ def resolve_model_digest(
     *,
     connect_timeout_s: float = 5.0,
 ) -> str | None:
-    """Query Ollama ``/api/tags`` via a requests session, or ``ollama.Client`` if None."""
+    """Query Ollama ``/api/tags`` via an ``httpx.Client``, or ``ollama.Client`` if None."""
     if session is None or isinstance(session, ollama.Client):
         return resolve_model_digest_sdk(api_root, model, client=session, timeout=10.0)
     try:
-        resp = session.get(f"{api_root.rstrip('/')}/api/tags", timeout=(connect_timeout_s, 10))
-    except requests.exceptions.RequestException:
+        resp = session.get(
+            f"{api_root.rstrip('/')}/api/tags",
+            timeout=_httpx_timeout((connect_timeout_s, 10.0)),
+        )
+    except (httpx.HTTPError, OSError):
         return None
     if resp.status_code != 200:
         return None
@@ -240,12 +243,15 @@ def wait_ready(
     sleep_s: float = DEFAULT_READY_SLEEP_S,
     sleep: Callable[[float], None] = time.sleep,
 ) -> bool:
-    """Poll Ollama via ``ollama.Client`` until ready or ``attempts`` are exhausted."""
-    for _ in range(attempts):
-        if serve_running(base_url):
-            return True
-        sleep(sleep_s)
-    return False
+    """Poll Ollama via ``ollama.Client`` using ``tenacity`` until ready or exhausted."""
+    retrying = Retrying(
+        stop=stop_after_attempt(max(1, attempts)),
+        wait=wait_fixed(sleep_s),
+        retry=retry_if_result(lambda ready: not ready),
+        retry_error_callback=lambda _state: False,
+        sleep=sleep,
+    )
+    return bool(retrying(serve_running, base_url))
 
 
 def start_ollama(
