@@ -44,8 +44,9 @@ Consolidating these into `experiment.toml` + a validated Pydantic `ExperimentCon
      - `[qgis]` (`timeout_s`, headless defaults)
      - `[backends.<name>]` (`dict[str, BackendProfile]`, preserving `local`, `remote-ollama`, `free-open`, with `api_key_env` references only and zero committed secrets)
 
-2. **Adapter loader & precedence contract (`experiment/src/experiment/adapters/config.py`):**
-   - Loads `experiment.toml` via `tomllib` (supporting `--config <path>` / `EXPERIMENT_CONFIG` override and graceful fallback to validated defaults when running in isolated test fixtures).
+2. **Adapter loader & precedence contract (`experiment/src/experiment/adapters/config.py` via `pydantic-settings`):**
+   - Adopt **`pydantic-settings`** (`BaseSettings` + `TomlConfigSettingsSource` + `EnvSettingsSource`, nested delimiter `__`) inside `adapters/config.py` (declared in `pixi.toml` `[feature.experiment.pypi-dependencies]`) to load `experiment.toml` and `EXPERIMENT_*` environment variables without hand-rolled `tomllib` / `os.environ` merging boilerplate, while keeping `domain/config.py` pure Pydantic `BaseModel`.
+   - Supports `--config <path>` / `EXPERIMENT_CONFIG` override and graceful fallback to validated defaults when running in isolated test fixtures.
    - Enforces a single, deterministic precedence order across every command:
      **CLI flags > `EXPERIMENT_*` environment variables > `experiment.toml` > `ExperimentConfig` model defaults**.
    - Exposes `experiment env config [--json]` (or similar inspection subcommand) so operators and CI logs can dump the effective resolved config (with secret values never included) for run provenance.
@@ -59,7 +60,7 @@ Consolidating these into `experiment.toml` + a validated Pydantic `ExperimentCon
 <!-- AC:BEGIN -->
 - [ ] #1 A root `experiment.toml` file replaces `experiment/backends.toml` and defines typed sections for `[experiment]`, `[paths]`, `[runner]`, `[backend_check]`, `[ssh]`, `[archive]`, `[qgis]`, and `[backends.*]` (`local`, `remote-ollama`, `free-open`), containing zero secrets.
 - [ ] #2 `experiment/src/experiment/domain/config.py` defines a pure Pydantic v2 `ExperimentConfig` (and nested section `BaseModel`s with `extra="forbid"`, `frozen=True`, and numeric/enum bounds) without importing `tomllib`, `os`, or `pathlib`.
-- [ ] #3 `experiment/src/experiment/adapters/config.py` loads `experiment.toml` (supporting `--config` / `EXPERIMENT_CONFIG`) and merges overrides under the documented precedence order: CLI flags > `EXPERIMENT_*` env vars > `experiment.toml` > model defaults.
+- [ ] #3 `experiment/src/experiment/adapters/config.py` uses `pydantic-settings` (`TomlConfigSettingsSource` + `EnvSettingsSource`) to load `experiment.toml` (supporting `--config` / `EXPERIMENT_CONFIG`) and merge overrides under the documented precedence order: CLI flags > `EXPERIMENT_*` env vars > `experiment.toml` > model defaults.
 - [ ] #4 `adapters/backends.py`, `adapters/paths.py`, `services/{run_spec,backend_check,workflow,workflow_pilot}.py`, and `cli/{run,env,archive,score,tasks}.py` consume resolved `ExperimentConfig` defaults instead of duplicated hardcoded constants, eliminating drift across subcommands.
 - [ ] #5 Obsolete `experiment/backends.toml` and stale references in code, CLI help text, tests, and docs are removed/updated, and `.alint.yml` enforces the presence of `experiment.toml`.
 - [ ] #6 Unit and CLI tests cover valid `experiment.toml` loading, unknown-key / invalid-value rejection (`extra="forbid"`), env-var and CLI-flag precedence, `--config` override, zero secret leakage in config inspection output, and fallback behavior when no config file exists.
@@ -70,7 +71,7 @@ Consolidating these into `experiment.toml` + a validated Pydantic `ExperimentCon
 
 <!-- SECTION:PLAN:BEGIN -->
 1. **Design pure `ExperimentConfig` schema (`domain/config.py`):** Define `ExperimentConfig` and nested section models (`ExperimentDefaults`, `PathsConfig`, `RunnerConfig`, `BackendCheckConfig`, `SshDefaults`, `ArchiveConfig`, `QgisConfig`, reusing `BackendProfile` from `domain/backend.py`).
-2. **Implement TOML + env config loader (`adapters/config.py` & `adapters/paths.py`):** Add `config_path(repo)` pointing to `experiment.toml`, implement `load_config(path=None, env=None)` with `tomllib` + `EXPERIMENT_*` overlay, and wire `adapters/backends.py` to read `[backends.*]` through `load_config()`.
+2. **Implement TOML + env config loader (`adapters/config.py` & `adapters/paths.py`):** Add `pydantic-settings` to `pixi.toml`, add `config_path(repo)` pointing to `experiment.toml`, implement `load_config(path=None, env=None)` via `BaseSettings` + `TomlConfigSettingsSource` + `EnvSettingsSource`, and wire `adapters/backends.py` to read `[backends.*]` through `load_config()`.
 3. **Create `experiment.toml` and remove `experiment/backends.toml`:** Populate `experiment.toml` with the project's canonical defaults and backend profiles (`local`, `remote-ollama`, `free-open`), remove `experiment/backends.toml`, and add an `.alint.yml` presence rule for `experiment.toml`.
 4. **Wire services & CLI:** Replace scattered hardcoded defaults in `services/{run_spec,backend_check,workflow,workflow_pilot}.py` and `cli/{run,env,archive,score,tasks}.py` with values sourced from `ExperimentConfig`, add `--config` / `EXPERIMENT_CONFIG` support, and expose config inspection (`--json`) with zero secret output.
 5. **Update tests & docs and run full gates:** Migrate `backends.toml` test fixtures to `experiment.toml`, add comprehensive config validation & precedence tests, update docs/READMEs referencing `backends.toml`, and verify `pixi run tools run fmt`, `check`, `md`, and `links`.
