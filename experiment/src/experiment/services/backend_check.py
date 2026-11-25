@@ -21,6 +21,9 @@ from experiment.adapters.backend_probe import BackendProbeError, create_backend_
 from experiment.adapters.github_workflow import GitHubWorkflowAdapter
 from experiment.adapters.ssh_tunnel import SshTunnelAdapter, TunnelProbeError
 from experiment.domain.backend import BackendProfile
+from experiment.domain.config import BackendCheckDefaults
+
+_CHECK_DEFAULTS = BackendCheckDefaults()
 
 
 class BackendCheckError(RuntimeError):
@@ -44,9 +47,9 @@ class BackendCheckConfig(BaseModel):
     expected_digest: str | None = None
     model: str | None = None
     host: str | None = None
-    poll_timeout_s: float = Field(default=30.0, ge=0.0)
-    poll_interval_s: float = Field(default=1.0, ge=0.0)
-    max_tokens: int = Field(default=16, ge=1)
+    poll_timeout_s: float = Field(default=_CHECK_DEFAULTS.poll_timeout_s, ge=0.0)
+    poll_interval_s: float = Field(default=_CHECK_DEFAULTS.poll_interval_s, ge=0.0)
+    max_tokens: int = Field(default=_CHECK_DEFAULTS.smoke_max_tokens, ge=1)
 
 
 class BackendCheckResult(BaseModel):
@@ -91,7 +94,7 @@ def _resolve_check_profile(cfg: BackendCheckConfig) -> BackendProfile:
         raise BackendCheckError(
             "client-error",
             str(exc),
-            "check --backend / experiment/backends.toml",
+            "check --backend / experiment.toml",
         ) from exc
 
 

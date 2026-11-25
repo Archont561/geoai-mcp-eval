@@ -14,6 +14,7 @@ from rich.text import Text
 
 from experiment.domain.backend import BackendCheckExitCode
 from experiment.services import backend_check as backend_check_service
+from experiment.services import config as config_service
 from experiment.services import mcp_selftest as mcp_selftest_service
 from experiment.services import qgis as qgis_service
 from experiment.services import workflow as workflow_service
@@ -22,6 +23,7 @@ app = typer.Typer(help="Preflight checks, model pinning, MCP probes, and PyQGIS 
 _qgis_app = typer.Typer(help="PyQGIS sandbox: check availability, run scripts scrubbed.")
 app.add_typer(_qgis_app, name="qgis")
 console = Console(highlight=False)
+_CFG = config_service.get_config()
 
 RUN_ID_OPT = typer.Option(
     "", "--run-id", envvar=["EXPERIMENT_RUN_ID", "RUN_ID"], help="Run identifier"
@@ -33,7 +35,7 @@ BACKEND_OPT = typer.Option(
     "remote-ollama",
     "--backend",
     envvar="EXPERIMENT_BACKEND",
-    help="Backend profile from experiment/backends.toml",
+    help="Backend profile from experiment.toml",
 )
 SSH_HOST_OPT = typer.Option(
     None, "--ssh-host", envvar="OLLAMA_SSH_HOST", help="SSH host for ControlMaster tunnel"
@@ -51,12 +53,20 @@ HOST_OPT = typer.Option(
     None, "--host", envvar=["EXPERIMENT_HOST", "OLLAMA_HOST"], help="Optional base_url override"
 )
 POLL_TIMEOUT_OPT = typer.Option(
-    30.0, "--poll-timeout-s", envvar="EXPERIMENT_POLL_TIMEOUT_S", help="Digest poll timeout (s)"
+    _CFG.backend_check.poll_timeout_s,
+    "--poll-timeout-s",
+    envvar="EXPERIMENT_POLL_TIMEOUT_S",
+    help="Digest poll timeout (s)",
+)
+CONFIG_OPT = typer.Option(
+    None, "--config", envvar="EXPERIMENT_CONFIG", help="Path to experiment.toml"
 )
 JSON_OPTION = typer.Option(False, "--json", help="Emit machine-readable JSON")
 SCRIPT_ARG = typer.Argument(..., help="PyQGIS script to run in the scrubbed sandbox")
 ARTIFACTS_DIR_OPTION = typer.Option(Path("."), "--artifacts-dir", help="cwd for the script")
-TIMEOUT_OPTION = typer.Option(120, "--timeout", help="Wall-clock timeout in seconds")
+TIMEOUT_OPTION = typer.Option(
+    _CFG.qgis.timeout_s, "--timeout", help="Wall-clock timeout in seconds"
+)
 
 EXIT_READY: BackendCheckExitCode = BackendCheckExitCode.READY
 EXIT_SSH_UNREACHABLE: BackendCheckExitCode = BackendCheckExitCode.SSH_UNREACHABLE
@@ -129,6 +139,28 @@ def backend_check(  # noqa: CC102
         raise typer.Exit(code=backend_check_exit_code(exc.kind)) from exc
     backend_check_service.emit_github_outputs(result)
     typer.echo(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True))
+
+
+@app.command("config")
+def show_config(
+    config_file: Path | None = CONFIG_OPT,
+    as_json: bool = JSON_OPTION,
+) -> None:
+    """Inspect effective experiment.toml configuration (secret values are never printed)."""
+    try:
+        snapshot = config_service.inspect_config(config_file)
+    except config_service.ConfigError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    if as_json:
+        typer.echo(json.dumps(snapshot, indent=2, sort_keys=True))
+        return
+    table = Table(title="Effective experiment.toml configuration")
+    table.add_column("Section", style="cyan")
+    table.add_column("Settings")
+    for section, payload in snapshot.items():
+        table.add_row(section, json.dumps(payload, sort_keys=True))
+    console.print(table)
 
 
 @app.command("mcp-ops")

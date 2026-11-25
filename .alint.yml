@@ -68,6 +68,18 @@ rules:
     level: error
     message: "The experiment package lives in experiment/src/experiment/, not at the repository root."
 
+  - id: require-experiment-toml
+    kind: file_exists
+    paths: experiment.toml
+    level: error
+    message: "Unified project configuration must live in experiment.toml at the repository root."
+
+  - id: forbid-legacy-backends-toml
+    kind: file_absent
+    paths: experiment/backends.toml
+    level: error
+    message: "experiment/backends.toml was replaced by root experiment.toml (GEO-025)."
+
   - id: require-experiment-package
     kind: file_exists
     paths: experiment/src/experiment/__init__.py

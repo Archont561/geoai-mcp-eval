@@ -38,7 +38,7 @@ type = "forbidden"
 source_modules = ["experiment.domain"]
 forbidden_modules = [
   "typer", "rich", "requests", "yaml", "jsonschema", "mcp", "subprocess",
-  "pathlib", "tomllib", "os", "zipfile",
+  "pathlib", "tomllib", "os", "zipfile", "pydantic_settings",
   "sshtunnel", "paramiko", "ollama", "openrouter", "httpx",
   "experiment.adapters", "experiment.cli", "experiment.oracle", "experiment.gis_ops",
 ]

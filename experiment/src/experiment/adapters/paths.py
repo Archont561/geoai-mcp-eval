@@ -45,11 +45,19 @@ def results_root(repo: Path | None = None) -> Path:
     return experiment_root().parent / "results"
 
 
-def backends_path(repo: Path | None = None) -> Path:
-    """Absolute path to ``experiment/backends.toml``."""
+def config_path(repo: Path | None = None) -> Path:
+    """Absolute path to ``experiment.toml`` (honoring ``EXPERIMENT_CONFIG`` when unset)."""
     if repo is not None:
-        return repo / "experiment" / "backends.toml"
-    return experiment_root() / "backends.toml"
+        return repo / "experiment.toml"
+    env_override = os.environ.get("EXPERIMENT_CONFIG", "").strip()
+    if env_override:
+        return Path(env_override).expanduser()
+    return find_repo_root() / "experiment.toml"
+
+
+def cache_root(repo: Path | None = None) -> Path:
+    """Absolute path to ``.cache/llm``."""
+    return (repo or find_repo_root()) / ".cache" / "llm"
 
 
 def experiment_env(repo_root: Path | None = None) -> dict[str, str]:

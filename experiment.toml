@@ -1,0 +1,78 @@
+# Unified project configuration for geoai-mcp-eval (GEO-025).
+#
+# Precedence (highest to lowest):
+#   CLI flags > EXPERIMENT_* environment variables > experiment.toml > model defaults
+#
+# Secrets NEVER belong in this file: backend profiles only declare `api_key_env`,
+# naming the environment variable that supplies the key at runtime.
+
+[experiment]
+default_backend = "local"
+default_driver = "scripted"
+default_stage = "pilot"
+default_arms = ["A", "B"]
+default_repetitions = 1
+default_enforce = "semantic_repair"
+use_llm_cache = true
+
+[paths]
+tasks_dir = "experiment/tasks"
+results_dir = "results"
+cache_dir = ".cache/llm"
+
+[runner]
+max_turns = 6
+script_timeout_s = 60
+mcp_timeout_s = 60
+
+[backend_check]
+poll_timeout_s = 30.0
+poll_interval_s = 1.0
+smoke_max_tokens = 16
+
+[ssh]
+remote_bind_host = "127.0.0.1"
+remote_bind_port = 11434
+local_bind_host = "127.0.0.1"
+connect_timeout_s = 10.0
+
+[archive]
+fail_on_missing = true
+skip_oracle = false
+keep_artifact = ""
+
+[qgis]
+timeout_s = 120
+headless = true
+
+# Local Ollama (default; also the fallback when no profile is requested).
+[backends.local]
+base_url = "http://127.0.0.1:11434/v1"
+model = "qwen2.5-coder:0.5b"
+max_tokens = 2048
+temperature = 0.0
+retries = 3
+
+# Remote Ollama reached over an SSH tunnel:
+#   ssh -fN -L 11434:127.0.0.1:11434 myhost
+# Keep the pinned model identical to `local` for comparable measurements.
+[backends.remote-ollama]
+base_url = "http://127.0.0.1:11434/v1"
+model = "qwen2.5-coder:0.5b"
+max_tokens = 2048
+temperature = 0.0
+retries = 3
+read_timeout_s = 600.0
+
+# Free hosted open model (OpenAI-compatible). Export the key, never commit it:
+#   export OPENROUTER_API_KEY=...
+# Expect rate limits (429 after retries fails the cell); endpoint and model
+# digest are recorded in the manifest for provenance.
+[backends.free-open]
+base_url = "https://openrouter.ai/api/v1"
+model = "qwen/qwen-2.5-coder-32b-instruct:free"
+api_key_env = "OPENROUTER_API_KEY"
+max_tokens = 2048
+temperature = 0.0
+retries = 2
+read_timeout_s = 120.0

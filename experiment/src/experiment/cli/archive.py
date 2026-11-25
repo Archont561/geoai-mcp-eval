@@ -12,9 +12,11 @@ from rich.text import Text
 
 from experiment.domain.run import RunStage
 from experiment.services import archive as archive_service
+from experiment.services import config as config_service
 
 app = typer.Typer(help="Pack, summarize, inspect, and prune RunArchive zip bundles.")
 console = Console(highlight=False)
+_CFG = config_service.get_config()
 
 HARVEST_DIR_OPT = typer.Option(
     Path("harvest"),
@@ -32,13 +34,13 @@ JSON_OPTION = typer.Option(False, "--json", help="Emit machine-readable JSON")
 ARMS_OPT = typer.Option("A,B", "--arms", envvar="EXPERIMENT_ARMS", help="Expected arms (e.g. A,B)")
 REPS_OPT = typer.Option(2, "--repetitions", envvar="EXPERIMENT_REPETITIONS", help="Repetitions")
 FAIL_MISSING_OPT = typer.Option(
-    True,
+    _CFG.archive.fail_on_missing,
     "--fail-on-missing/--no-fail-on-missing",
     envvar="EXPERIMENT_FAIL_ON_MISSING",
     help="Fail loudly when any expected cell is missing",
 )
 SKIP_ORACLE_OPT = typer.Option(
-    False,
+    _CFG.archive.skip_oracle,
     "--skip-oracle/--no-skip-oracle",
     envvar="EXPERIMENT_SKIP_ORACLE",
     help="Skip oracle determinism gate (smoke stage only)",
@@ -50,7 +52,7 @@ HARVEST_FLAG_OPT = typer.Option(
     help="Run harvest completeness/determinism gate before zipping",
 )
 STAGE_OPT = typer.Option(
-    RunStage.PILOT,
+    _CFG.experiment.default_stage,
     "--stage",
     envvar="EXPERIMENT_STAGE",
     help="Run stage (preflight|smoke|pilot|study)",
