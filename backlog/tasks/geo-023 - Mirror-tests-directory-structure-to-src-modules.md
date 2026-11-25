@@ -1,7 +1,7 @@
 ---
 id: GEO-023
 title: Mirror tests directory structure to src modules (1:1 module-to-test mapping)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-24T00:00:00Z'
 labels:
@@ -58,12 +58,12 @@ Reorganize `experiment/tests/` and `experiment-qgis-plugin/tests/` so the test d
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Every non-dunder Python source module under `experiment/src/experiment/` (all `domain/`, `domain/run/`, `adapters/`, `adapters/mcp/`, `services/`, `services/runners/`, `cli/`, `oracle/`, `analysis/`, and top-level modules) has a mirrored test module at `experiment/tests/<rel_dir>/test_<stem>.py` containing direct unit tests for that module.
-- [ ] #2 Every non-dunder Python source module under `experiment-qgis-plugin/experiment_plugin/` has a mirrored test module at `experiment-qgis-plugin/tests/test_<stem>.py` containing direct unit tests for that module.
-- [ ] #3 Existing catch-all unit test files are cleanly split into their mirrored per-module test files without losing test assertions, while BDD scenario tests (`test_cli_scenarios.py`, `test_plugin_scenarios.py`, `test_review_scenarios.py`), repo gates (`test_architecture.py`, `test_clean_code_gate.py`), property tests (`test_properties.py`), and `.alint.yml`-required anchors (`test_smoke.py`, `test_plugin.py`) remain intact and cleanly separated.
-- [ ] #4 `pyproject.toml` pytest and coverage configuration handles nested same-basename test modules without import collisions (`--import-mode=importlib` or package-qualified layout) and preserves shared `conftest.py` / `cli_harness.py` / `plugin_harness.py` resolution.
-- [ ] #5 An automated structural test (in `experiment/tests/test_architecture.py` or a dedicated check wired into `pixi run tools run check`) enforces the 1:1 `src` -> `tests` mirror invariant across both `experiment` and `experiment-qgis-plugin`, failing if any non-dunder source module lacks its mirrored test file.
-- [ ] #6 `pixi run tools run check`, `md`, and `links` pass with `0` `clean_code` violations, all `import-linter` contracts kept, `97/97` (or updated) `alint` rules passing, and `>=90%` test coverage with zero dropped test cases.
+- [x] #1 Every non-dunder Python source module under `experiment/src/experiment/` (all `domain/`, `domain/run/`, `adapters/`, `adapters/mcp/`, `services/`, `services/runners/`, `cli/`, `oracle/`, `analysis/`, and top-level modules) has a mirrored test module at `experiment/tests/<rel_dir>/test_<stem>.py` containing direct unit tests for that module.
+- [x] #2 Every non-dunder Python source module under `experiment-qgis-plugin/experiment_plugin/` has a mirrored test module at `experiment-qgis-plugin/tests/test_<stem>.py` containing direct unit tests for that module.
+- [x] #3 Existing catch-all unit test files are cleanly split into their mirrored per-module test files without losing test assertions, while BDD scenario tests (`test_cli_scenarios.py`, `test_plugin_scenarios.py`, `test_review_scenarios.py`), repo gates (`test_architecture.py`, `test_clean_code_gate.py`), property tests (`test_properties.py`), and `.alint.yml`-required anchors (`test_smoke.py`, `test_plugin.py`) remain intact and cleanly separated.
+- [x] #4 `pyproject.toml` pytest and coverage configuration handles nested same-basename test modules without import collisions (`--import-mode=importlib` or package-qualified layout) and preserves shared `conftest.py` / `cli_harness.py` / `plugin_harness.py` resolution.
+- [x] #5 An automated structural test (in `experiment/tests/test_architecture.py` or a dedicated check wired into `pixi run tools run check`) enforces the 1:1 `src` -> `tests` mirror invariant across both `experiment` and `experiment-qgis-plugin`, failing if any non-dunder source module lacks its mirrored test file.
+- [x] #6 `pixi run tools run check`, `md`, and `links` pass with `0` `clean_code` violations, all `import-linter` contracts kept, `97/97` (or updated) `alint` rules passing, and `>=90%` test coverage with zero dropped test cases.
 <!-- AC:END -->
 
 ## Implementation Plan

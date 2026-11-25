@@ -301,3 +301,38 @@ def test_no_migrated_legacy_flat_modules_remain() -> None:
     )
     remaining = [name for name in retired if (pkg_root / name).exists()]
     assert remaining == []
+
+
+def test_every_src_module_has_mirrored_test_module() -> None:
+    """Every non-dunder src/ module must have a mirrored test_<stem>.py under tests/ (GEO-023)."""
+    import ast
+
+    roots = (
+        (REPO_ROOT / "experiment" / "src" / "experiment", REPO_ROOT / "experiment" / "tests"),
+        (
+            REPO_ROOT / "experiment-qgis-plugin" / "experiment_plugin",
+            REPO_ROOT / "experiment-qgis-plugin" / "tests",
+        ),
+    )
+    missing: list[str] = []
+    empty: list[str] = []
+    for src_root, tests_root in roots:
+        for src_file in sorted(src_root.rglob("*.py")):
+            if src_file.name in ("__init__.py", "__main__.py"):
+                continue
+            rel = src_file.relative_to(src_root)
+            expected = tests_root / rel.parent / f"test_{rel.stem}.py"
+            if not expected.is_file():
+                missing.append(
+                    f"{src_file.relative_to(REPO_ROOT)} -> {expected.relative_to(REPO_ROOT)}"
+                )
+                continue
+            tree = ast.parse(expected.read_text(encoding="utf-8"))
+            has_test = any(
+                isinstance(node, ast.FunctionDef) and node.name.startswith("test_")
+                for node in ast.walk(tree)
+            )
+            if not has_test:
+                empty.append(str(expected.relative_to(REPO_ROOT)))
+    assert missing == [], "Source modules missing mirrored test files:\n" + "\n".join(missing)
+    assert empty == [], "Mirrored test files without test_* functions:\n" + "\n".join(empty)

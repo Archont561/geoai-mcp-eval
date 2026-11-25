@@ -124,9 +124,14 @@ source_modules = [
 forbidden_modules = ["qgis", "PyQt5", "PyQt6", "qgis_sdk"]
 
 [tool.pytest.ini_options]
-pythonpath = ["experiment/src", "experiment-qgis-plugin"]
+pythonpath = [
+  "experiment/src",
+  "experiment-qgis-plugin",
+  "experiment/tests",
+  "experiment-qgis-plugin/tests",
+]
 testpaths = ["experiment/tests", "experiment-qgis-plugin/tests"]
-addopts = "-q"
+addopts = "-q --import-mode=importlib"
 # Gherkin tags used by the feature files, declared so pytest-bdd's scenario
 # markers are known rather than reported as typos.
 markers = [
@@ -147,7 +152,7 @@ markers = [
 [tool.coverage.run]
 source = ["experiment/src/experiment"]
 branch = true
-omit = ["experiment/tests/*"]
+omit = ["experiment/tests/**", "experiment-qgis-plugin/tests/**"]
 
 [tool.coverage.report]
 show_missing = true
