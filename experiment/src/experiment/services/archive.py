@@ -11,7 +11,6 @@ from pydantic import ValidationError
 
 from experiment.adapters import paths, run_store
 from experiment.adapters.github_workflow import GitHubWorkflowAdapter
-from experiment.adapters.harness_io import ARM_PREFIX
 from experiment.adapters.run_archive import RunArchive, build_artifact_refs, collect_dir_files
 from experiment.adapters.task_repository import discover_task_files, load_task
 from experiment.domain.run import (
@@ -75,37 +74,6 @@ def _read_model_pin(source_dir: Path) -> ModelPin | None:
         return None
     digest = parts[1] if len(parts) >= 2 else None
     return ModelPin(backend_id="local", tag=parts[0], digest=digest)
-
-
-def _discover_local_cells(source_dir: Path) -> list[tuple[str, str, int, Path]]:
-    found: list[tuple[str, str, int, Path]] = []
-    for cell_dir in run_store.discover_cell_dirs(source_dir, ARM_PREFIX):
-        task_id = cell_dir.parent.name
-        arm = cell_dir.name.removeprefix(ARM_PREFIX)
-        found.append((task_id, arm, 1, cell_dir))
-    return found
-
-
-def _manifest_cell_key(record: dict[str, Any] | None) -> tuple[str, str, int] | None:
-    if record is None:
-        return None
-    arm = record.get("arm")
-    task = record.get("task")
-    rep = record.get("rep")
-    if type(arm) is str and type(task) is str and type(rep) is int:
-        return (task, arm, rep)
-    return None
-
-
-def _discover_harvest_cells(source_dir: Path) -> list[tuple[str, str, int, Path]]:
-    found: list[tuple[str, str, int, Path]] = []
-    seen: set[tuple[str, str, int]] = set()
-    for manifest_path in run_store.discover_manifests(source_dir):
-        key = _manifest_cell_key(run_store.read_json_mapping(manifest_path))
-        if key is not None and key not in seen:
-            seen.add(key)
-            found.append((*key, manifest_path.parent))
-    return sorted(found)
 
 
 def _trial_enforcement(arm: str, raw: object) -> EnforcementLevel:
@@ -173,34 +141,32 @@ def _build_trial_record(
 
 
 def _build_trial_key(
-    entry: tuple[str, str, int, Path],
+    cell: run_store.CellDir,
     manifest: dict[str, Any],
     existing: TrialMeasurement | None,
 ) -> TrialKey:
-    task_id, arm, rep, _ = entry
     enforce_raw = manifest.get("enforce") or (
         existing.key.enforcement_level if existing is not None else None
     )
     return TrialKey(
-        task_id=task_id,
-        paradigm=arm_to_paradigm(arm),
-        enforcement_level=_trial_enforcement(arm, enforce_raw),
-        repetition=rep,
+        task_id=cell.task_id,
+        paradigm=arm_to_paradigm(cell.arm),
+        enforcement_level=_trial_enforcement(cell.arm, enforce_raw),
+        repetition=cell.repetition,
     )
 
 
 def _build_trial_entry(
     task_map: dict[str, Path],
-    entry: tuple[str, str, int, Path],
+    cell: run_store.CellDir,
 ) -> tuple[TrialRecord, TrialMeasurement, dict[str, bytes]]:
-    cell_dir = entry[3]
-    manifest = run_store.read_json_mapping(cell_dir / "manifest.json") or {}
-    existing = _existing_measurement(cell_dir)
-    key = _build_trial_key(entry, manifest, existing)
-    payloads = collect_dir_files(cell_dir)
+    manifest = run_store.read_json_mapping(cell.path / "manifest.json") or {}
+    existing = _existing_measurement(cell.path)
+    key = _build_trial_key(cell, manifest, existing)
+    payloads = collect_dir_files(cell.path)
     record = _build_trial_record(key, manifest, payloads)
     measurement = _resolve_measurement(
-        task_map, cell_dir, record, float(manifest.get("wall_s") or 0.0), existing
+        task_map, cell.path, record, float(manifest.get("wall_s") or 0.0), existing
     )
     return record, measurement, payloads
 
@@ -209,12 +175,11 @@ def _collect_trials(
     source_dir: Path,
 ) -> tuple[dict[str, TrialRecord], dict[str, TrialMeasurement], dict[str, dict[str, bytes]]]:
     task_map = {load_task(p).id: p for p in discover_task_files(paths.tasks_root())}
-    cells = _discover_harvest_cells(source_dir) or _discover_local_cells(source_dir)
     trials: dict[str, TrialRecord] = {}
     measurements: dict[str, TrialMeasurement] = {}
     payloads_map: dict[str, dict[str, bytes]] = {}
-    for entry in cells:
-        record, measurement, payloads = _build_trial_entry(task_map, entry)
+    for cell in run_store.discover_cells(source_dir):
+        record, measurement, payloads = _build_trial_entry(task_map, cell)
         tid = record.trial_id
         trials[tid] = record
         measurements[tid] = measurement

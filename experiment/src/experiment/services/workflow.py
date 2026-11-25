@@ -181,7 +181,9 @@ def run_workflow_cell(spec: WorkflowCellSpec) -> Path:
     repo_root = find_repo_root()
     rid = resolve_run_id(spec.run_id)
     cell_dir = run_store.ensure_dir(
-        paths.results_root(repo_root) / rid / spec.task_id / spec.arm / f"rep-{spec.repetition}"
+        run_store.cell_dir_path(
+            paths.results_root(repo_root) / rid, spec.arm, spec.task_id, spec.repetition
+        )
     )
     base = _cell_base_metadata(spec, rid)
     ollama_bin = subprocess_runner.which("ollama")

@@ -18,18 +18,24 @@ console = Console(highlight=False)
 
 DEFAULT_TASK_ROOT = tasks_service.default_task_root()
 ROOT_OPTION = typer.Option(DEFAULT_TASK_ROOT, "--root", help="Task suite root directory")
+JSON_OPTION = typer.Option(False, "--json", help="Emit machine-readable JSON")
 TARGET_ARG = typer.Argument(..., help="Run directory or RunArchive .zip file")
 TASK_ID_ARG = typer.Argument(..., help="Task identifier")
 ARTIFACTS_OPTION = typer.Option(..., "--artifacts-dir", help="Cell directory to evaluate")
 
 
 @app.command("eval")
-def evaluate(target: Path = TARGET_ARG, root: Path = ROOT_OPTION) -> None:
+def evaluate(
+    target: Path = TARGET_ARG, root: Path = ROOT_OPTION, as_json: bool = JSON_OPTION
+) -> None:
     """Re-score every cell in TARGET (run directory or zip archive) against the oracle."""
     summary = scoring.rescore_run(target, task_root=root)
     if summary is None:
         console.print(Text(f"no cells under {target}", style="red"))
         raise typer.Exit(code=1)
+    if as_json:
+        typer.echo(json.dumps(summary.to_dict(), indent=2, sort_keys=True))
+        return
     print_score_table(console, summary)
 
 
@@ -51,11 +57,14 @@ def determinism(
 
 
 @app.command()
-def show(target: Path = TARGET_ARG) -> None:
+def show(target: Path = TARGET_ARG, as_json: bool = JSON_OPTION) -> None:
     """Display stored oracle scores from a run directory or RunArchive zip."""
     try:
         summary = scoring.load_summary(target)
     except scoring.SummaryNotFoundError as exc:
         console.print(Text(f"missing {exc}", style="red"))
         raise typer.Exit(code=1) from None
+    if as_json:
+        typer.echo(json.dumps(summary.to_dict(), indent=2, sort_keys=True))
+        return
     print_score_table(console, summary)

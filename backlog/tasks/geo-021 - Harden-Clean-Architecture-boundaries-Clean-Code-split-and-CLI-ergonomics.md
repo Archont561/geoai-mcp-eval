@@ -1,7 +1,7 @@
 ---
 id: GEO-021
 title: Harden Clean Architecture boundaries, Clean Code split, and CLI ergonomics
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-25T00:00:00Z'
 labels:
@@ -48,7 +48,7 @@ Follow-up architectural and ergonomics hardening from the post-`m-5` Clean Archi
 - [x] #4 Typed frozen DTOs replace untyped `dict[str, Any]` handoffs across `services/{runs,scoring,archive,workflow_summary}.py` and remove all `# type: ignore` suppressions in `experiment/src/experiment/services/`.
 - [x] #5 `[tool.importlinter]` contracts in `pyproject.toml` forbid `cli -> gis_ops`, forbid direct `qgis`/`PyQt` imports in `experiment_plugin.{metrics,review,session}`, and keep `services/` free of direct `os.environ` / filesystem probes (PyQGIS version probing moved to an adapter).
 - [x] #6 Every module currently above 340 lines (`backend_check.py`, `task_suite.py`, `runs.py`, `run_archive.py`, `workflow.py`, `archive.py`, `experiment_plugin/session.py`, `experiment_plugin/review.py`) is split by cohesion to comfortable headroom below `CC001`.
-- [ ] #7 Local and CI cell runs share one canonical `cell-<arm>-<task>-r<rep>/` layout, CLI flags/env vars are aligned (`--cache/--no-cache`, `EXPERIMENT_*` env vars, `--json` on inspection commands), and `pixi run tools run check` passes with 0 `clean_code` violations and `>=90%` coverage.
+- [x] #7 Local and CI cell runs share one canonical `cell-<arm>-<task>-r<rep>/` layout, CLI flags/env vars are aligned (`--cache/--no-cache`, `EXPERIMENT_*` env vars, `--json` on inspection commands), and `pixi run tools run check` passes with 0 `clean_code` violations and `>=90%` coverage.
 <!-- AC:END -->
 
 ## Implementation Plan

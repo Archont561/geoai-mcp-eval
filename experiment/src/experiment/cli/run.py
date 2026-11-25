@@ -26,21 +26,34 @@ ROOT_OPTION = typer.Option(TASK_ROOT, "--root", help="Task suite root directory"
 DRIVER_OPTION = typer.Option(
     "scripted", "--driver", help="scripted (deterministic canned plan) | ollama (live LLM)"
 )
-MODEL_OPTION = typer.Option(None, "--model", help="Override the backend profile model tag")
-HOST_OPTION = typer.Option(None, "--host", help="Override the backend base URL")
-BACKEND_OPTION = typer.Option("local", "--backend", help="Backend profile from backends.toml")
+MODEL_OPTION = typer.Option(
+    None, "--model", envvar="EXPERIMENT_MODEL", help="Override the backend profile model tag"
+)
+HOST_OPTION = typer.Option(
+    None, "--host", envvar="EXPERIMENT_HOST", help="Override the backend base URL"
+)
+BACKEND_OPTION = typer.Option(
+    "local", "--backend", envvar="EXPERIMENT_BACKEND", help="Backend profile from backends.toml"
+)
 TASK_OPTION = typer.Option("all", "--task", help="all | comma-separated task IDs")
+REPETITIONS_OPTION = typer.Option(
+    1, "--repetitions", envvar="EXPERIMENT_REPETITIONS", help="Repetitions per (task, arm) cell"
+)
 OUTPUT_OPTION = typer.Option(None, "--output-dir", help="Output directory for run artifacts")
 MAX_CELL_TOKENS_OPTION = typer.Option(
     None, "--max-cell-tokens", help="Abort cell if reported tokens exceed this positive integer"
 )
-NO_CACHE_OPTION = typer.Option(
-    False, "--no-cache", help="Bypass the digest-keyed LLM completion cache"
+CACHE_OPTION = typer.Option(
+    True,
+    "--cache/--no-cache",
+    envvar="EXPERIMENT_USE_LLM_CACHE",
+    help="Use or bypass the digest-keyed LLM completion cache",
 )
 CACHE_DIR_OPTION = typer.Option(None, "--cache-dir", help="Override LLM completion cache dir")
 ENFORCE_OPTION = typer.Option(
     "semantic_repair",
     "--enforce",
+    envvar="EXPERIMENT_ENFORCE",
     help="MCP enforcement level (none|declarative|syntactic|semantic_repair|transactional|N0..N4)",
 )
 PACK_ZIP_OPTION = typer.Option(
@@ -56,10 +69,15 @@ CELL_STAGE_OPT = typer.Option(
 CELL_ENFORCE_OPT = typer.Option(
     "N3", "--enforce", envvar="EXPERIMENT_ENFORCE", help="MCP enforcement depth (N1..N4)"
 )
-CELL_MODEL_OPT = typer.Option("qwen2.5:3b", "--model", envvar="MODEL", help="Ollama model tag")
-CELL_RUN_ID_OPT = typer.Option("", "--run-id", envvar="RUN_ID", help="Run identifier")
+CELL_MODEL_OPT = typer.Option(
+    "qwen2.5:3b", "--model", envvar=["EXPERIMENT_MODEL", "MODEL"], help="Ollama model tag"
+)
+CELL_RUN_ID_OPT = typer.Option(
+    "", "--run-id", envvar=["EXPERIMENT_RUN_ID", "RUN_ID"], help="Run identifier"
+)
 CELL_CACHE_OPT = typer.Option(
     False,
+    "--cache/--no-cache",
     "--use-cache/--no-cache",
     envvar="EXPERIMENT_USE_LLM_CACHE",
     help="Use local SQLite LLM completion cache",
@@ -73,6 +91,7 @@ class _RunTarget:
     root: Path
     output_dir: Path | None
     enforce: str = "none"
+    repetitions: int = 1
 
 
 @dataclass(frozen=True)
@@ -86,7 +105,7 @@ class _RunBackend:
 @dataclass(frozen=True)
 class _RunLimits:
     max_cell_tokens: int | None
-    no_cache: bool
+    use_cache: bool
     cache_dir: Path | None
     pack_zip: bool
 
@@ -133,9 +152,10 @@ def _execute_run(target: _RunTarget, backend: _RunBackend, limits: _RunLimits) -
                 task=target.task,
                 backend=backend.backend,
                 max_cell_tokens=limits.max_cell_tokens,
-                use_cache=not limits.no_cache,
+                use_cache=limits.use_cache,
                 cache_dir=limits.cache_dir,
                 enforce=target.enforce,
+                repetitions=target.repetitions,
             )
         )
     except runs.RunSpecError as exc:
@@ -158,18 +178,19 @@ def _register_enforced_cmd(name: str, arms: str, help_text: str) -> None:
         model: str | None = MODEL_OPTION,
         host: str | None = HOST_OPTION,
         task: str = TASK_OPTION,
+        repetitions: int = REPETITIONS_OPTION,
         enforce: str = ENFORCE_OPTION,
         output_dir: Path | None = OUTPUT_OPTION,
         root: Path = ROOT_OPTION,
         backend: str = BACKEND_OPTION,
         max_cell_tokens: int | None = MAX_CELL_TOKENS_OPTION,
-        no_cache: bool = NO_CACHE_OPTION,
+        use_cache: bool = CACHE_OPTION,
         cache_dir: Path | None = CACHE_DIR_OPTION,
         pack_zip: bool = PACK_ZIP_OPTION,
     ) -> None:
-        target = _RunTarget(arms, task, root, output_dir, enforce)
+        target = _RunTarget(arms, task, root, output_dir, enforce, repetitions)
         be = _RunBackend(driver, backend, model, host)
-        limits = _RunLimits(max_cell_tokens, no_cache, cache_dir, pack_zip)
+        limits = _RunLimits(max_cell_tokens, use_cache, cache_dir, pack_zip)
         _execute_run(target, be, limits)
 
 
@@ -183,18 +204,19 @@ def run_codegen(  # noqa: CC102
     model: str | None = MODEL_OPTION,
     host: str | None = HOST_OPTION,
     task: str = TASK_OPTION,
+    repetitions: int = REPETITIONS_OPTION,
     output_dir: Path | None = OUTPUT_OPTION,
     root: Path = ROOT_OPTION,
     backend: str = BACKEND_OPTION,
     max_cell_tokens: int | None = MAX_CELL_TOKENS_OPTION,
-    no_cache: bool = NO_CACHE_OPTION,
+    use_cache: bool = CACHE_OPTION,
     cache_dir: Path | None = CACHE_DIR_OPTION,
     pack_zip: bool = PACK_ZIP_OPTION,
 ) -> None:
     """Run Arm B (free Python/PyQGIS codegen paradigm) trials (enforcement fixed to none)."""
-    target = _RunTarget("B", task, root, output_dir)
+    target = _RunTarget("B", task, root, output_dir, repetitions=repetitions)
     be = _RunBackend(driver, backend, model, host)
-    limits = _RunLimits(max_cell_tokens, no_cache, cache_dir, pack_zip)
+    limits = _RunLimits(max_cell_tokens, use_cache, cache_dir, pack_zip)
     _execute_run(target, be, limits)
 
 

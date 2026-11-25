@@ -35,6 +35,7 @@ class RunSpec:
     use_cache: bool = True
     cache_dir: Path | None = None
     enforce: str = "semantic_repair"
+    repetitions: int = 1
 
 
 @dataclass(frozen=True)

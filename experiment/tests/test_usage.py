@@ -199,7 +199,7 @@ def test_scripted_run_writes_manifest_and_explicit_null_usage(tmp_path: Path) ->
     assert summary.usage == manifest["totals"]["usage"]
     transcript_entries = [
         json.loads(line)
-        for line in (out / "analysis-de9im-001" / "arm-B" / "transcript.jsonl")
+        for line in (out / "cell-B-analysis-de9im-001-r1" / "transcript.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()
         if line.strip()

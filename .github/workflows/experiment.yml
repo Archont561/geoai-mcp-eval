@@ -169,7 +169,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: experiment-${{ matrix.arm }}-${{ matrix.task_id }}-rep${{ matrix.rep }}
-          path: results/${{ github.run_id }}-${{ github.sha }}/${{ matrix.task_id }}/${{ matrix.arm }}/rep-${{ matrix.rep }}
+          path: results/${{ github.run_id }}-${{ github.sha }}/cell-${{ matrix.arm }}-${{ matrix.task_id }}-r${{ matrix.rep }}
           if-no-files-found: warn
           retention-days: 1
 

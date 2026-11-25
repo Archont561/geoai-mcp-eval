@@ -273,7 +273,7 @@ def run_task_subset_both_arms(cli: CliRunner, output: Path, task_ids: str) -> di
 def check_determinism_on_cell(
     cli: CliRunner, output: Path, suite: dict, task_id: str, arm: str
 ) -> dict:
-    cell = output / task_id / f"arm-{arm}"
+    cell = output / f"cell-{arm}-{task_id}-r1"
     result = run_cli(
         cli, f"score determinism {task_id} --artifacts-dir {cell} --root {suite['path']}"
     )
@@ -339,7 +339,8 @@ def every_cell_keeps_artifacts(output: Path) -> None:
     summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
     assert summary["prototype"] is True
     for cell in summary["cells"]:
-        cell_dir = output / cell["task"] / f"arm-{cell['arm']}"
+        rep = cell.get("repetition", 1)
+        cell_dir = output / f"cell-{cell['arm']}-{cell['task']}-r{rep}"
         assert cell["prototype"] is True
         assert (cell_dir / "transcript.jsonl").is_file(), cell_dir
         score = json.loads((cell_dir / "score.json").read_text(encoding="utf-8"))
@@ -721,7 +722,7 @@ def showing_prints_scores(cli: CliRunner, output: Path) -> None:
 
 @when("I corrupt and rescore the result", target_fixture="rescored")
 def corrupt_and_rescore(cli: CliRunner, output: Path) -> dict:
-    path = output / "analysis-de9im-001" / "arm-B" / "result.json"
+    path = output / "cell-B-analysis-de9im-001-r1" / "result.json"
     result = json.loads(path.read_text(encoding="utf-8"))
     result.update({"relation": "disjoint", "de9im": "FF*FF****"})
     path.write_text(json.dumps(result), encoding="utf-8")
@@ -765,7 +766,7 @@ def stubbed_ollama_without_usage(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _read_transcript(output: Path) -> list[dict]:
-    path = output / "analysis-de9im-001" / "arm-B" / "transcript.jsonl"
+    path = output / "cell-B-analysis-de9im-001-r1" / "transcript.jsonl"
     return [
         json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
     ]
@@ -838,7 +839,7 @@ def summary_and_manifest_record_null_totals(output: Path, missing: int) -> None:
 
 @then("the cell is aborted for token_cap_exceeded without executing its code")
 def cell_aborted_for_token_cap(output: Path) -> None:
-    cell_dir = output / "analysis-de9im-001" / "arm-B"
+    cell_dir = output / "cell-B-analysis-de9im-001-r1"
     assert not (cell_dir / "result.json").exists()
     entries = _read_transcript(output)
     assert not any(e.get("role") == "tool_result" for e in entries)

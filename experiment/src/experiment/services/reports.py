@@ -67,6 +67,7 @@ class CellSummary:
     oracle_passed: bool
     checks: tuple[CheckView, ...]
     wall_s: float | str = 0.0
+    repetition: int = 1
     paradigm: str | None = None
     error: str | None = None
     abort_reason: str | None = None
@@ -81,6 +82,7 @@ class CellSummary:
         payload: dict[str, Any] = {
             "task": self.task,
             "arm": self.arm,
+            "repetition": self.repetition,
             "status": self.status,
             "wall_s": self.wall_s,
             "oracle_passed": self.oracle_passed,
@@ -99,6 +101,7 @@ class CellSummary:
         status = str(raw.get("status", "ok"))
         oracle_passed = bool(raw.get("oracle_passed", False))
         wall_s = raw.get("wall_s", "—")
+        repetition = int(raw.get("repetition") or 1)
         cache_hits = int(raw.get("cache_hits") or 0)
         cache_misses = int(raw.get("cache_misses") or 0)
         return cls(
@@ -108,6 +111,7 @@ class CellSummary:
             oracle_passed=oracle_passed,
             checks=checks,
             wall_s=wall_s,
+            repetition=repetition,
             paradigm=_opt_str(raw, "paradigm"),
             error=_opt_str(raw, "error"),
             abort_reason=_opt_str(raw, "abort_reason"),
@@ -192,6 +196,18 @@ class TrialOverview:
     predicate_score: float
     silent_invalid: bool
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "trial_id": self.trial_id,
+            "task_id": self.task_id,
+            "paradigm": self.paradigm,
+            "enforcement_level": self.enforcement_level,
+            "repetition": self.repetition,
+            "task_success": self.task_success,
+            "predicate_score": self.predicate_score,
+            "silent_invalid": self.silent_invalid,
+        }
+
 
 @dataclass(frozen=True)
 class ArchiveOverview:
@@ -208,6 +224,21 @@ class ArchiveOverview:
     mean_predicate_score: float
     has_summary: bool
     trials: tuple[TrialOverview, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "run_id": self.run_id,
+            "stage": self.stage,
+            "schema_version": self.schema_version,
+            "model": self.model,
+            "model_digest": self.model_digest,
+            "trial_count": self.trial_count,
+            "task_success_count": self.task_success_count,
+            "task_success_rate": self.task_success_rate,
+            "mean_predicate_score": self.mean_predicate_score,
+            "has_summary": self.has_summary,
+            "trials": [trial.to_dict() for trial in self.trials],
+        }
 
 
 @dataclass(frozen=True)
