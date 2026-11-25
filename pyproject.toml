@@ -39,7 +39,7 @@ source_modules = ["experiment.domain"]
 forbidden_modules = [
   "typer", "rich", "requests", "yaml", "jsonschema", "mcp", "subprocess",
   "pathlib", "tomllib", "os", "zipfile", "pydantic_settings",
-  "diskcache", "tenacity", "jenkspy", "mapclassify", "filelock", "tabulate",
+  "diskcache", "tenacity", "jenkspy", "mapclassify", "filelock", "tabulate", "github", "pandera",
   "sshtunnel", "paramiko", "ollama", "openrouter", "httpx",
   "experiment.adapters", "experiment.cli", "experiment.oracle", "experiment.gis_ops",
 ]
@@ -106,6 +106,12 @@ name = "Analysis never imports or reads the LLM completion cache"
 type = "forbidden"
 source_modules = ["experiment.analysis"]
 forbidden_modules = ["experiment.adapters.llm_cache", "experiment.domain.cache_key"]
+
+[[tool.importlinter.contracts]]
+name = "Analysis never shells out via subprocess or gh CLI"
+type = "forbidden"
+source_modules = ["experiment.analysis"]
+forbidden_modules = ["experiment.adapters.subprocess_runner", "subprocess"]
 
 [[tool.importlinter.contracts]]
 name = "QGIS plugin core has no QGIS, Qt, or qgis_sdk imports"

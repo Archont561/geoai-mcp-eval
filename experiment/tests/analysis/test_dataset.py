@@ -6,13 +6,18 @@ import ast
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pandera.errors
 import pytest
 
 from experiment.analysis import (
     ASSERTION_COLUMNS,
     CELL_SUMMARY_COLUMNS,
     MEASUREMENT_COLUMNS,
+    AssertionTableSchema,
+    CellSummarySchema,
+    MeasurementTableSchema,
     RunDataset,
+    validate_predicate_matrix,
 )
 from experiment.domain.run import (
     AssertionResult,
@@ -126,6 +131,40 @@ def test_predicates_and_assertions_fail_loudly_on_unknown_assertion() -> None:
     empty_summary = RunDataset.from_run(empty_run).cell_summary_df()
     assert empty_summary.empty
     assert list(empty_summary.columns) == list(CELL_SUMMARY_COLUMNS)
+
+
+def test_pandera_schemas_reject_invalid_values(packed_pilot_zip: Path) -> None:
+    with RunDataset.from_zip(packed_pilot_zip) as dataset:
+        meas = dataset.measurements_df()
+        bad_meas = meas.copy()
+        bad_meas.loc[0, "task_success"] = 2
+        with pytest.raises(pandera.errors.SchemaError):
+            MeasurementTableSchema.validate(bad_meas)
+
+        bad_score = meas.copy()
+        bad_score.loc[0, "predicate_score"] = 1.5
+        with pytest.raises(pandera.errors.SchemaError):
+            MeasurementTableSchema.validate(bad_score)
+
+        preds = dataset.predicates_df(REAL_TASKS)
+        bad_preds = preds.copy()
+        bad_preds["touches"] = bad_preds["touches"].astype(float)
+        bad_preds.loc[0, "touches"] = float("nan")
+        pred_cols = [c for c in preds.columns if c not in preds.columns[:6]]
+        with pytest.raises((pandera.errors.SchemaError, pandera.errors.SchemaErrors)):
+            validate_predicate_matrix(bad_preds, pred_cols)
+
+        summary = dataset.cell_summary_df()
+        bad_summary = summary.copy()
+        bad_summary.loc[0, "n_trials"] = 0
+        with pytest.raises(pandera.errors.SchemaError):
+            CellSummarySchema.validate(bad_summary)
+
+        asserts = dataset.assertions_df(REAL_TASKS)
+        bad_asserts = asserts.copy()
+        bad_asserts.loc[0, "tier"] = "unknown"
+        with pytest.raises(pandera.errors.SchemaError):
+            AssertionTableSchema.validate(bad_asserts)
 
 
 def test_analysis_path_contains_no_cache_reads_or_imports() -> None:

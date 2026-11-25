@@ -1,9 +1,10 @@
 ---
 id: GEO-029
 title: Remove gh CLI from Marimo analysis via PyGithub and adopt Pandera DataFrame schemas
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-24T00:00:00Z'
+updated_date: '2026-11-25T00:00:00Z'
 labels:
   - analysis
   - marimo
@@ -56,13 +57,13 @@ Eliminate the `gh` CLI subprocess dependency from `experiment.analysis` and Mari
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `experiment/src/experiment/analysis/github_client.py` uses `PyGithub` (+ `httpx` streaming download and `filelock`) to list workflow runs and download/cache `experiment-run-*.zip` artifacts with zero `gh` CLI invocations and zero `subprocess` imports.
-- [ ] #2 `GitHubRunClient` supports `token=` parameter, `GITHUB_TOKEN` / `GH_TOKEN` environment variables, and injected `PyGithub` / `httpx` test doubles, handles GitHub artifact redirect downloads cleanly, verifies `RunArchive.verify_all()`, and honors `CachePolicy` (`use` / `refresh`).
-- [ ] #3 `experiment/src/experiment/analysis/dataset.py` validates `measurements()`, `predicates()`, `cell_summary()`, and `assertions()` DataFrames via `pandera` `DataFrameModel` schemas, replacing manual column-list and dtype boilerplate.
-- [ ] #4 `PyGithub`, `httpx`, `filelock`, and `pandera` are declared in both `[feature.experiment.pypi-dependencies]` and `[feature.docs.pypi-dependencies]` so Marimo notebooks in `docs/` run without `gh` installed.
-- [ ] #5 An `import-linter` contract (and `test_architecture.py` check) forbids `experiment.analysis` from importing `subprocess` or `experiment.adapters.subprocess_runner`.
-- [ ] #6 Marimo notebooks and docs referencing `GitHubRunClient` document token-based auth (`GITHUB_TOKEN` / `GH_TOKEN`) instead of `gh auth login`, and tests verify mocked `PyGithub` + `httpx` downloads, cache refresh, corruption re-download, and Pandera schema enforcement.
-- [ ] #7 `pixi run tools run check`, `md`, and `links` pass with `0` `clean_code` violations, all `import-linter` contracts kept, `97/97` `alint` rules passing, and `>=90%` test coverage.
+- [x] #1 `experiment/src/experiment/analysis/github_client.py` uses `PyGithub` (+ `httpx` streaming download and `filelock`) to list workflow runs and download/cache `experiment-run-*.zip` artifacts with zero `gh` CLI invocations and zero `subprocess` imports.
+- [x] #2 `GitHubRunClient` supports `token=` parameter, `GITHUB_TOKEN` / `GH_TOKEN` environment variables, and injected `PyGithub` / `httpx` test doubles, handles GitHub artifact redirect downloads cleanly, verifies `RunArchive.verify_all()`, and honors `CachePolicy` (`use` / `refresh`).
+- [x] #3 `experiment/src/experiment/analysis/dataset.py` validates `measurements()`, `predicates()`, `cell_summary()`, and `assertions()` DataFrames via `pandera` `DataFrameModel` schemas, replacing manual column-list and dtype boilerplate.
+- [x] #4 `PyGithub`, `httpx`, `filelock`, and `pandera` are declared in both `[feature.experiment.pypi-dependencies]` and `[feature.docs.pypi-dependencies]` so Marimo notebooks in `docs/` run without `gh` installed.
+- [x] #5 An `import-linter` contract (and `test_architecture.py` check) forbids `experiment.analysis` from importing `subprocess` or `experiment.adapters.subprocess_runner`.
+- [x] #6 Marimo notebooks and docs referencing `GitHubRunClient` document token-based auth (`GITHUB_TOKEN` / `GH_TOKEN`) instead of `gh auth login`, and tests verify mocked `PyGithub` + `httpx` downloads, cache refresh, corruption re-download, and Pandera schema enforcement.
+- [x] #7 `pixi run tools run check`, `md`, and `links` pass with `0` `clean_code` violations, all `import-linter` contracts kept, `97/97` `alint` rules passing, and `>=90%` test coverage.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -73,3 +74,14 @@ Eliminate the `gh` CLI subprocess dependency from `experiment.analysis` and Mari
 3. **Adopt `pandera` in `analysis/dataset.py`:** Define `DataFrameModel` schemas for measurements, predicates, cell summaries, and assertions and validate all `RunDataset` projections through them.
 4. **Enforce zero-`subprocess` boundary & update docs/tests:** Add `import-linter` forbidden contract blocking `subprocess` / `subprocess_runner` from `experiment.analysis`, migrate `test_github_client.py` and `test_dataset.py` to mock `PyGithub`/`httpx` (zero `gh` fake runner), update Marimo docs, and pass `pixi run tools run fmt`, `check`, `md`, and `links`.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Completed in Step 4 (`GEO-029`):
+
+- **Pure-Python GitHub Actions client (`experiment/src/experiment/analysis/github_client.py`)**: Replaced `gh` CLI subprocess calls with `PyGithub` (`github.Github` + `github.Auth.Token`), redirect-safe `httpx` artifact downloads (stripping `Authorization` on 302 redirects to Azure Blob SAS URLs), outer artifact zip unwrapping, `filelock`-guarded cache writes (`run_store.file_lock`), SHA-256 `RunArchive.verify_all()` with automatic re-download on cache corruption, and pure-Python `.git/config` / `GITHUB_REPOSITORY` repo resolution. Grouped injectable test collaborators cleanly in `GitHubTransport`.
+- **Pandera `DataFrameModel` schemas (`experiment/src/experiment/analysis/dataset.py`)**: Defined `MeasurementTableSchema`, `PredicateMatrixSchema`, `CellSummarySchema`, and `AssertionTableSchema` plus `validate_predicate_matrix`, deriving `MEASUREMENT_COLUMNS`, `PREDICATE_KEY_COLUMNS`, `CELL_SUMMARY_COLUMNS`, and `ASSERTION_COLUMNS` from the schemas as a single source of truth and validating all `RunDataset` projections.
+- **Manifests & Marimo docs**: Declared `PyGithub`, `httpx`, `filelock`, and `pandera` in both `[feature.experiment.pypi-dependencies]` and `[feature.docs.pypi-dependencies]` (`pixi.toml`) plus `experiment/pyproject.toml`, and updated `docs/analyses/experiment-analysis.md` to document token-based auth (`GITHUB_TOKEN` / `GH_TOKEN`) with zero `gh` CLI requirement.
+- **Architecture contract**: Added `import-linter` contract `Analysis never shells out via subprocess or gh CLI` forbidding `experiment.adapters.subprocess_runner` and `subprocess` in `experiment.analysis` (verified in `test_architecture.py`), and added `github` and `pandera` to `experiment.domain`'s forbidden list.
+<!-- SECTION:NOTES:END -->

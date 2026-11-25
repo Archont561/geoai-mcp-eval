@@ -145,8 +145,18 @@ def test_the_shipped_contracts_pass_and_reject_violations(tmp_path: Path) -> Non
     cli_io = "CLI never performs transport or subprocess I/O directly"
     cli_adapters = "CLI calls services rather than importing adapters directly"
     analysis_cache = "Analysis never imports or reads the LLM completion cache"
+    analysis_no_subproc = "Analysis never shells out via subprocess or gh CLI"
     plugin_core = "QGIS plugin core has no QGIS, Qt, or qgis_sdk imports"
-    for name in (layers, no_frameworks, svc_io, cli_io, cli_adapters, analysis_cache, plugin_core):
+    for name in (
+        layers,
+        no_frameworks,
+        svc_io,
+        cli_io,
+        cli_adapters,
+        analysis_cache,
+        analysis_no_subproc,
+        plugin_core,
+    ):
         assert f"{name} KEPT" in result.stdout
     shutil.copytree(
         REPO_ROOT / "experiment" / "src" / "experiment",
@@ -267,6 +277,18 @@ def test_the_shipped_contracts_pass_and_reject_violations(tmp_path: Path) -> Non
             "from experiment.adapters import llm_cache\n",
             analysis_cache,
             "experiment.analysis is not allowed to import experiment.adapters.llm_cache",
+        ),
+        (
+            "analysis",
+            "import subprocess\n",
+            analysis_no_subproc,
+            "experiment.analysis is not allowed to import subprocess",
+        ),
+        (
+            "analysis",
+            "from experiment.adapters import subprocess_runner\n",
+            analysis_no_subproc,
+            "experiment.adapters.subprocess_runner",
         ),
         (
             "analysis",

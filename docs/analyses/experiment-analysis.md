@@ -236,16 +236,18 @@ FAILURE_CLASSES
   remains the raw audit view.
 
 :::{dropdown} Refreshing from GitHub Actions (`GitHubRunClient` + `RunDataset`)
-The cells above never touch the network and never read `results/` at build time. To pull a
+The cells above never touch the network and never read `results/` at build time. `GitHubRunClient`
+talks to GitHub Actions directly in pure Python (`PyGithub` + `httpx`, no `gh` CLI binary
+required) using `GITHUB_TOKEN` or `GH_TOKEN` (or an explicit `token=` argument). To pull a
 completed workflow run's single `experiment-run-<run_id>.zip` artifact (cached under
 `.cache/gh-runs/`) or open a local archive offline, run this recipe outside the site, then paste
 the printed JSON into `MATRIX_JSON` and rewrite the captions in Cells 2–5:
 
 ```bash
-PYTHONPATH=experiment/src pixi run python - <<'PYEOF'
+GITHUB_TOKEN="<token>" PYTHONPATH=experiment/src pixi run python - <<'PYEOF'
 from experiment.analysis import GitHubRunClient
 
-client = GitHubRunClient()
+client = GitHubRunClient(repo="Archont561/geoai-mcp-eval")
 # Online (cached under .cache/gh-runs/): client.load_latest() or client.load_run(<run_id>)
 # Offline local zip: client.load_zip("path/to/experiment-run-<run_id>.zip")
 with client.load_latest() as dataset:
