@@ -1,33 +1,30 @@
-"""Shared cell I/O plumbing: paths, fixture staging, transcripts, deliverables, sandbox."""
+"""Cell I/O adapter: paths, fixture staging, transcripts, deliverables, and Python sandbox."""
 
 from __future__ import annotations
 
 import os
 import sys
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from experiment.adapters import paths, run_store, subprocess_runner
+from experiment.adapters import backends, paths, run_store, subprocess_runner
+from experiment.domain.prompts import (
+    RESULT_GEOJSON,
+    RESULT_JSON,
+    ChatTurn,
+    SandboxExecution,
+)
 
 if TYPE_CHECKING:
     from experiment.domain.backend import BackendProfile
-    from experiment.domain.cache_key import CacheStats
     from experiment.domain.task import Task
-    from experiment.domain.usage import UsageAccumulator
 
 TASK_ROOT = paths.tasks_root()
 RESULTS_ROOT = paths.results_root()
 
-RESULT_JSON = "result.json"
-RESULT_GEOJSON = "result.geojson"
-
 UTF8 = run_store.UTF8
 JSON_INDENT = run_store.JSON_INDENT
-_K_ROLE = "role"
-_K_CONTENT = "content"
-_K_ID = "id"
 
 ARM_PREFIX = "arm-"
 
@@ -37,47 +34,6 @@ ARMS = ("A", "B")
 
 def model_label(driver: str, model: str) -> str:
     return model if driver == "ollama" else "scripted-canned"
-
-
-@dataclass(frozen=True)
-class RunSpec:
-    """What to run: arms, task filter, driver, model, host."""
-
-    arms: tuple[str, ...]
-    task_ids: tuple[str, ...] | None
-    driver: str
-    model: str
-    host: str
-    profile: BackendProfile | None = None
-    max_cell_tokens: int | None = None
-    backend_id: str = "local"
-    use_cache: bool = True
-    cache_dir: Path | None = None
-    enforce: str = "semantic_repair"
-
-
-@dataclass(frozen=True)
-class CellRequest:
-    """Everything one (task, arm) cell needs; threaded through runners."""
-
-    task_path: Path
-    task: Task
-    arm: str
-    driver: str
-    cell: Path
-    model: str
-    host: str
-    run_id: str
-    profile: BackendProfile | None = None
-    max_cell_tokens: int | None = None
-    usage: UsageAccumulator | None = None
-    backend_id: str = "local"
-    model_digest: str | None = None
-    use_cache: bool = True
-    cache_dir: Path | None = None
-    cache_stats: CacheStats | None = None
-    enforce: str = "semantic_repair"
-    repetition: int = 1
 
 
 def fixture_path(task_path: Path, task: Task) -> Path:
@@ -157,3 +113,60 @@ def fixture_fc(task_path: Path, task: Task) -> dict[str, Any]:
 
 def extract_iso(features: list[dict[str, Any]]) -> list[str]:
     return [f["properties"]["ISO_A3"] for f in features]
+
+
+class FilesystemCellWorkspace:
+    """Concrete ``CellWorkspace`` backed by the local cell directory."""
+
+    def load_fixture(self, task_path: Path, task: Task) -> dict[str, Any]:
+        return fixture_fc(task_path, task)
+
+    def stage_fixture(self, task_path: Path, task: Task, cell: Path) -> Path:
+        return stage_fixture_input(task_path, task, cell)
+
+    def append_transcript(self, cell: Path, record: dict[str, Any]) -> None:
+        append_transcript(cell, record)
+
+    def write_deliverable(self, cell: Path, task: Task, payload: Any) -> Path:
+        return write_deliverable(cell, task, payload)
+
+
+class SubprocessCodeSandbox:
+    """Concrete ``CodeSandbox`` executing Python in an isolated scrubbed subprocess."""
+
+    def execute(self, code: str, cell: Path, timeout_s: int = 120) -> SandboxExecution:
+        completed = run_python_sandboxed(code, cell, timeout_s=timeout_s)
+        return SandboxExecution(
+            returncode=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+        )
+
+
+class HttpChatGateway:
+    """Concrete ``ChatGateway`` over an OpenAI-compatible HTTP session."""
+
+    def __init__(self, profile: BackendProfile) -> None:
+        self._profile = profile
+        self._session = backends.build_session(profile)
+
+    @property
+    def temperature(self) -> float:
+        return self._profile.temperature
+
+    @property
+    def max_tokens(self) -> int:
+        return self._profile.max_tokens
+
+    def complete(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        return backends.chat_completions(self._session, self._profile, messages, tools)
+
+    def parse_turn(self, reply: dict[str, Any]) -> ChatTurn:
+        return backends.parse_chat_turn(reply)
+
+    def close(self) -> None:
+        self._session.close()

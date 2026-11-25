@@ -20,4 +20,6 @@ def test_package_imports() -> None:
     assert callable(scoring.score_cell)
     assert callable(runners.ollama_arm_a)
     assert callable(runners.scripted_arm_a)
-    assert harness_io.CellRequest is not None
+    assert runners.CellRequest is not None
+    assert runners.HarnessPorts is not None
+    assert callable(harness_io.run_python_sandboxed)

@@ -53,7 +53,7 @@ recorded below with the study pin on the GitHub Actions runner (`GEO-011`).
 
 ### Frozen arm B system prompt (ratified 2026-11-24)
 
-- **Source:** `experiment/src/experiment/services/runners/ollama.py` (`_ARM_B_SYSTEM`)
+- **Source:** `experiment/src/experiment/domain/prompts.py` (`ARM_B_SYSTEM_PROMPT`)
 - **Length:** 418 bytes (UTF-8)
 - **SHA-256:** `5c44378126c5b889a159b7524ea83bf0d365f45854ee2559b38230851ac1c985`
 

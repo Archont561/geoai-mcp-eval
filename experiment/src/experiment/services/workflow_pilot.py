@@ -8,9 +8,10 @@ from typing import Literal
 
 from experiment.adapters import backends, paths, run_store
 from experiment.adapters import ollama as ollama_adapter
-from experiment.adapters.harness_io import CellRequest, append_transcript
+from experiment.adapters.harness_io import append_transcript
 from experiment.adapters.task_repository import find_task_file, load_task
 from experiment.services import runs as runs_service
+from experiment.services.runners.ports import CellRequest
 
 OLLAMA_API = ollama_adapter.DEFAULT_BASE_URL
 
