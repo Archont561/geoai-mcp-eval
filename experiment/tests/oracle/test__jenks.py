@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
 from experiment.oracle._jenks import jenks_assignments
@@ -40,40 +40,57 @@ def test_jenks_assignments_maps_every_feature_to_ordered_class(
     assert all(1 <= cls <= k for cls in assignments.values())
 
 
-def test_jenks_assignments_classifies_geojson_fixture_and_rejects_bad_rows(
-    tmp_path: Path,
+@settings(max_examples=30, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@example(start=1, gap=99)
+@given(start=st.integers(-10000, 10000), gap=st.integers(min_value=3, max_value=10000))
+def test_jenks_assignments_separates_well_spaced_pairs(
+    tmp_path: Path, start: int, gap: int
 ) -> None:
     fixture = tmp_path / "pops.geojson"
+    values = [start, start + 1, start + gap, start + gap + 1]
     fixture.write_text(
         json.dumps(
             {
                 "type": "FeatureCollection",
                 "features": [
-                    {"type": "Feature", "properties": {"id": "a", "val": 1.0}, "geometry": None},
-                    {"type": "Feature", "properties": {"id": "b", "val": 2.0}, "geometry": None},
-                    {"type": "Feature", "properties": {"id": "c", "val": 100.0}, "geometry": None},
-                    {"type": "Feature", "properties": {"id": "d", "val": 101.0}, "geometry": None},
+                    {"type": "Feature", "properties": {"id": name, "val": value}, "geometry": None}
+                    for name, value in zip(("a", "b", "c", "d"), values, strict=True)
                 ],
             }
         ),
         encoding="utf-8",
     )
     breaks, assignments = jenks_assignments(fixture, "id", "val", 2)
-    assert breaks == [2.0, 101.0]
+    assert breaks == [float(start + 1), float(start + gap + 1)]
     assert assignments == {"a": 1, "b": 1, "c": 2, "d": 2}
 
-    dup = tmp_path / "dup.geojson"
-    dup.write_text(
+
+@settings(max_examples=30, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@example(identifier="a", first=1, second=2)
+@given(
+    identifier=st.text(min_size=1, max_size=20),
+    first=st.integers(-1000, 1000),
+    second=st.integers(-1000, 1000),
+)
+def test_jenks_assignments_rejects_duplicate_identifiers(
+    tmp_path: Path, identifier: str, first: int, second: int
+) -> None:
+    fixture = tmp_path / "dup.geojson"
+    fixture.write_text(
         json.dumps(
             {
                 "type": "FeatureCollection",
                 "features": [
-                    {"type": "Feature", "properties": {"id": "a", "val": 1.0}, "geometry": None},
-                    {"type": "Feature", "properties": {"id": "a", "val": 2.0}, "geometry": None},
+                    {
+                        "type": "Feature",
+                        "properties": {"id": identifier, "val": value},
+                        "geometry": None,
+                    }
+                    for value in (first, second)
                 ],
             }
         ),
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="unique"):
-        jenks_assignments(dup, "id", "val", 2)
+        jenks_assignments(fixture, "id", "val", 2)

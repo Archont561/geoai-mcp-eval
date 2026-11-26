@@ -1,30 +1,44 @@
-@plugin @action-surface
-Feature: Greeting the user from inside QGIS
-  The plugin's actions are its public surface: QGIS menus and the session
-  panel reach the plugin only through them, and a host that asks for an action
-  the plugin never declared must fail loudly rather than silently succeed.
+@plugin
+Feature: Plugin availability in QGIS
+  The plugin offers a greeting and makes session controls available to the host.
 
   Background:
     Given the Experiment Plugin is loaded
 
-  Scenario: An action greets a person by name
-    When I call the "hello" action with name "world"
-    Then the action replies "Hello, world!"
+  Rule: The greeting responds to the name supplied
 
-  Scenario: A missing name still produces a greeting
-    When I call the "hello" action with no name
-    Then the action replies "Hello, !"
+    Scenario: A participant receives a personal greeting
+      Given the plugin is ready to receive requests
+      When I request a greeting for "world"
+      Then the greeting says "Hello, world!"
 
-  Scenario: The plugin exposes exactly its documented actions
-    Then the plugin offers the actions "abandon_session, end_session, hello, log_manual_action, log_note, review_session, show_timer, start_session"
+    @edge_case
+    Scenario: An empty name still produces a greeting
+      Given the plugin is ready to receive requests
+      When I request a greeting without a name
+      Then the greeting says "Hello, !"
 
-  Scenario: Asking for an action the plugin never declared is an error
-    When I call the undeclared action "missing"
-    Then the call fails with a lookup error
+  Rule: The host can discover the plugin's supported capabilities
 
-  Scenario: The session panel is registered as a surface the host can open
-    Then the plugin registers a "session_panel_dialog" surface
+    Scenario: All documented actions are available
+      Given the plugin is ready to receive requests
+      When the host discovers the plugin's actions
+      Then exactly the documented actions are available
 
-  Scenario: The plugin shuts down cleanly
-    When the plugin unloads
-    Then the plugin reports itself as stopped
+    Scenario: The host can open the session panel
+      Given the plugin is ready to receive requests
+      When the host discovers the plugin's panels
+      Then the session panel is available
+
+    @edge_case
+    Scenario: An unsupported action is rejected
+      Given the plugin is ready to receive requests
+      When the host requests an unsupported action
+      Then the request is rejected
+
+  Rule: Unloading stops the plugin
+
+    Scenario: The plugin shuts down cleanly
+      Given the plugin is ready to receive requests
+      When the plugin unloads
+      Then the plugin reports itself as stopped

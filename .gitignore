@@ -4,10 +4,6 @@
 .rumdl_cache/
 .tasknest/
 docs/_build/
-.vale/styles/Google/
-.vale/styles/Microsoft/
-.vale/styles/proselint/
-.vale/styles/write-good/
 
 # JavaScript tooling installed with Bun
 node_modules/

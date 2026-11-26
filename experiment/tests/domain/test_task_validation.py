@@ -21,34 +21,38 @@ from experiment.domain.task_validation import (
 )
 
 
-def test_domain_task_validation_pure_helpers() -> None:
-    bad_fc = validate_fixture_document("t1", "f.geojson", {"type": "Point"})
+@given(
+    country=st.text(alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZ", min_size=1, max_size=3),
+    task_id=st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789", min_size=1, max_size=15),
+)
+def test_domain_task_validation_pure_helpers(country: str, task_id: str) -> None:
+    bad_fc = validate_fixture_document(task_id, "f.geojson", {"type": "Point"})
     assert bad_fc is not None and "FeatureCollection" in bad_fc.message
     dup_id = validate_fixture_document(
-        "t1",
+        task_id,
         "f.geojson",
         {
             "type": "FeatureCollection",
             "features": [
-                {"properties": {"ISO_A3": "POL"}},
-                {"properties": {"ISO_A3": "POL"}},
+                {"properties": {"ISO_A3": country}},
+                {"properties": {"ISO_A3": country}},
             ],
         },
     )
     assert dup_id is not None and "ISO_A3" in dup_id.message
     assert (
         validate_fixture_document(
-            "t1",
+            task_id,
             "f.geojson",
-            {"type": "FeatureCollection", "features": [{"properties": {"ISO_A3": "POL"}}]},
+            {"type": "FeatureCollection", "features": [{"properties": {"ISO_A3": country}}]},
         )
         is None
     )
 
-    unknown = validate_assertion_semantics("t1", {"id": "a1", "type": "bogus"})
+    unknown = validate_assertion_semantics(task_id, {"id": "a1", "type": "bogus"})
     assert len(unknown) == 1 and "unimplemented" in unknown[0].message
     bad_rel = validate_assertion_semantics(
-        "t1",
+        task_id,
         {
             "id": "a2",
             "type": "de9im_relation",
@@ -69,8 +73,8 @@ def test_domain_task_validation_pure_helpers() -> None:
 
     traps, issues = validate_suite_coverage(
         [
-            ("a.yaml", {"id": "t1", "family": "P", "required_traps": ["crs-axis-order"]}),
-            ("b.yaml", {"id": "t1", "family": "P", "required_traps": []}),
+            ("a.yaml", {"id": task_id, "family": "P", "required_traps": ["crs-axis-order"]}),
+            ("b.yaml", {"id": task_id, "family": "P", "required_traps": []}),
         ],
         "suite",
     )
@@ -97,9 +101,13 @@ def test_validation_report_passed_iff_no_issues_and_roundtrips(
     assert ValidationReport.model_validate_json(report.model_dump_json()) == report
 
 
-def test_validation_issue_forbids_extra_fields() -> None:
+@given(
+    path=st.text(min_size=1, max_size=30),
+    extra=st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=20),
+)
+def test_validation_issue_forbids_extra_fields(path: str, extra: str) -> None:
     with pytest.raises(ValidationError):
-        ValidationIssue(path="x", message="y", extra=1)  # type: ignore[call-arg]
+        ValidationIssue.model_validate({"path": path, "message": "y", f"extra_{extra}": 1})
 
 
 @given(oracle_type=st.sampled_from(list(OracleAssertionType)))

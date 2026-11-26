@@ -14,7 +14,7 @@ description: >-
 pixi install --locked        # environment from the committed pixi.lock
 pixi run tools ls            # task graph sanity
 pixi run tools check         # alint + ruff + pytest + rumdl (offline gate)
-pixi run tools run prose     # Vale prose gate (downloads presets; network required)
+pixi run tools run prose     # Vale prose gate (uses vendored presets)
 ```
 
 - **pixi only** for Python environments. No `uv`, `pip`, `requirements.txt`, `venv`.

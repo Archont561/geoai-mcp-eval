@@ -18,8 +18,9 @@ from experiment.domain.backend import (
 )
 
 
-def test_profile_defaults() -> None:
-    profile = BackendProfile(base_url="http://127.0.0.1:11434", model="m")
+@given(model=st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789", min_size=1, max_size=32))
+def test_profile_defaults(model: str) -> None:
+    profile = BackendProfile(base_url="http://127.0.0.1:11434", model=model)
     assert profile.max_tokens == 2048
     assert profile.temperature == 0.0
     assert profile.retries == 3
@@ -27,14 +28,20 @@ def test_profile_defaults() -> None:
     assert profile.chat_url == "http://127.0.0.1:11434/v1/chat/completions"
 
 
-def test_chat_url_keeps_existing_v1_suffix() -> None:
-    profile = BackendProfile(base_url="http://h:11434/v1/", model="m")
-    assert profile.chat_url == "http://h:11434/v1/chat/completions"
+@given(
+    host=st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=15),
+    slash=st.sampled_from(["", "/"]),
+)
+def test_chat_url_keeps_existing_v1_suffix(host: str, slash: str) -> None:
+    profile = BackendProfile(base_url=f"http://{host}:11434/v1{slash}", model="m")
+    assert profile.chat_url == f"http://{host}:11434/v1/chat/completions"
 
 
-def test_unknown_key_rejected() -> None:
+@given(extra=st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=20))
+def test_unknown_key_rejected(extra: str) -> None:
+    fields = {"base_url": "http://h", "model": "m", f"unexpected_{extra}": 1}
     with pytest.raises(ValidationError):
-        BackendProfile(base_url="http://h", model="m", bogus=1)  # type: ignore[call-arg]
+        BackendProfile.model_validate(fields)
 
 
 @given(
@@ -78,9 +85,15 @@ def test_normalize_host_strips_trailing_slashes_idempotently(host: str, slashes:
     assert normalize_host(normalized) == normalized
 
 
-def test_backend_error_formats_message() -> None:
-    err = BackendError("transport", "boom")
-    assert "boom" in str(err)
+@given(
+    error_class=st.text(min_size=1, max_size=30),
+    detail=st.text(min_size=1, max_size=100),
+)
+def test_backend_error_formats_message(error_class: str, detail: str) -> None:
+    err = BackendError(error_class, detail)
+    assert str(err) == f"{error_class}: {detail}"
+    assert err.error_class == error_class
+    assert err.detail == detail
 
 
 @given(kind=st.sampled_from(list(BackendProbeErrorKind)))

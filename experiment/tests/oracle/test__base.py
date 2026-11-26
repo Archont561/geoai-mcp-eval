@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
@@ -49,12 +49,26 @@ def test_oracle_models_to_dict_and_roundtrip_for_arbitrary_verdicts(
     assert DeterminismReport.model_validate_json(report.model_dump_json()) == report
 
 
-def test_oracle_models_reject_extra_fields_and_negative_runs() -> None:
+@given(
+    assertion_id=st.text(min_size=1, max_size=24),
+    negative_runs=st.integers(max_value=-1),
+    extra=st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=12),
+)
+def test_oracle_models_reject_extra_fields_and_negative_runs(
+    assertion_id: str, negative_runs: int, extra: str
+) -> None:
     with pytest.raises(ValidationError):
-        AssertionResult(assertion_id="c1", passed=True, message="ok", bogus=1)  # type: ignore[call-arg]
+        AssertionResult.model_validate(
+            {
+                "assertion_id": assertion_id,
+                "passed": True,
+                "message": "ok",
+                f"extra_{extra}": 1,
+            }
+        )
     with pytest.raises(ValidationError):
         DeterminismReport(
-            passed=False, required_runs=-1, consistent=False, run_results=(), issues=()
+            passed=False, required_runs=negative_runs, consistent=False, run_results=(), issues=()
         )
 
 
@@ -66,16 +80,25 @@ def test_safe_path_contains_arbitrary_relative_paths(tmp_path: Path, segments: l
     assert resolved.is_relative_to(tmp_path.resolve())
 
 
-def test_safe_path_read_json_and_geojson_features(tmp_path: Path) -> None:
-    target = tmp_path / "data.geojson"
-    target.write_text(json.dumps({"type": "FeatureCollection", "features": []}), encoding="utf-8")
-    assert safe_path(tmp_path, "data.geojson") == target.resolve()
-    assert read_json(target) == {"type": "FeatureCollection", "features": []}
-    assert geojson_features(target) == []
+@settings(max_examples=30, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@example(name="data", payload=[])
+@given(
+    name=PATH_SEG,
+    payload=st.lists(st.dictionaries(st.text(max_size=10), st.integers(), max_size=4), max_size=5),
+)
+def test_safe_path_read_json_and_geojson_features(
+    tmp_path: Path, name: str, payload: list[dict[str, int]]
+) -> None:
+    target = tmp_path / f"{name}.geojson"
+    document = {"type": "FeatureCollection", "features": payload}
+    target.write_text(json.dumps(document), encoding="utf-8")
+    assert safe_path(tmp_path, target.name) == target.resolve()
+    assert read_json(target) == document
+    assert geojson_features(target) == payload
 
     bad = tmp_path / "bad.geojson"
     bad.write_text(json.dumps({"type": "Feature", "features": []}), encoding="utf-8")
     with pytest.raises(ValueError, match="escapes"):
-        safe_path(tmp_path, "../outside.json")
+        safe_path(tmp_path, f"../{name}.json")
     with pytest.raises(ValueError, match="FeatureCollection"):
         geojson_features(bad)

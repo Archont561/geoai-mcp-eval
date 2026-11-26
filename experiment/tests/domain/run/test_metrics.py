@@ -3,49 +3,60 @@
 from __future__ import annotations
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from experiment.domain.run.metrics import _TranscriptTally, extract_transcript_metrics
 
 
-def test_extract_transcript_metrics_counts_calls_repairs_and_violations() -> None:
+@example(tool_count=2, violations=1, input_tokens=120, output_tokens=40, llm_calls=2)
+@given(
+    tool_count=st.integers(min_value=0, max_value=10),
+    violations=st.integers(min_value=0, max_value=10),
+    input_tokens=st.integers(min_value=0, max_value=10000),
+    output_tokens=st.integers(min_value=0, max_value=10000),
+    llm_calls=st.integers(min_value=0, max_value=100),
+)
+def test_extract_transcript_metrics_counts_calls_repairs_and_violations(
+    tool_count: int, violations: int, input_tokens: int, output_tokens: int, llm_calls: int
+) -> None:
     entries = [
         {"role": "meta", "task": "analysis-de9im-001"},
         {
             "role": "assistant",
-            "content": "",
             "tool_calls": [
-                {"id": "1", "function": {"name": "filter_features", "arguments": "{}"}},
-                {"id": "2", "function": {"name": "relate_de9im", "arguments": "{}"}},
+                {"id": str(i), "function": {"name": "feature_info", "arguments": "{}"}}
+                for i in range(tool_count)
             ],
         },
-        {"role": "tool", "tool_name": "filter_features", "error_code": "INVALID_SCHEMA"},
-        {"role": "assistant", "content": '{"relation": "touches", "de9im": "FF2F11212"}'},
+    ]
+    for _ in range(violations):
+        entries.extend(
+            [
+                {"role": "tool", "error_code": "INVALID_SCHEMA"},
+                {"role": "assistant", "content": "corrected"},
+            ]
+        )
+    entries.append(
         {
             "role": "harness",
             "event": "usage_summary",
             "usage": {
-                "input_tokens": 120,
-                "output_tokens": 40,
-                "total_tokens": 160,
-                "llm_calls": 2,
-                "calls_with_usage": 2,
-                "calls_missing_usage": 0,
-                "max_cell_tokens": None,
-                "cap_exceeded": False,
-                "warnings": [],
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": input_tokens + output_tokens,
+                "llm_calls": llm_calls,
             },
-        },
-    ]
+        }
+    )
     metrics = extract_transcript_metrics(entries, wall_seconds=3.25)
     assert metrics.wall_seconds == 3.25
-    assert metrics.llm_calls == 2
-    assert metrics.tool_calls == 2
-    assert metrics.schema_violations == 1
-    assert metrics.repair_turns == 1
-    assert metrics.tokens.total_tokens == 160
+    assert metrics.llm_calls == llm_calls
+    assert metrics.tool_calls == tool_count
+    assert metrics.schema_violations == violations
+    assert metrics.repair_turns == violations
+    assert metrics.tokens.total_tokens == input_tokens + output_tokens
 
     empty = extract_transcript_metrics([])
     assert empty.llm_calls == 0

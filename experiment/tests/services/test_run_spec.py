@@ -40,12 +40,13 @@ def test_parse_run_spec_rejects_non_positive_repetitions(bad_reps: int) -> None:
         parse_run_spec(RunSpecInput(driver="scripted", repetitions=bad_reps))
 
 
-def test_parse_run_spec_and_enforce_error_paths() -> None:
+@given(invalid=st.text(alphabet="xyz0123456789", min_size=1, max_size=15))
+def test_parse_run_spec_and_enforce_reject_unknown_values(invalid: str) -> None:
     assert parse_enforce("N2") == "syntactic"
     assert parse_enforce("semantic_repair") == "semantic_repair"
     with pytest.raises(RunSpecError):
-        parse_enforce("N9")
+        parse_enforce(invalid)
     with pytest.raises(RunSpecError, match="driver"):
-        parse_run_spec(RunSpecInput(driver="bogus"))
+        parse_run_spec(RunSpecInput(driver=invalid))
     with pytest.raises(ValidationError):
-        RunSpecInput(driver="scripted", bogus=1)  # type: ignore[call-arg]
+        RunSpecInput.model_validate({"driver": "scripted", "bogus": invalid})

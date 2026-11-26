@@ -150,10 +150,19 @@ markers = [
   "session-panel: the timer and logs panel",
   "host-observation: QGIS project and canvas hooks",
   "pilot: the pilot task suite and the determinism gate",
-  "analysis: analysis-ready data preparation",
+  "analysis: analysis-ready data preparation and GitHub run loading",
   "proto: prototype runs, scoring, and the MCP self-test",
-  "workflow: the end-to-end pass from suite check to predicate matrix",
+  "workflow: the end-to-end pass from suite check to archive bundle",
   "qgis: the PyQGIS sandbox availability check and script runner",
+  "qgis_sandbox: isolated GIS script execution gate",
+  "tasks: task suite discovery and schema validation",
+  "oracle: automated spatial and cartographic grading",
+  "runs: paradigm execution, token accounting, and response caching",
+  "archive: run archive packing, merging, tamper checks, and inspection",
+  "preflight: remote backend verification, tunnels, and diagnostics",
+  "review: non-destructive human-baseline session review",
+  "smoke: fast end-to-end sanity checks",
+  "edge_case: negative paths, error diagnostics, and boundary conditions",
 ]
 
 [tool.coverage.run]

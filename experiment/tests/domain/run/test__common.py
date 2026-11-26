@@ -25,21 +25,54 @@ from experiment.domain.run import (
 )
 
 
-def test_legacy_mappers_translate_arms_and_enforcement_levels() -> None:
-    assert arm_to_paradigm("A") == "typed_mcp"
-    assert arm_to_paradigm("B") == "codegen"
-    assert arm_to_paradigm("C") == "hybrid_mcp_code"
-    assert arm_to_paradigm("D") == "code_driving_mcp"
-    assert arm_to_paradigm("H") == "human_gui"
-    assert enforce_code_to_level("N0") == "none"
-    assert enforce_code_to_level("N1") == "declarative"
-    assert enforce_code_to_level("N2") == "syntactic"
-    assert enforce_code_to_level("N3") == "semantic_repair"
-    assert enforce_code_to_level("N4") == "transactional"
+@given(
+    pair=st.sampled_from(
+        [
+            ("A", "typed_mcp"),
+            ("B", "codegen"),
+            ("C", "hybrid_mcp_code"),
+            ("D", "code_driving_mcp"),
+            ("H", "human_gui"),
+        ]
+    ),
+    lowercase=st.booleans(),
+)
+def test_legacy_arm_mappings(pair: tuple[str, str], lowercase: bool) -> None:
+    arm, expected = pair
+    assert arm_to_paradigm(arm.lower() if lowercase else arm) == expected
+
+
+@given(
+    pair=st.sampled_from(
+        [
+            ("N0", "none"),
+            ("N1", "declarative"),
+            ("N2", "syntactic"),
+            ("N3", "semantic_repair"),
+            ("N4", "transactional"),
+        ]
+    ),
+    lowercase=st.booleans(),
+)
+def test_legacy_enforcement_mappings(pair: tuple[str, str], lowercase: bool) -> None:
+    code, expected = pair
+    token = code.lower() if lowercase else code
+    assert enforce_code_to_level(token) == expected
+    assert parse_enforcement_level(token) == expected
+
+
+@given(unknown=st.text(alphabet="efgijklmopqrstuvwxyz", min_size=1, max_size=8))
+def test_legacy_arm_rejects_unknown_codes(unknown: str) -> None:
     with pytest.raises(ValueError, match="unknown arm"):
-        arm_to_paradigm("Z")
+        arm_to_paradigm(unknown)
+
+
+@given(index=st.integers(min_value=5, max_value=9999))
+def test_enforcement_rejects_unknown_codes(index: int) -> None:
     with pytest.raises(ValueError, match="unknown enforcement"):
-        enforce_code_to_level("N9")
+        enforce_code_to_level(f"N{index}")
+    with pytest.raises(ValueError):
+        parse_enforcement_level(f"N{index}")
 
 
 @given(
@@ -55,35 +88,43 @@ def test_parse_enforcement_level_normalizes_whitespace_and_case(
     assert parse_enforcement_level(raw) == level
 
 
-def test_parse_enforcement_level_accepts_legacy_codes_and_rejects_unknown() -> None:
-    assert parse_enforcement_level("N0") == "none"
-    assert parse_enforcement_level("n3") == "semantic_repair"
-    with pytest.raises(ValueError):
-        parse_enforcement_level("N9")
-
-
 @given(status=st.sampled_from(["ok", "error", "aborted", "smoke"]))
 def test_parse_execution_status_is_case_insensitive_for_valid_statuses(status: str) -> None:
     assert parse_execution_status(status) == status
     assert parse_execution_status(status.upper()) == status
 
 
-def test_parse_execution_status_normalizes_mock_smoke_and_fallback() -> None:
-    assert parse_execution_status("mock-smoke") == "smoke"
+@given(
+    fallback=st.sampled_from(["ok", "error", "aborted", "smoke"]),
+    unknown=st.text(alphabet="xyz-", min_size=1, max_size=12),
+)
+def test_status_alias_and_fallback(fallback: str, unknown: str) -> None:
+    assert parse_execution_status("mock-smoke", default=fallback) == "smoke"
     assert parse_execution_status("unknown-status") == "ok"
-    assert parse_execution_status(None, default="error") == "error"
+    assert parse_execution_status(unknown, default=fallback) == fallback
+    assert parse_execution_status(None, default=fallback) == fallback
 
 
-def test_infer_assertion_tier_maps_legacy_letters_and_types() -> None:
-    assert infer_assertion_tier("geojson_feature_count") == "trivial"
-    assert infer_assertion_tier("representative_point_matches") == "spatial"
-    assert infer_assertion_tier("de9im_relation") == "spatial"
-    assert infer_assertion_tier("jenks_classification") == "value"
-    assert infer_assertion_tier("custom_type", explicit_tier="A") == "trivial"
-    assert infer_assertion_tier("custom_type", explicit_tier="B") == "spatial"
-    assert infer_assertion_tier("custom_type", explicit_tier="C") == "value"
-    assert infer_assertion_tier("custom_type", explicit_tier="spatial") == "spatial"
-    assert infer_assertion_tier("unknown_type") is None
+@given(
+    pair=st.sampled_from(
+        [
+            ("geojson_feature_count", None, "trivial"),
+            ("representative_point_matches", None, "spatial"),
+            ("de9im_relation", None, "spatial"),
+            ("jenks_classification", None, "value"),
+            ("custom_type", "A", "trivial"),
+            ("custom_type", "B", "spatial"),
+            ("custom_type", "C", "value"),
+            ("custom_type", "spatial", "spatial"),
+            ("unknown_type", None, None),
+        ]
+    )
+)
+def test_assertion_tier_maps_known_types_and_legacy_aliases(
+    pair: tuple[str, str | None, str | None],
+) -> None:
+    assertion_type, explicit_tier, expected = pair
+    assert infer_assertion_tier(assertion_type, explicit_tier=explicit_tier) == expected
 
 
 @given(level=st.sampled_from(list(EnforcementLevel)))

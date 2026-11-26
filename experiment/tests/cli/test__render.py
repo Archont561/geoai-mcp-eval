@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from hypothesis import example, given
+from hypothesis import strategies as st
 from rich.console import Console
 
 from experiment.cli._render import print_score_table
 from experiment.services.reports import CellSummary, CheckView, RunSummary
 
 
-def test_print_score_table_renders_summary() -> None:
+@example(task_id="analysis-de9im-001")
+@given(task_id=st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789-", min_size=1, max_size=20))
+def test_print_score_table_renders_summary(task_id: str) -> None:
     console = Console(record=True)
     summary = RunSummary(
         run_id="r1",
@@ -18,7 +22,7 @@ def test_print_score_table_renders_summary() -> None:
         generated_at="2026-11-25T00:00:00Z",
         cells=(
             CellSummary(
-                task="analysis-de9im-001",
+                task=task_id,
                 arm="A",
                 status="ok",
                 oracle_passed=True,
@@ -31,5 +35,5 @@ def test_print_score_table_renders_summary() -> None:
     )
     print_score_table(console, summary)
     rendered = console.export_text()
-    assert "analysis-de9im-001" in rendered
+    assert task_id in rendered
     assert "1/1 cells oracle-passed" in rendered

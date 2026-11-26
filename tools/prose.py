@@ -9,8 +9,7 @@ PROSE_TARGETS = ["README.md", "AGENTS.md", "docs", "experiment/features"]
 
 @tool(description="Lint Markdown and MDX prose with Vale style presets.")
 def prose(ctx: ToolContext) -> None:
-    """Install configured Vale packages, report every alert, then gate on errors."""
-    ctx.run(["vale", "sync"])
+    """Report every alert using the vendored Vale styles, then gate on errors."""
     # Two passes over the same targets. The first is the advisory report: every warning
     # and error, with `--no-exit` so readability advice cannot fail the build. The second
     # is the gate: only `error`-level alerts are shown and Vale's own exit code stands, so

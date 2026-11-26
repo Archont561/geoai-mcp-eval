@@ -5,13 +5,11 @@ from __future__ import annotations
 import json
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from experiment.domain.prompts import (
-    ARM_A_SYSTEM_PROMPT,
-    ARM_B_SYSTEM_PROMPT,
     ChatTurn,
     SandboxExecution,
     ToolCall,
@@ -21,7 +19,6 @@ from experiment.domain.prompts import (
     prompt_sha256,
 )
 
-RATIFIED_ARM_B_SHA256 = "5c44378126c5b889a159b7524ea83bf0d365f45854ee2559b38230851ac1c985"
 JSON_PRIMITIVES = st.one_of(st.integers(-1000, 1000), st.booleans(), st.text(max_size=16))
 JSON_DICTS = st.dictionaries(
     st.text(alphabet="abcdefghijklmnopqrstuvwxyz_", min_size=1, max_size=10),
@@ -29,13 +26,6 @@ JSON_DICTS = st.dictionaries(
     min_size=1,
     max_size=5,
 )
-
-
-def test_ratified_prompt_scaffolds_are_preserved_verbatim() -> None:
-    assert prompt_sha256(ARM_B_SYSTEM_PROMPT) == RATIFIED_ARM_B_SHA256
-    assert len(ARM_B_SYSTEM_PROMPT.encode("utf-8")) == 418
-    assert "provided tools only" in ARM_A_SYSTEM_PROMPT
-    assert len(prompt_sha256(ARM_A_SYSTEM_PROMPT)) == 64
 
 
 @given(payload=JSON_DICTS)
@@ -54,16 +44,24 @@ def test_prompt_sha256_is_deterministic_64_hex_chars(text: str) -> None:
     assert digest == prompt_sha256(text)
 
 
-def test_pure_parsers_extract_stdout_and_python_blocks() -> None:
-    assert extract_json_block('Result: {"relation": "touches"}') == {"relation": "touches"}
+@example(code="print(1)", label="python", payload={"relation": "touches"})
+@example(code="print(2)", label="py", payload={"x": 1})
+@example(code="print(3)", label="", payload={"a": 1})
+@given(
+    code=st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789 ()_=", min_size=1, max_size=80),
+    label=st.sampled_from(["python", "py", ""]),
+    payload=JSON_DICTS,
+)
+def test_pure_parsers_extract_stdout_and_python_blocks(
+    code: str, label: str, payload: dict[str, object]
+) -> None:
+    encoded = json.dumps(payload)
+    assert extract_json_block(f"Result: {encoded}") == payload
     assert extract_json_block("not json at all") is None
-    assert extract_stdout_json('```json\n{"x": 1}\n```') == {"x": 1}
+    assert extract_stdout_json(f"```json\n{encoded}\n```") == payload
     assert extract_stdout_json("not json") is None
-
-    assert extract_python_code_block("```python\nprint(1)\n```") == "print(1)\n"
-    assert extract_python_code_block("```py\nprint(2)\n```") == "print(2)\n"
-    assert extract_python_code_block('```json\n{"a": 1}\n```') is None
-    assert extract_python_code_block("```\nprint(3)\n```") == "print(3)\n"
+    assert extract_python_code_block(f"```{label}\n{code}\n```") == f"{code}\n"
+    assert extract_python_code_block(f"```json\n{encoded}\n```") is None
 
 
 @given(

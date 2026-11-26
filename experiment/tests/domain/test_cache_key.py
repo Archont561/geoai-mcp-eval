@@ -52,24 +52,40 @@ def test_build_cache_key_is_deterministic_64_hex_chars(
     )
 
 
+@given(
+    backend=NON_EMPTY_TOKEN,
+    model_digest=NON_EMPTY_TOKEN,
+    content=st.text(max_size=50),
+    max_tokens=st.integers(min_value=1, max_value=16384),
+    temperature=st.sampled_from([0.0, 0.5, 1.0]),
+    blank=st.text(alphabet=" \t\n", max_size=12),
+)
 def test_build_cache_key_requires_model_digest_and_varies_with_all_inputs(
-    sample_cache_key_spec: CacheKeySpec,
+    backend: str, model_digest: str, content: str, max_tokens: int, temperature: float, blank: str
 ) -> None:
-    base = build_cache_key(sample_cache_key_spec)
-    variations = (
-        sample_cache_key_spec.model_copy(update={"backend_id": "remote-ollama"}),
-        sample_cache_key_spec.model_copy(update={"model_digest": "sha256:bbbb"}),
-        sample_cache_key_spec.model_copy(update={"messages": [{"role": "user", "content": "bye"}]}),
-        sample_cache_key_spec.model_copy(
-            update={"tools": [{"type": "function", "function": {"name": "x"}}]}
-        ),
-        sample_cache_key_spec.model_copy(update={"temperature": 0.5}),
-        sample_cache_key_spec.model_copy(update={"max_tokens": 1024}),
+    spec = CacheKeySpec(
+        backend_id=backend,
+        model_digest=model_digest,
+        messages=[{"role": "user", "content": content}],
+        tools=None,
+        temperature=temperature,
+        max_tokens=max_tokens,
     )
-    for varied in variations:
-        assert base != build_cache_key(varied)
+    base = build_cache_key(spec)
+    variations = (
+        {"backend_id": backend + "x"},
+        {"model_digest": model_digest + "x"},
+        {"messages": [{"role": "user", "content": content + "x"}]},
+        {"tools": [{"type": "function", "function": {"name": "x"}}]},
+        {"temperature": temperature + 0.25},
+        {"max_tokens": max_tokens + 1},
+    )
+    for update in variations:
+        assert base != build_cache_key(spec.model_copy(update=update))
     with pytest.raises(ValueError, match="model_digest"):
-        build_cache_key(sample_cache_key_spec.model_copy(update={"model_digest": "   "}))
+        build_cache_key(spec.model_copy(update={"model_digest": blank}))
+    with pytest.raises(ValueError, match="backend_id"):
+        build_cache_key(spec.model_copy(update={"backend_id": blank}))
 
 
 @given(events=st.lists(st.booleans(), max_size=25))
@@ -85,20 +101,35 @@ def test_cache_stats_tracks_hits_and_misses_accurately(events: list[bool]) -> No
     assert stats.all_hit is (expected_hits > 0 and expected_misses == 0)
 
 
+@given(
+    backend=NON_EMPTY_TOKEN,
+    model_digest=NON_EMPTY_TOKEN,
+    hits=st.integers(min_value=0, max_value=1000),
+    negative=st.integers(max_value=-1),
+    extra=st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=15),
+    content=st.text(max_size=50),
+)
 def test_cache_key_spec_and_stats_pydantic_validation_and_roundtrip(
-    sample_cache_key_spec: CacheKeySpec,
+    backend: str, model_digest: str, hits: int, negative: int, extra: str, content: str
 ) -> None:
-    reloaded = CacheKeySpec.model_validate_json(sample_cache_key_spec.model_dump_json())
-    assert reloaded == sample_cache_key_spec
+    spec = CacheKeySpec(
+        backend_id=backend,
+        model_digest=model_digest,
+        messages=[],
+        tools=None,
+        temperature=0.0,
+        max_tokens=100,
+    )
+    assert CacheKeySpec.model_validate_json(spec.model_dump_json()) == spec
     with pytest.raises(ValidationError):
-        CacheKeySpec(**sample_cache_key_spec.model_dump(), extra_field=1)  # type: ignore[call-arg]
+        CacheKeySpec.model_validate({**spec.model_dump(), f"extra_{extra}": 1})
     with pytest.raises(ValidationError):
-        sample_cache_key_spec.backend_id = "mutated"  # type: ignore[misc]
+        spec.backend_id = "mutated"  # type: ignore[misc]
 
     stats = CacheStats()
-    stats.hits += 2
-    assert stats.model_dump() == {"hits": 2, "misses": 0}
+    stats.hits += hits
+    assert stats.model_dump() == {"hits": hits, "misses": 0}
     with pytest.raises(ValidationError):
-        stats.hits = -1
-    assert is_cacheable_response({"choices": [{"message": {"content": "ok"}}]}) is True
-    assert is_cacheable_response({"error": "rate_limit"}) is False
+        stats.hits = negative
+    assert is_cacheable_response({"choices": [{"message": {"content": content}}]}) is True
+    assert is_cacheable_response({"error": content}) is False

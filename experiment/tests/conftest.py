@@ -13,15 +13,21 @@ from fakes import (  # noqa: F401
     fake_chat_gateway,
     fake_code_sandbox,
     fake_completion_cache,
+    fake_current_gis_host,
     fake_harness_ports,
     fake_http_response,
     fake_http_session,
+    fake_legacy_gis_host,
+    fake_missing_gis_host,
     fake_ollama_sdk_client,
     fake_openrouter_sdk_client,
+    fake_pygithub,
     fake_ssh_forwarder,
     fake_ssh_tunnel_adapter,
     fake_subprocess_runner,
     fake_tool_session,
+    http_backend_probe,
+    ok_http_session,
 )
 from fixtures import (  # noqa: F401
     backend_check_config,
@@ -45,3 +51,5 @@ from fixtures import (  # noqa: F401
     sample_trial,
     trial_record_factory,
 )
+
+pytest_plugins = ("task_suite_steps", "github_workflow_steps", "qgis_version_steps")

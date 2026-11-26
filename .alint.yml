@@ -120,9 +120,9 @@ rules:
 
   - id: require-experiment-qgis-plugin-tests
     kind: file_exists
-    paths: experiment-qgis-plugin/tests/test_plugin.py
+    paths: experiment-qgis-plugin/tests/test_plugin_scenarios.py
     level: error
-    message: "experiment-qgis-plugin/ must have tests/ with test_plugin.py."
+    message: "experiment-qgis-plugin/ must have tests/ with test_plugin_scenarios.py."
 
   - id: require-experiment-qgis-plugin-features
     kind: file_exists

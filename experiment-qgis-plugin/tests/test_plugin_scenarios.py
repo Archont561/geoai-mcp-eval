@@ -35,6 +35,7 @@ from plugin_harness import (
 from pytest_bdd import given, parsers, scenarios, then, when
 
 from experiment_plugin import plugin
+from experiment_plugin.session import sha256_file as session_sha256
 
 FEATURE_DIR = Path(__file__).resolve().parents[1] / "features"
 
@@ -59,6 +60,11 @@ def the_plugin_is_loaded_with_pilot_suite(pilot_tasks) -> PluginHandle:
     handle = PluginHandle()
     yield handle
     handle.unload()
+
+
+@given("the plugin is ready to receive requests")
+def plugin_is_ready(loaded: PluginHandle) -> None:
+    assert loaded.plugin.runtime.state.value == "running"
 
 
 # --- When: the action surface ------------------------------------------------
@@ -123,6 +129,65 @@ def the_plugin_registers_a_surface(surface_id: str) -> None:
 @then("the plugin reports itself as stopped")
 def the_plugin_reports_stopped(loaded: PluginHandle) -> None:
     assert loaded.plugin.runtime.state.value == "stopped"
+
+
+# The discovery assertions deliberately check the exact public contract while
+# keeping implementation identifiers out of the researcher-facing specification.
+@when(parsers.parse('I request a greeting for "{name}"'), target_fixture="reply")
+def request_greeting(loaded: PluginHandle, name: str) -> str:
+    assert loaded.plugin.runtime.state.value == "running"
+    return loaded.call("hello", name=name)
+
+
+@when("I request a greeting without a name", target_fixture="reply")
+def request_empty_greeting(loaded: PluginHandle) -> str:
+    return loaded.call("hello", name="")
+
+
+@then(parsers.parse('the greeting says "{expected}"'))
+def greeting_says(reply: str, expected: str) -> None:
+    assert reply == expected
+
+
+@when("the host discovers the plugin's actions")
+@when("the host discovers the plugin's panels")
+def host_discovers_plugin(loaded: PluginHandle) -> None:
+    assert loaded is not None
+
+
+@then("exactly the documented actions are available")
+def documented_actions(loaded: PluginHandle) -> None:
+    from qgis_sdk import describe
+
+    from experiment_plugin.plugin import app
+
+    expected_ids = [
+        "abandon_session",
+        "end_session",
+        "hello",
+        "log_manual_action",
+        "log_note",
+        "review_session",
+        "show_timer",
+        "start_session",
+    ]
+    assert sorted(loaded.actions) == expected_ids
+    assert [action.id for action in describe(app).actions] == expected_ids
+
+
+@then("the session panel is available")
+def session_panel_available() -> None:
+    the_plugin_registers_a_surface("session_panel_dialog")
+
+
+@when("the host requests an unsupported action", target_fixture="error")
+def request_unsupported_action(loaded: PluginHandle) -> Exception | None:
+    return call_undeclared_action(loaded, "missing")
+
+
+@then("the request is rejected")
+def request_rejected(error: Exception | None) -> None:
+    assert isinstance(error, KeyError)
 
 
 # --- When: sessions ----------------------------------------------------------
@@ -204,6 +269,7 @@ def the_session_dir_is_under_baselines(started: dict, pilot_tasks: Path) -> None
     assert started["output_dir"].name.startswith("session-")
 
 
+@then("the event log begins with the start of the session")
 @then("the event log opens with a session_start event")
 def the_log_opens_with_session_start(started: dict) -> None:
     first = read_events(started["output_dir"])[0]
@@ -240,6 +306,7 @@ def the_reply_counts_events(reply: str) -> None:
     assert "2 events so far" in reply
 
 
+@then("the session directory contains a human-reference record")
 @then("human-reference-record.json exists in the session directory")
 def the_record_exists(running: dict) -> None:
     assert (running["output_dir"] / "human-reference-record.json").is_file()
@@ -306,11 +373,13 @@ def the_record_hashes_outputs(running: dict) -> None:
 @then("the plugin reports no active session")
 def the_plugin_has_no_active_session() -> None:
     assert plugin._ACTIVE["session"] is None
+    assert plugin._active_session_error() is None
 
 
 @then("the start is refused because a session is already running")
-def the_start_is_refused(started: dict) -> None:
+def the_start_is_refused(started: dict, running: dict) -> None:
     assert started["reply"].startswith("session already active")
+    assert running["recorder"].task_id in started["reply"]
 
 
 @then("the plugin explains that the session cannot be started")
@@ -324,20 +393,24 @@ def the_log_records_abandonment(running: dict) -> None:
     assert "session_abandoned" in events
 
 
-@then("a session-abandoned marker exists in the session directory")
+@then("the abandonment marker records observation sources without claiming tools")
 def the_abandon_marker_exists(running: dict) -> None:
     import json
 
     marker = running["output_dir"] / "session-abandoned.json"
     payload = json.loads(marker.read_text(encoding="utf-8"))
     assert payload["record_written"] is False
+    assert payload["observation_sources"] == ["host:project", "note"]
+    assert "tools_used" not in payload
 
 
+@then("no human-reference record is written")
 @then("no human-reference-record.json is written")
 def no_record_is_written(running: dict) -> None:
     assert not (running["output_dir"] / "human-reference-record.json").exists()
 
 
+@then(parsers.parse('the task manifest keeps its baseline status as "{status}"'))
 @then(parsers.parse('the task manifest\'s human_baseline status stays "{status}"'))
 def the_manifest_status_is_unchanged(running: dict, status: str) -> None:
     import yaml
@@ -506,6 +579,7 @@ def stop_from_panel(panel_state: dict) -> dict:
     return panel_state
 
 
+@then("the panel's session has a human-reference record")
 @then("human-reference-record.json exists for the panel's session")
 def panel_session_has_record() -> None:
     last = plugin._LAST["session"]
@@ -579,6 +653,7 @@ def clock_is_fixed(stopped: dict) -> None:
     assert re.fullmatch(r"\d{2}:\d{2}:\d{2}", stopped["dialog"]._parts["elapsed_label"].text())
 
 
+@then("the log view shows that the session started")
 @then("the log view contains the session_start event")
 def log_view_has_start(panel_state: dict) -> None:
     assert "session_start" in panel_state["dialog"]._parts["log_edit"].toPlainText()
@@ -597,6 +672,7 @@ def export_log(panel_state: dict, tmp_path) -> dict:
     return {**panel_state, "target": target}
 
 
+@then("the exported readable log shows that the session started")
 @then("the exported file is a human-readable session log containing session_start")
 def export_is_readable(exported: dict) -> None:
     content = exported["target"].read_text(encoding="utf-8")
@@ -685,6 +761,7 @@ def actions_unavailable(panel_state: dict) -> None:
     assert "actions unavailable: boom" in panel_state["dialog"]._parts["status_label"].text()
 
 
+@when("I start a session from a panel that cannot start recording", target_fixture="panel_state")
 @when("I start a session from a panel whose start action raises", target_fixture="panel_state")
 def start_with_raising_action(loaded: PluginHandle, qt) -> dict:
     class _BrokenActions:
@@ -718,6 +795,105 @@ def panel_answers(panel_reply: str, expected: str) -> None:
     assert panel_reply == expected
 
 
+@when("I ask the panel for an unsupported action", target_fixture="panel_reply")
+def request_unknown_panel_action(loaded: PluginHandle, qt) -> str:
+    return dispatch_undeclared(loaded, qt, "no_such_action")
+
+
+@then("the panel explains that the action is unknown")
+def panel_explains_unknown_action(panel_reply: str) -> None:
+    assert panel_reply == "unknown action no_such_action"
+
+
+@given("a session started from a panel on a QGIS host", target_fixture="panel_host")
+def session_started_in_view(monkeypatch, loaded: PluginHandle, task_suite: Path) -> dict:
+    from qgis_sdk.ui.actions import ViewActions
+
+    project, canvas = FakeProject(), FakeCanvas()
+    install_host(monkeypatch, project=project, canvas=lambda: canvas)
+    runtime = loaded.plugin.runtime
+    scope = runtime.context.scope.child()
+    actions = ViewActions(runtime, view_id="session-panel", scope=scope)
+    actions.start_session(task_id=DEMO_TASK_ID, base_dir=str(task_suite))
+    recorder = plugin._ACTIVE["session"]
+    assert recorder is not None
+    return {"project": project, "canvas": canvas, "scope": scope, "recorder": recorder}
+
+
+@when("the starting panel closes and the project and map change")
+def close_view_and_change_host(panel_host: dict) -> None:
+    panel_host["scope"].close()
+    panel_host["project"].layersAdded.fire(["a"])
+    panel_host["canvas"].scaleChanged.fire(50000.0)
+
+
+@then("the session records both host changes")
+def record_host_changes_after_closing_view(panel_host: dict) -> None:
+    assert [event["event"] for event in read_events(panel_host["recorder"].output_dir)] == [
+        "session_start",
+        "layers_added",
+        "canvas_scale",
+    ]
+
+
+@then("the participant can still end the session")
+def end_after_closing_view(loaded: PluginHandle) -> None:
+    assert loaded.call("end_session").startswith("session ended")
+
+
+@given("a QGIS host with a delayed map observation", target_fixture="delayed_host")
+def delayed_map_observation(monkeypatch: pytest.MonkeyPatch) -> dict:
+    from threading import Event
+
+    canvas = FakeCanvas()
+    entered, release = Event(), Event()
+    extent = canvas.extent
+
+    def blocked_extent():
+        entered.set()
+        if not release.wait(5):
+            raise TimeoutError("host callback did not resume")
+        return extent()
+
+    monkeypatch.setattr(canvas, "extent", blocked_extent)
+    install_host(monkeypatch, project=FakeProject(), canvas=lambda: canvas)
+    return {"canvas": canvas, "entered": entered, "release": release}
+
+
+@when("the participant ends the session while the observation is in progress")
+def end_while_observing(delayed_host: dict, loaded: PluginHandle) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        observation = pool.submit(delayed_host["canvas"].extentsChanged.fire)
+        try:
+            assert delayed_host["entered"].wait(5)
+            ending = pool.submit(loaded.call, "end_session")
+            with pytest.raises(TimeoutError):
+                ending.result(timeout=0.2)
+        finally:
+            delayed_host["release"].set()
+        observation.result(timeout=5)
+        assert ending.result(timeout=5).startswith("session ended")
+
+
+@then("the observation is recorded before the session ends")
+def observation_precedes_end(running: dict) -> None:
+    assert [event["event"] for event in read_events(running["output_dir"])] == [
+        "session_start",
+        "canvas_extent",
+        "session_end",
+    ]
+
+
+@then("later host changes do not alter the completed evidence")
+def finished_evidence_immutable(delayed_host: dict, running: dict) -> None:
+    events_path = running["output_dir"] / "events.jsonl"
+    evidence = events_path.read_bytes()
+    delayed_host["canvas"].extentsChanged.fire()
+    assert events_path.read_bytes() == evidence
+
+
 # --- the QGIS host ----------------------------------------------------------
 
 START = 'I start a session for task "{task_id}"'
@@ -731,20 +907,20 @@ def host_with_project(monkeypatch: pytest.MonkeyPatch) -> dict:
 
 
 @given(
-    parsers.parse('a QGIS host with a project that only offers the "{signal}" signal'),
+    "a QGIS host with a project that only offers the legacy project-read notification",
     target_fixture="host",
 )
-def host_with_qgis3_project(monkeypatch: pytest.MonkeyPatch, signal: str) -> dict:
-    project = FakeProject(signal)
+def host_with_qgis3_project(monkeypatch: pytest.MonkeyPatch) -> dict:
+    project = FakeProject("projectRead")
     install_host(monkeypatch, project=project)
     return {"project": project}
 
 
 @given("a QGIS host with a project that offers no read signal", target_fixture="host")
 def host_without_read_signal(monkeypatch: pytest.MonkeyPatch) -> dict:
-    project = FakeProject(None)
-    install_host(monkeypatch, project=project)
-    return {"project": project}
+    project, canvas = FakeProject(None), FakeCanvas()
+    install_host(monkeypatch, project=project, canvas=lambda: canvas)
+    return {"project": project, "canvas": canvas}
 
 
 @given("a QGIS host with a map canvas and a running session", target_fixture="host")
@@ -1079,6 +1255,15 @@ def flood_project_crs_changes(host: dict, count: int) -> None:
         host["project"].crsChanged.fire()
 
 
+@then("the event log records the layer and project changes in order")
+def log_records_project_changes_in_order(running: dict) -> None:
+    log_records_layers_added(running)
+    log_records_layers_removed(running)
+    log_records_crs(running)
+    log_records_project_path(running)
+    project_observations_keep_source_and_order(running)
+
+
 @then("the event log records two layers added")
 def log_records_layers_added(running: dict) -> None:
     events = [e for e in read_events(running["output_dir"]) if e["event"] == "layers_added"]
@@ -1132,6 +1317,8 @@ def legacy_project_read_disconnected(host: dict, running: dict) -> None:
 def start_message_reports_missing_hook(running: dict) -> None:
     assert "host hooks: project (partial)" in running["reply"]
     assert "host hook failed: project_read: no project-read signal found" in running["reply"]
+    assert "canvas" in running["reply"]
+    assert session_sha256(running["recorder"].task_yaml) in running["reply"]
 
 
 @then("the event log records both project changes")
@@ -1464,6 +1651,7 @@ def event_log_contains_entries(running: dict, count: int) -> None:
 @then("the start message says no host hooks were connected")
 def start_message_has_no_hooks(started: dict) -> None:
     assert "host hooks: none" in started["reply"]
+    assert "host hook failed: project:" in started["reply"]
 
 
 @then("the start message lists the wired host hooks")
@@ -1817,6 +2005,7 @@ def record_captures_qgis4_versions(running: dict) -> None:
     }
 
 
+@then("the record leaves host software versions unknown")
 @then("the record leaves host software versions as null")
 def record_leaves_software_versions_null(running: dict) -> None:
     record = read_record(running["output_dir"])
@@ -1828,6 +2017,10 @@ def record_leaves_software_versions_null(running: dict) -> None:
     }
 
 
+@given(
+    "no task directory is configured and the working folder is inside a task checkout",
+    target_fixture="checkout",
+)
 @given(
     "no EXPERIMENT_TASK_DIR is configured and cwd is nested inside a task checkout",
     target_fixture="checkout",
@@ -1883,6 +2076,7 @@ def started_session_belongs_to_checkout(started: dict, checkout: Path) -> None:
     assert started["output_dir"].parent == expected
 
 
+@then("the plugin explains that the task directory is missing and how to configure it")
 @then("the plugin explains that the task directory does not exist and mentions EXPERIMENT_TASK_DIR")
 def plugin_explains_missing_task_dir(started: dict) -> None:
     assert started["recorder"] is None
@@ -1892,8 +2086,11 @@ def plugin_explains_missing_task_dir(started: dict) -> None:
 
 
 @when("the participant saves top-level and nested output files into the session directory")
-def participant_saves_nested_outputs(running: dict) -> None:
+def participant_saves_nested_outputs(running: dict, tmp_path: Path) -> None:
     root = running["output_dir"]
+    outside = tmp_path / "outside-secret.txt"
+    outside.write_text("do-not-hash", encoding="utf-8")
+    (root / "linked.txt").symlink_to(outside)
     (root / "summary.geojson").write_text('{"type": "FeatureCollection"}\n', encoding="utf-8")
     bundle = root / "shapefile" / "poland"
     bundle.mkdir(parents=True)
@@ -1901,6 +2098,7 @@ def participant_saves_nested_outputs(running: dict) -> None:
     (bundle / "layer.prj").write_text("EPSG:2180\n", encoding="utf-8")
 
 
+@then("the record fingerprints saved outputs but excludes links to external files")
 @then("the record hashes both top-level and nested output files with relative POSIX paths")
 def record_hashes_nested_outputs(running: dict) -> None:
     import hashlib
@@ -1933,3 +2131,405 @@ for _feature in (
     "host-observation.feature",
 ):
     scenarios(str(FEATURE_DIR / _feature))
+
+
+@then("the terminal evidence remains unchanged and host observation has stopped")
+def terminal_evidence_and_host_observation(
+    running: dict, terminal_evidence: dict, host: dict
+) -> None:
+    terminal_evidence_is_unchanged(running, terminal_evidence)
+    all_host_hooks_disconnected(host)
+
+
+@then("the terminal evidence remains unchanged and the legacy listener is disconnected")
+def terminal_evidence_and_legacy_listener(
+    running: dict, terminal_evidence: dict, host: dict
+) -> None:
+    terminal_evidence_is_unchanged(running, terminal_evidence)
+    legacy_project_read_disconnected(host, running)
+
+
+@then("the terminal evidence remains unchanged and processing observation has stopped")
+def terminal_evidence_and_processing_observation(
+    running: dict, terminal_evidence: dict, host: dict
+) -> None:
+    terminal_evidence_is_unchanged(running, terminal_evidence)
+    processing_listener_disconnected(host)
+
+
+@then("the completed take reports the project hook failure and keeps the earlier changes")
+def completed_take_retains_changes(running: dict) -> None:
+    start_message_reports_project_failure(running)
+    completed_log_keeps_connected_changes(running)
+
+
+@then("the abandoned take reports the canvas hook failure and keeps the earlier changes")
+def abandoned_take_retains_changes(running: dict) -> None:
+    start_message_reports_partial_canvas_failure(running)
+    abandoned_log_keeps_connected_changes(running)
+
+
+@when("the project and map change after the take", target_fixture="terminal_evidence")
+def project_and_map_change_after_take(running: dict, host: dict) -> dict[str, bytes]:
+    evidence = capture_terminal_evidence(running)
+    drive_project_and_canvas_after_failure(host)
+    return evidence
+
+
+@then("the failed take is closed without a record or host observers")
+def failed_take_is_closed(running: dict, host: dict) -> None:
+    no_record_is_written(running)
+    all_host_hooks_disconnected(host)
+    the_plugin_has_no_active_session()
+
+
+@then("the failed take is closed without a record and remaining observers are released")
+def failed_take_releases_remaining_observers(running: dict, host: dict) -> None:
+    no_record_is_written(running)
+    remaining_hooks_were_disconnected(host)
+    the_plugin_has_no_active_session()
+
+
+@then("the terminal evidence remains unchanged and remaining observers are released")
+def terminal_evidence_and_remaining_observers(
+    running: dict, terminal_evidence: dict, host: dict
+) -> None:
+    terminal_evidence_is_unchanged(running, terminal_evidence)
+    remaining_hooks_were_disconnected(host)
+
+
+@then("the session is still running without a human-reference record")
+def running_without_record(running: dict, loaded: PluginHandle) -> None:
+    no_record_is_written(running)
+    the_session_is_still_running(loaded)
+
+
+@then("the finished log has only session markers and project observation has stopped")
+def finished_log_and_project_observation(running: dict, host: dict) -> None:
+    finished_log_contains_only_markers(running)
+    surviving_project_hooks_are_disconnected(host)
+
+
+@when("the project and map change after the panel stops", target_fixture="panel_evidence")
+def project_and_map_change_after_panel_stop(
+    stopped: dict, host: dict
+) -> tuple[Path, dict[str, bytes]]:
+    evidence = capture_panel_evidence(stopped)
+    drive_project_and_canvas_after_failure(host)
+    return evidence
+
+
+@then("the incomplete take has no record, new session, or host observers")
+def incomplete_take_is_closed(restarted: dict, host: dict) -> None:
+    incomplete_take_is_not_promoted(restarted)
+    all_host_hooks_disconnected(host)
+
+
+@then("the failed take is closed without changing its evidence or leaving observers")
+def failed_take_evidence_and_closure(running: dict, terminal_evidence: dict, host: dict) -> None:
+    terminal_evidence_is_unchanged(running, terminal_evidence)
+    failed_take_is_closed(running, host)
+
+
+@then("the session continues observing without a human-reference record")
+def continuing_session_observes(running: dict, loaded: PluginHandle) -> None:
+    log_records_changes_after_project_failure(running)
+    running_without_record(running, loaded)
+
+
+@then("only the new session records the host changes")
+def new_session_observes_without_altering_previous(
+    host: dict, running: dict, new_take: Path, terminal_evidence: dict
+) -> None:
+    terminal_evidence_is_unchanged(running, terminal_evidence)
+    new_take_alone_records_changes(host, running, new_take)
+
+
+@then("the panel's evidence remains unchanged and remaining observers are released")
+def panel_evidence_and_remaining_observers(panel_evidence: tuple, host: dict) -> None:
+    panel_evidence_is_unchanged(panel_evidence)
+    remaining_hooks_were_disconnected(host)
+
+
+@then("the incomplete take remains unchanged, without a record or observers")
+def incomplete_take_is_unchanged_and_closed(restarted: dict, host: dict) -> None:
+    previous_evidence_is_unchanged(restarted)
+    incomplete_take_is_closed(restarted, host)
+
+
+@then("the failed take remains closed without changing its evidence or leaving other observers")
+def failed_take_evidence_and_remaining_observers(
+    running: dict, terminal_evidence: dict, host: dict
+) -> None:
+    terminal_evidence_is_unchanged(running, terminal_evidence)
+    failed_take_releases_remaining_observers(running, host)
+
+
+@given("abandonment and canvas disconnection both fail")
+def both_abandonment_and_disconnection_fail(host: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    canvas_refuses_disconnect(host, monkeypatch)
+    abandonment_marker_unwritable(monkeypatch)
+
+
+@when(parsers.parse("a buffer operation runs and I {action} the session"))
+def buffer_and_close(host: dict, loaded: PluginHandle, action: str) -> None:
+    processing_algorithm_executes(host, "native:buffer")
+    assert action in {"end", "abandon"}
+    loaded.call("end_session" if action == "end" else "abandon_session")
+
+
+@then("only the new session records the later processing execution")
+def new_processing_leaves_previous_evidence_unchanged(
+    host: dict, running: dict, new_take: Path, terminal_evidence: dict
+) -> None:
+    terminal_evidence_is_unchanged(running, terminal_evidence)
+    new_session_alone_records_processing(host, running, new_take, "native:clip")
+
+
+@then("processing executions remain separate from raw host observations and notes")
+def processing_evidence_remains_separate(running: dict) -> None:
+    record_preserves_observed_processing(running)
+    record_excludes_raw_from_processing(running)
+
+
+@when("I add a note and refresh the log")
+def note_and_refresh_log(loaded: PluginHandle, panel_state: dict) -> None:
+    loaded.call("log_note", message="hello world")
+    panel_state["dialog"]._parts["refresh_button"].click()
+
+
+@then("the log shows the session details and the note")
+def log_shows_session_and_note(panel_state: dict) -> None:
+    text = panel_state["dialog"]._parts["log_edit"].toPlainText()
+    lines = text.splitlines()
+    assert lines[0].startswith("human-baseline session log")
+    assert DEMO_TASK_ID in lines[0]
+    assert any("status: in_progress" in line for line in lines)
+    assert any("session_start" in line and f"task_id={DEMO_TASK_ID}" in line for line in lines)
+    assert any("note" in line and "message=hello world" in line for line in lines)
+
+
+@when("a damaged entry is added to the event log")
+def append_damaged_event() -> None:
+    recorder = plugin._ACTIVE["session"]
+    assert recorder is not None
+    with recorder.tracker.events_path.open("a", encoding="utf-8") as handle:
+        handle.write("this is not json\n")
+
+
+@when("the event log goes missing")
+def remove_event_log() -> None:
+    recorder = plugin._ACTIVE["session"]
+    assert recorder is not None
+    recorder.tracker.events_path.unlink()
+
+
+@when("I refresh the log")
+def refresh_log(panel_state: dict) -> None:
+    panel_state["dialog"]._parts["refresh_button"].click()
+
+
+@then("the damaged entry is shown instead of hidden")
+def damaged_event_is_visible(panel_state: dict) -> None:
+    assert "this is not json" in panel_state["dialog"]._parts["log_edit"].toPlainText()
+
+
+@then("the panel reports that the event log is unavailable")
+def missing_log_reported(panel_state: dict) -> None:
+    assert "(event log unavailable:" in panel_state["dialog"]._parts["log_edit"].toPlainText()
+
+
+@then("the record counts three actions and lists the two distinct tools")
+def reviewed_actions_deduplicate_tools(running: dict) -> None:
+    record = read_record(running["output_dir"])
+    assert record["session"]["steps"] == 3
+    assert record["session"]["tools"] == ["native:buffer", "qgis:save-features-as"]
+    assert record["session"]["metrics_status"] == "reviewed"
+
+
+@given(
+    "a host whose task fixture disappears while observation starts", target_fixture="failed_start"
+)
+def host_with_disappearing_fixture(monkeypatch: pytest.MonkeyPatch, task_suite: Path) -> dict:
+    project, canvas = FakeProject(), FakeCanvas()
+    connect = project.layersAdded.connect
+
+    def remove_fixture_after_connect(slot) -> None:
+        connect(slot)
+        (task_suite / "fixture.geojson").unlink()
+
+    monkeypatch.setattr(project.layersAdded, "connect", remove_fixture_after_connect)
+    install_host(monkeypatch, project=project, canvas=lambda: canvas)
+    return {"project": project, "canvas": canvas, "task_suite": task_suite}
+
+
+@when("the participant tries to start a session")
+def try_start_with_missing_fixture(failed_start: dict, loaded: PluginHandle) -> None:
+    with pytest.raises(FileNotFoundError) as error:
+        loaded.call("start_session", task_id=DEMO_TASK_ID, base_dir=str(failed_start["task_suite"]))
+    failed_start["error"] = error.value
+    failed_start["output_dir"] = next(
+        (failed_start["task_suite"] / "baselines" / DEMO_TASK_ID).iterdir()
+    )
+
+
+@then("the start failure is reported and no reference record is written")
+def failed_start_is_not_promoted(failed_start: dict, loaded: PluginHandle) -> None:
+    assert isinstance(failed_start["error"], FileNotFoundError)
+    assert not (failed_start["output_dir"] / "human-reference-record.json").exists()
+    assert loaded.call("log_note", message="late") == "no active session"
+
+
+@then("later host changes cannot alter the incomplete evidence")
+def failed_start_evidence_is_closed(failed_start: dict) -> None:
+    events = failed_start["output_dir"] / "events.jsonl"
+    before = events.read_bytes()
+    failed_start["project"].layersAdded.fire(["a"])
+    failed_start["canvas"].scaleChanged.fire(50000.0)
+    assert events.read_bytes() == before
+    assert not failed_start["project"].layersAdded.slots
+    assert not failed_start["canvas"].scaleChanged.slots
+
+
+@given(
+    parsers.parse("a QGIS host prepared for a publication failure {processing_availability}"),
+    target_fixture="host",
+)
+def publication_failure_host(monkeypatch: pytest.MonkeyPatch, processing_availability: str) -> dict:
+    project, canvas = FakeProject(), FakeCanvas()
+    history = (
+        FakeHistoryRegistry() if processing_availability == "with processing history" else None
+    )
+    assert processing_availability in {"with processing history", "without processing history"}
+    install_host(monkeypatch, project=project, canvas=lambda: canvas, history_registry=history)
+    return {"project": project, "canvas": canvas, "history": history}
+
+
+@when(
+    "the reference record cannot be published at the end of the take", target_fixture="publication"
+)
+def fail_reference_publication(
+    running: dict, host: dict, loaded: PluginHandle, monkeypatch: pytest.MonkeyPatch
+) -> dict:
+    history = host["history"]
+    if history is not None:
+        history.add_entry(
+            "processing", {"algorithm_id": "native:buffer", "parameters": {"DISTANCE": 5}}
+        )
+    replace = Path.replace
+
+    def fail_publication(path: Path, target: Path) -> Path:
+        if path.name.startswith(".human-reference-record-"):
+            raise OSError("record publication failed")
+        return replace(path, target)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "replace", fail_publication)
+        with pytest.raises(OSError, match="record publication failed") as error:
+            loaded.call("end_session", manual_review_complete=history is not None)
+    return {"error": error.value, "before": running["recorder"].tracker.events_path.read_bytes()}
+
+
+@then("the failure is reported and no reference record is promoted")
+def failed_publication_not_promoted(running: dict, host: dict, publication: dict) -> None:
+    recorder = running["recorder"]
+    assert "record publication failed" in str(publication["error"])
+    assert recorder.status == "incomplete"
+    assert not (recorder.output_dir / "human-reference-record.json").exists()
+    assert not list(recorder.output_dir.glob(".human-reference-record-*.tmp"))
+    if host["history"] is None:
+        assert list(recorder.output_dir.iterdir()) == [recorder.output_dir / "events.jsonl"]
+        assert [event["event"] for event in read_events(recorder.output_dir)] == [
+            "session_start",
+            "session_end",
+        ]
+    else:
+        assert not host["history"].entryAdded.slots
+
+
+@then("later host activity cannot change the incomplete evidence")
+def publication_evidence_is_closed(
+    running: dict, host: dict, publication: dict, loaded: PluginHandle
+) -> None:
+    host["project"].crsChanged.fire()
+    if host["history"] is not None:
+        host["history"].add_entry("processing", {"algorithm_id": "native:clip", "parameters": {}})
+    assert running["recorder"].tracker.events_path.read_bytes() == publication["before"]
+    assert loaded.call("log_note", message="late") == "no active session"
+
+
+@when(
+    parsers.parse("finishing the take fails {timing} its final event is recorded"),
+    target_fixture="terminal_write_failure",
+)
+def terminal_event_write_fails(
+    timing: str, running: dict, loaded: PluginHandle, monkeypatch: pytest.MonkeyPatch
+) -> dict:
+    from contextlib import contextmanager
+
+    assert timing in {"before", "after"}
+    events_path = running["recorder"].tracker.events_path
+    open_file = Path.open
+
+    @contextmanager
+    def failing_open(path, mode="r", *args, **kwargs):
+        with open_file(path, mode, *args, **kwargs) as handle:
+            if path != events_path or mode != "a":
+                yield handle
+                return
+
+            class TerminalWriter:
+                def write(self, text):
+                    if '"event": "session_end"' in text:
+                        if timing == "after":
+                            handle.write(text)
+                            handle.flush()
+                        raise OSError("terminal event write failed")
+                    return handle.write(text)
+
+            yield TerminalWriter()
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "open", failing_open)
+        with pytest.raises(OSError, match="terminal event write failed") as error:
+            loaded.call("end_session")
+    return {"timing": timing, "error": error.value}
+
+
+@then("no reference record is promoted during the failed attempt")
+def no_record_during_failed_terminal_write(running: dict, terminal_write_failure: dict) -> None:
+    assert "terminal event write failed" in str(terminal_write_failure["error"])
+    assert not (running["output_dir"] / "human-reference-record.json").exists()
+    assert not list(running["output_dir"].glob(".human-reference-record-*.tmp"))
+
+
+@then(parsers.parse("the take {outcome} after the failure"))
+def session_recovers_or_closes_after_terminal_write_failure(
+    running: dict, host: dict, loaded: PluginHandle, terminal_write_failure: dict, outcome: str
+) -> None:
+    recorder = running["recorder"]
+    events = recorder.tracker.events_path
+    if terminal_write_failure["timing"] == "after":
+        assert outcome == "closes and remains unchanged"
+        assert recorder.status == "incomplete"
+        assert loaded.call("log_note", message="late") == "no active session"
+        before = events.read_bytes()
+        host["project"].layersAdded.fire(["a"])
+        host["canvas"].scaleChanged.fire(50000.0)
+        assert events.read_bytes() == before
+        assert [event["event"] for event in read_events(recorder.output_dir)] == [
+            "session_start",
+            "session_end",
+        ]
+        assert not host["project"].layersAdded.slots and not host["canvas"].scaleChanged.slots
+    else:
+        assert outcome == "remains active and can later be finished"
+        host["project"].layersAdded.fire(["a"])
+        host["canvas"].scaleChanged.fire(50000.0)
+        assert [event["event"] for event in read_events(recorder.output_dir)] == [
+            "session_start",
+            "layers_added",
+            "canvas_scale",
+        ]
+        assert loaded.call("end_session").startswith("session ended")
+        assert (recorder.output_dir / "human-reference-record.json").exists()

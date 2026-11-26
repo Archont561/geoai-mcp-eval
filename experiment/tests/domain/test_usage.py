@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
@@ -43,20 +43,26 @@ def test_extract_response_usage_supports_openai_and_input_output_keys(
     assert alt_snap == openai_snap
 
 
-def test_extract_response_usage_never_estimates_missing_or_invalid_values() -> None:
+@example(count=50, bad_negative=-3)
+@given(count=TOKEN_COUNT, bad_negative=st.integers(max_value=-1))
+def test_extract_response_usage_never_estimates_missing_or_invalid_values(
+    count: int, bad_negative: int
+) -> None:
     missing = extract_response_usage({"choices": [{"message": {"content": "hello"}}]})
     assert missing.input_tokens is None
     assert missing.output_tokens is None
     assert missing.total_tokens is None
     assert missing.warning is not None
 
-    partial = extract_response_usage({"usage": {"prompt_tokens": 50, "completion_tokens": None}})
-    assert partial.input_tokens == 50
+    partial = extract_response_usage({"usage": {"prompt_tokens": count, "completion_tokens": None}})
+    assert partial.input_tokens == count
     assert partial.output_tokens is None
     assert partial.total_tokens is None
     assert partial.warning is not None
 
-    bad_bool = extract_response_usage({"usage": {"prompt_tokens": True, "completion_tokens": -3}})
+    bad_bool = extract_response_usage(
+        {"usage": {"prompt_tokens": True, "completion_tokens": bad_negative}}
+    )
     assert bad_bool.input_tokens is None
     assert bad_bool.output_tokens is None
     assert bad_bool.total_tokens is None
@@ -85,9 +91,13 @@ def test_usage_accumulator_sums_turns_and_detects_cap_accurately(
     assert acc.cap_exceeded is (expected_total > cap)
 
 
-def test_usage_accumulator_flags_partial_missing_and_aggregates_nulls() -> None:
-    acc = UsageAccumulator(max_cell_tokens=500)
-    acc.record(UsageSnapshot(input_tokens=100, output_tokens=40, total_tokens=140))
+@example(inp=100, out=40, cap=500)
+@given(inp=TOKEN_COUNT, out=TOKEN_COUNT, cap=st.integers(min_value=1, max_value=100_000))
+def test_usage_accumulator_flags_partial_missing_and_aggregates_nulls(
+    inp: int, out: int, cap: int
+) -> None:
+    acc = UsageAccumulator(max_cell_tokens=cap)
+    acc.record(UsageSnapshot(input_tokens=inp, output_tokens=out, total_tokens=inp + out))
     summary = acc.to_summary()
     acc.record(
         UsageSnapshot(
@@ -106,17 +116,25 @@ def test_usage_accumulator_flags_partial_missing_and_aggregates_nulls() -> None:
     assert agg["cells_missing_usage"] == 1
 
 
-def test_usage_accumulator_to_token_usage_preserves_nulls() -> None:
-    acc = UsageAccumulator(max_cell_tokens=500)
-    snapshot = UsageSnapshot(input_tokens=10, output_tokens=None, total_tokens=None, warning="part")
+@example(inp=10, cap=500, warning="part")
+@given(
+    inp=TOKEN_COUNT,
+    cap=st.integers(min_value=1, max_value=100_000),
+    warning=st.text(min_size=1, max_size=40),
+)
+def test_usage_accumulator_to_token_usage_preserves_nulls(inp: int, cap: int, warning: str) -> None:
+    acc = UsageAccumulator(max_cell_tokens=cap)
+    snapshot = UsageSnapshot(
+        input_tokens=inp, output_tokens=None, total_tokens=None, warning=warning
+    )
     acc.record(snapshot)
     dto = acc.to_token_usage()
-    assert dto.input_tokens == 10
+    assert dto.input_tokens == inp
     assert dto.output_tokens is None
     assert dto.total_tokens is None
     assert dto.calls_missing_usage == 1
-    assert dto.max_trial_tokens == 500
-    assert dto.warnings == ["part"]
+    assert dto.max_trial_tokens == cap
+    assert dto.warnings == [warning]
 
 
 @given(neg=st.integers(max_value=-1))

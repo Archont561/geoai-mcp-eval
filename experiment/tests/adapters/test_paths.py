@@ -1,17 +1,21 @@
-"""Unit tests for ``experiment.adapters.paths``."""
-
-from __future__ import annotations
+"""Path resolution properties for arbitrary checkout roots."""
 
 from pathlib import Path
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 from experiment.adapters import paths
 from experiment.adapters.task_repository import discover_task_ids
 
 
+@settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(
+    root_name=st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789_-", min_size=1, max_size=20)
+)
 def test_paths_resolve_consistently_from_repo_and_custom_roots(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, root_name: str
 ) -> None:
     monkeypatch.delenv("EXPERIMENT_CONFIG", raising=False)
     repo = paths.find_repo_root()
@@ -22,18 +26,21 @@ def test_paths_resolve_consistently_from_repo_and_custom_roots(
     assert paths.cache_root() == repo / ".cache" / "llm"
     assert paths.package_src_root() == repo / "experiment" / "src"
 
-    assert paths.tasks_root(tmp_path) == tmp_path / "experiment" / "tasks"
-    assert paths.results_root(tmp_path) == tmp_path / "results"
-    assert paths.config_path(tmp_path) == tmp_path / "experiment.toml"
-    assert paths.cache_root(tmp_path) == tmp_path / ".cache" / "llm"
+    root = tmp_path / root_name
+    assert paths.tasks_root(root) == root / "experiment" / "tasks"
+    assert paths.results_root(root) == root / "results"
+    assert paths.config_path(root) == root / "experiment.toml"
+    assert paths.cache_root(root) == root / ".cache" / "llm"
 
-    override = tmp_path / "custom.toml"
+    override = root / "custom.toml"
     monkeypatch.setenv("EXPERIMENT_CONFIG", str(override))
     assert paths.config_path() == override
 
-    env = paths.experiment_env(tmp_path)
-    assert str(tmp_path / "experiment" / "src") in env["PYTHONPATH"]
-    assert str(tmp_path / "experiment-qgis-plugin") in env["PYTHONPATH"]
-
-    ids = discover_task_ids(paths.tasks_root())
-    assert set(ids) == {"analysis-de9im-001", "cartography-jenks-001", "prep-axis-order-001"}
+    env = paths.experiment_env(root)
+    assert str(root / "experiment" / "src") in env["PYTHONPATH"]
+    assert str(root / "experiment-qgis-plugin") in env["PYTHONPATH"]
+    assert set(discover_task_ids(paths.tasks_root())) == {
+        "analysis-de9im-001",
+        "cartography-jenks-001",
+        "prep-axis-order-001",
+    }

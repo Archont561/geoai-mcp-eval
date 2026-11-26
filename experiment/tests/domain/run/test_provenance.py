@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 from dirty_equals import IsPartialDict
-from hypothesis import given
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
@@ -31,12 +31,21 @@ def test_provenance_models_roundtrip_arbitrary_pins(
     assert RunProvenance.model_validate_json(prov.model_dump_json()) == prov
 
 
-def test_provenance_factory_builds_valid_provenance(run_provenance_factory: Any) -> None:
-    prov = run_provenance_factory.build()
+@settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(repo_sha=HEX_SHA)
+def test_provenance_factory_builds_valid_provenance(
+    run_provenance_factory: Any, repo_sha: str
+) -> None:
+    prov = run_provenance_factory.build(environment=EnvironmentPin(repo_sha=repo_sha))
     assert isinstance(prov, RunProvenance)
+    assert prov.environment.repo_sha == repo_sha
     assert RunProvenance.model_validate_json(prov.model_dump_json()) == prov
 
 
-def test_provenance_models_forbid_extra_fields() -> None:
+@given(
+    repo_sha=HEX_SHA,
+    extra=st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=20),
+)
+def test_provenance_models_forbid_extra_fields(repo_sha: str, extra: str) -> None:
     with pytest.raises(ValidationError):
-        EnvironmentPin(repo_sha="deadbeef", unknown_key="nope")  # type: ignore[call-arg]
+        EnvironmentPin.model_validate({"repo_sha": repo_sha, f"unknown_{extra}": "nope"})

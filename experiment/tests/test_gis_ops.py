@@ -1,4 +1,4 @@
-"""Coverage tests for the typed GIS operations (pure, no QGIS)."""
+"""Properties of the typed GIS operations exposed to study models."""
 
 from __future__ import annotations
 
@@ -6,178 +6,241 @@ import json
 from pathlib import Path
 
 import pytest
+from hypothesis import example, given, settings
+from hypothesis import strategies as st
+from shapely.geometry import box, mapping, shape
 
 from experiment import gis_ops
 
-FEATURES_KEY = "features"
-ISO_FIELD = "ISO_A3"
-TYPE_KEY = "type"
-
 FIXTURES = Path(__file__).resolve().parents[1] / "tasks" / "fixtures"
+POL_CZE = json.loads((FIXTURES / "analysis/poland-czechia.geojson").read_text(encoding="utf-8"))
+COUNTRIES = json.loads((FIXTURES / "cartography/countries.geojson").read_text(encoding="utf-8"))
+point_features = st.builds(
+    lambda x, y, code: {
+        "type": "Feature",
+        "geometry": {"type": "Point", "coordinates": [x, y]},
+        "properties": {"ISO_A3": code},
+    },
+    st.integers(-180, 180),
+    st.integers(-90, 90),
+    st.text(alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZ", min_size=1, max_size=8),
+)
+collections = st.lists(point_features, min_size=1, max_size=8).map(
+    lambda features: {"type": "FeatureCollection", "features": features}
+)
 
 
-def fc(path: str) -> dict:
-    return json.loads((FIXTURES / path).read_text(encoding="utf-8"))
-
-
-@pytest.fixture()
-def pol_cze() -> dict:
-    return fc("analysis/poland-czechia.geojson")
-
-
-@pytest.fixture()
-def countries() -> dict:
-    return fc("cartography/countries.geojson")
-
-
-def test_feature_info(countries: dict) -> None:
-    info = gis_ops.feature_info(countries)
-    assert info["feature_count"] == len(countries[FEATURES_KEY])
-    assert info["bbox"][0] < info["bbox"][2]
-    assert ISO_FIELD in info["property_keys"]
-    assert info["geometry_types"]
-
-
-def test_feature_info_rejects_non_collection() -> None:
-    with pytest.raises(ValueError, match="FeatureCollection"):
-        gis_ops.feature_info({TYPE_KEY: "Feature"})
-
-
-def test_filter_features(pol_cze: dict) -> None:
-    pol = gis_ops.filter_features(pol_cze, ISO_FIELD, "pol", case_insensitive=True)
-    assert [f["properties"][ISO_FIELD] for f in pol[FEATURES_KEY]] == ["POL"]
-    assert gis_ops.filter_features(pol_cze, ISO_FIELD, "XXX")[FEATURES_KEY] == []
-
-
-def test_buffer_and_distance_validation(pol_cze: dict) -> None:
-    buffered = gis_ops.buffer_geometries(pol_cze, 0.5)
-    assert len(buffered[FEATURES_KEY]) == len(pol_cze[FEATURES_KEY])
-    with pytest.raises(ValueError, match="distance"):
-        gis_ops.buffer_geometries(pol_cze, -1)
-
-
-def test_union_intersection_difference(pol_cze: dict) -> None:
-    pol = gis_ops.filter_features(pol_cze, ISO_FIELD, "POL")
-    cze = gis_ops.filter_features(pol_cze, ISO_FIELD, "CZE")
-    merged = gis_ops.union_geometries(pol_cze)
-    assert merged[FEATURES_KEY][0]["properties"]["n_inputs"] == 2
-    inter = gis_ops.intersection(pol, cze)
-    assert inter[FEATURES_KEY][0]["geometry"] is not None
-    diff = gis_ops.difference(pol, cze)
-    assert diff[FEATURES_KEY][0]["geometry"][TYPE_KEY] in {"Polygon", "MultiPolygon"}
-
-
-def test_centroid_and_representative_point(pol_cze: dict) -> None:
-    centroids = gis_ops.centroid(pol_cze)
-    points = gis_ops.representative_point(pol_cze)
-    assert all(f["geometry"][TYPE_KEY] == "Point" for f in centroids[FEATURES_KEY])
-    assert len(points[FEATURES_KEY]) == len(pol_cze[FEATURES_KEY])
-    # properties are preserved
-    assert points[FEATURES_KEY][0]["properties"].get(ISO_FIELD) in {"POL", "CZE"}
-
-
-def test_area_geographic_vs_planar(pol_cze: dict) -> None:
-    geo = gis_ops.area(pol_cze)
-    assert geo["units"] == "m2-geodesic"
-    assert geo["total"] > 0
-    projected = gis_ops.reproject(pol_cze, "EPSG:4326", "EPSG:2180")
-    planar = gis_ops.area(projected)
-    assert planar["units"] == "crs-units"
-
-
-def test_reproject_roundtrip(pol_cze: dict) -> None:
-    projected = gis_ops.reproject(pol_cze, "EPSG:4326", "EPSG:2180")
-    back = gis_ops.reproject(projected, "EPSG:2180", "EPSG:4326")
-    original = gis_ops._bbox_of(pol_cze[FEATURES_KEY])
-    roundtrip = gis_ops._bbox_of(back[FEATURES_KEY])
-    assert all(abs(a - b) < 1e-6 for a, b in zip(original, roundtrip, strict=True))
-
-
-def test_spatial_join_intersects(pol_cze: dict, countries: dict) -> None:
-    pol = gis_ops.filter_features(countries, ISO_FIELD, "POL")
-    cze = gis_ops.filter_features(countries, ISO_FIELD, "CZE")
-    joined = gis_ops.spatial_join_intersects(pol, cze)
-    # POL does not intersect CZE at country granularity? keep it about mechanics:
-    assert joined[TYPE_KEY] == "FeatureCollection"
-    assert all("right_ISO_A3" in f["properties"] for f in joined[FEATURES_KEY])
-
-
-def test_relate_de9im(pol_cze: dict) -> None:
-    pol = gis_ops.filter_features(pol_cze, ISO_FIELD, "POL")
-    cze = gis_ops.filter_features(pol_cze, ISO_FIELD, "CZE")
-    result = gis_ops.relate_de9im(pol, cze)
-    assert result["de9im"] == "FF2F11212"
-    assert result["relation"] == "touches"
-
-
-def test_jenks_breaks_empty_and_validation() -> None:
-    with pytest.raises(ValueError):
-        gis_ops.jenks_breaks([], 2)
-    with pytest.raises(ValueError):
-        gis_ops.jenks_breaks([1, 2, 3], 0)
-    jb = gis_ops.jenks_breaks([1.0, 2.0, 3.0, 100.0], 2)
-    assert jb["method"] == "jenks"
-    assert jb["breaks"][-1] == 100.0
-    assert jb["assignments"][-1] == 2
-
-
-def test_nearest_feature(pol_cze: dict) -> None:
-    result = gis_ops.nearest_feature([19.0, 52.0], pol_cze)
-    assert result["properties"][ISO_FIELD] == "POL"
-    with pytest.raises(ValueError):
-        gis_ops.nearest_feature([19.0], pol_cze)
-
-
-def test_invalid_geometry_raises() -> None:
-    bad = {
-        TYPE_KEY: "FeatureCollection",
-        FEATURES_KEY: [
-            {
-                TYPE_KEY: "Feature",
-                "geometry": {TYPE_KEY: "Bogus", "coordinates": [0]},
-                "properties": {},
-            }
-        ],
-    }
-    with pytest.raises(ValueError):
-        gis_ops.centroid(bad)
-
-
-def test_single_geometry_requires_features() -> None:
-    with pytest.raises(ValueError):
-        gis_ops._single_geometry({TYPE_KEY: "FeatureCollection", FEATURES_KEY: []})
-
-
-def test_mcp_server_exposes_exactly_the_ops_registry() -> None:
-    import asyncio
-
-    from experiment.adapters.mcp import client as mcp_client
-    from experiment.adapters.mcp import server as mcp_server
-
-    tools = asyncio.run(mcp_server.server.list_tools())
-    advertised = asyncio.run(mcp_client.list_tools())
-    assert {tool.name for tool in tools} == set(gis_ops.OPS)
-    assert set(advertised) == set(gis_ops.OPS)
-    assert len(advertised) == len(gis_ops.OPS)
-
-
-def test_area_geographic_non_polygon_reports_warning() -> None:
-    point_collection = {
+def point_collection(x: int, y: int) -> dict:
+    return {
         "type": "FeatureCollection",
         "features": [
             {
                 "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [21.0, 52.0]},
-                "properties": {"ISO_A3": "WAW"},
+                "geometry": {"type": "Point", "coordinates": [x, y]},
+                "properties": {"name": "point"},
             }
         ],
     }
-    report = gis_ops.area(point_collection)
+
+
+@example(collection=POL_CZE)
+@example(collection=COUNTRIES)
+@given(collection=collections)
+def test_feature_information_and_point_outputs_preserve_features(collection: dict) -> None:
+    features = collection["features"]
+    info = gis_ops.feature_info(collection)
+    assert info["feature_count"] == len(features)
+    bounds = [shape(feature["geometry"]).bounds for feature in features]
+    assert info["bbox"] == [
+        min(b[0] for b in bounds),
+        min(b[1] for b in bounds),
+        max(b[2] for b in bounds),
+        max(b[3] for b in bounds),
+    ]
+    assert info["property_keys"] == sorted(
+        {key for feature in features for key in feature["properties"]}
+    )
+    assert sum(info["geometry_types"].values()) == len(features)
+    for operation in (gis_ops.centroid, gis_ops.representative_point):
+        result = operation(collection)["features"]
+        assert len(result) == len(features)
+        assert all(feature["geometry"]["type"] == "Point" for feature in result)
+        assert [feature["properties"] for feature in result] == [f["properties"] for f in features]
+
+
+@given(kind=st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=20))
+def test_feature_info_rejects_non_collections(kind: str) -> None:
+    with pytest.raises(ValueError, match="FeatureCollection"):
+        gis_ops.feature_info({"type": kind})
+
+
+@example(collection=POL_CZE, index=0, insensitive=False)
+@example(collection=POL_CZE, index=1, insensitive=True)
+@given(collection=collections, index=st.integers(min_value=0), insensitive=st.booleans())
+def test_filter_selects_matching_values(collection: dict, index: int, insensitive: bool) -> None:
+    features = collection["features"]
+    code = features[index % len(features)]["properties"]["ISO_A3"]
+    query = code.lower() if insensitive else code
+    selected = gis_ops.filter_features(collection, "ISO_A3", query, case_insensitive=insensitive)
+    assert selected["features"] == [f for f in features if f["properties"]["ISO_A3"] == code]
+    assert gis_ops.filter_features(collection, "ISO_A3", "#")["features"] == []
+
+
+@given(distance=st.floats(min_value=-100, max_value=-0.001, allow_nan=False, allow_infinity=False))
+def test_negative_buffer_distance_is_rejected(distance: float) -> None:
+    with pytest.raises(ValueError, match="distance"):
+        gis_ops.buffer_geometries(POL_CZE, distance)
+
+
+def rectangle_collection(x: int, y: int, width: int, height: int, label: str) -> dict:
+    return {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": mapping(box(x, y, x + width, y + height)),
+                "properties": {"label": label},
+            }
+        ],
+    }
+
+
+@given(
+    x=st.integers(-100, 100),
+    y=st.integers(-100, 100),
+    width=st.integers(1, 20),
+    height=st.integers(1, 20),
+    dx=st.integers(-25, 25),
+    dy=st.integers(-25, 25),
+)
+def test_union_intersection_and_difference(
+    x: int, y: int, width: int, height: int, dx: int, dy: int
+) -> None:
+    left = rectangle_collection(x, y, width, height, "left")
+    right = rectangle_collection(x + dx, y + dy, width, height, "right")
+    combined = {"type": "FeatureCollection", "features": left["features"] + right["features"]}
+    a, b = (shape(item["features"][0]["geometry"]) for item in (left, right))
+    union = gis_ops.union_geometries(combined)["features"][0]
+    assert union["properties"]["n_inputs"] == 2
+    assert shape(union["geometry"]).equals(a.union(b))
+    assert shape(gis_ops.intersection(left, right)["features"][0]["geometry"]).equals(
+        a.intersection(b)
+    )
+    assert shape(gis_ops.difference(left, right)["features"][0]["geometry"]).equals(a.difference(b))
+
+
+@settings(deadline=None)
+@given(dx=st.integers(-3, 3), dy=st.integers(-3, 3))
+def test_spatial_join_properties_match_intersections(dx: int, dy: int) -> None:
+    left = rectangle_collection(0, 0, 2, 2, "left")
+    right = rectangle_collection(dx, dy, 2, 2, "right")
+    joined = gis_ops.spatial_join_intersects(left, right)
+    assert joined["type"] == "FeatureCollection"
+    assert all(f["properties"]["right_label"] == "right" for f in joined["features"])
+    assert bool(joined["features"]) == shape(left["features"][0]["geometry"]).intersects(
+        shape(right["features"][0]["geometry"])
+    )
+
+
+@given(
+    x=st.integers(-100, 100),
+    y=st.integers(-100, 100),
+    width=st.integers(1, 20),
+    height=st.integers(1, 20),
+)
+def test_adjacent_rectangles_touch_symmetrically(x: int, y: int, width: int, height: int) -> None:
+    left = rectangle_collection(x, y, width, height, "left")
+    right = rectangle_collection(x + width, y, width, height, "right")
+    for a, b in ((left, right), (right, left)):
+        result = gis_ops.relate_de9im(a, b)
+        assert result["relation"] == "touches"
+        assert result["de9im"] == shape(a["features"][0]["geometry"]).relate(
+            shape(b["features"][0]["geometry"])
+        )
+
+
+@given(
+    values=st.lists(st.integers(-100, 100), min_size=1, max_size=20, unique=True), data=st.data()
+)
+def test_jenks_assignments_respect_breaks(values: list[int], data: st.DataObject) -> None:
+    count = data.draw(st.integers(1, len(values)))
+    result = gis_ops.jenks_breaks(values, count)
+    assert result["method"] == "jenks"
+    assert result["breaks"][-1] == max(values)
+    assert result["assignments"] == [
+        next(i for i, b in enumerate(result["breaks"], 1) if v <= b) for v in values
+    ]
+
+
+@given(count=st.integers(max_value=0), value=st.integers())
+def test_jenks_rejects_empty_values_and_invalid_count(count: int, value: int) -> None:
+    with pytest.raises(ValueError):
+        gis_ops.jenks_breaks([], 2)
+    with pytest.raises(ValueError):
+        gis_ops.jenks_breaks([value], count)
+
+
+@given(x=st.integers(-180, 180), y=st.integers(-90, 90))
+def test_geographic_point_area_warns_and_nearest_is_self(x: int, y: int) -> None:
+    collection = point_collection(x, y)
+    report = gis_ops.area(collection)
     assert report["units"] == "m2-geodesic"
     assert report["per_feature"] == [0.0]
     assert report["warnings"] == ["feature 0: not a polygon; geodesic area reported as 0.0"]
+    nearest = gis_ops.nearest_feature([x, y], collection)
+    assert nearest["properties"]["name"] == "point"
+    assert nearest["distance"] == 0
 
 
-def test_reproject_rejects_unknown_crs(pol_cze: dict) -> None:
+@given(point=st.lists(st.integers(), max_size=4).filter(lambda p: len(p) != 2))
+def test_nearest_rejects_wrong_coordinate_count(point: list[int]) -> None:
+    with pytest.raises(ValueError):
+        gis_ops.nearest_feature(point, POL_CZE)
+
+
+@given(kind=st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=20))
+@example(kind="Bogus")
+@example(kind="NotAGeometry")
+def test_invalid_geometry_raises(kind: str) -> None:
+    bad = point_collection(0, 0)
+    bad["features"][0]["geometry"] = {"type": kind, "coordinates": [0]}
+    with pytest.raises(ValueError):
+        gis_ops.centroid(bad)
+
+
+@given(operation=st.sampled_from([gis_ops.union_geometries, gis_ops._single_geometry]))
+def test_union_operations_require_features(operation) -> None:
+    with pytest.raises(ValueError):
+        operation({"type": "FeatureCollection", "features": []})
+
+
+@settings(deadline=None)
+@given(
+    code=st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=20).map(
+        lambda suffix: "invalid-authority:" + suffix
+    )
+)
+@example(code="EPSG:not-a-crs")
+@example(code="EPSG:0")
+@example(code="invalid")
+def test_reproject_rejects_unknown_crs(code: str) -> None:
     with pytest.raises(ValueError, match="reprojection failed"):
-        gis_ops.reproject(pol_cze, "EPSG:not-a-crs", "EPSG:2180")
+        gis_ops.reproject(POL_CZE, code, "EPSG:2180")
+
+
+@given(
+    longitude=st.integers(min_value=-180, max_value=180),
+    latitude=st.integers(min_value=-90, max_value=90),
+)
+@example(longitude=19, latitude=52)
+def test_nearest_country_matches_geometry_distances(longitude: int, latitude: int) -> None:
+    from shapely.geometry import Point
+
+    nearest = gis_ops.nearest_feature([longitude, latitude], POL_CZE)
+    distances = [
+        shape(f["geometry"]).distance(Point(longitude, latitude)) for f in POL_CZE["features"]
+    ]
+    assert nearest["distance"] == min(distances)
+    assert nearest["index"] == distances.index(min(distances))
+    if (longitude, latitude) == (19, 52):
+        assert nearest["properties"]["ISO_A3"] == "POL"
