@@ -36,4 +36,4 @@ def test_print_score_table_renders_summary(task_id: str) -> None:
     print_score_table(console, summary)
     rendered = console.export_text()
     assert task_id in rendered
-    assert "1/1 cells oracle-passed" in rendered
+    assert "1/1 trials oracle-passed" in rendered

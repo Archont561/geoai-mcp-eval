@@ -61,9 +61,10 @@ def predicate_table(dataset: RunDataset) -> None:
     assert list(axis["touches"]) == [0, 0]
 
 
-@then("the cell summaries report successful trials")
+@then("the condition summaries report successful trials")
 def cell_summaries(dataset: RunDataset) -> None:
-    summary = dataset.cell_summary_df()
+    summary = dataset.condition_summary_df()
+    assert summary.equals(dataset.cell_summary_df())
     assert list(summary.columns) == list(CELL_SUMMARY_COLUMNS)
     assert len(summary) == 6
     assert all(summary["pass_at_k"])
@@ -324,7 +325,7 @@ def empty_preparation_run() -> dict:
     return {"dataset": RunDataset.from_run(ExperimentRun(run_id="empty", stage="preflight"))}
 
 
-@when("the researcher requests its cell summary", target_fixture="summary")
+@when("the researcher requests its condition summary", target_fixture="summary")
 def request_empty_summary(memory_run: dict):
     return memory_run["dataset"].cell_summary_df()
 

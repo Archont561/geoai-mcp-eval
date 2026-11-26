@@ -21,17 +21,17 @@ ROOT_OPTION = typer.Option(DEFAULT_TASK_ROOT, "--root", help="Task suite root di
 JSON_OPTION = typer.Option(False, "--json", help="Emit machine-readable JSON")
 TARGET_ARG = typer.Argument(..., help="Run directory or RunArchive .zip file")
 TASK_ID_ARG = typer.Argument(..., help="Task identifier")
-ARTIFACTS_OPTION = typer.Option(..., "--artifacts-dir", help="Cell directory to evaluate")
+ARTIFACTS_OPTION = typer.Option(..., "--artifacts-dir", help="Trial directory to evaluate")
 
 
 @app.command("eval")
 def evaluate(
     target: Path = TARGET_ARG, root: Path = ROOT_OPTION, as_json: bool = JSON_OPTION
 ) -> None:
-    """Re-score every cell in TARGET (run directory or zip archive) against the oracle."""
+    """Re-score every trial in TARGET (run directory or zip archive) against the oracle."""
     summary = scoring.rescore_run(target, task_root=root)
     if summary is None:
-        console.print(Text(f"no cells under {target}", style="red"))
+        console.print(Text(f"no trials under {target}", style="red"))
         raise typer.Exit(code=1)
     if as_json:
         typer.echo(json.dumps(summary.to_dict(), indent=2, sort_keys=True))

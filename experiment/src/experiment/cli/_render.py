@@ -15,7 +15,7 @@ def print_score_table(console: Console, summary: RunSummary) -> None:
     for col in ("task", "arm", "status", "oracle", "checks"):
         table.add_column(col)
     table.add_column("wall_s", justify="right")
-    for cell in summary.cells:
+    for cell in summary.trials:
         verdict = "✓" if cell.oracle_passed else "✗"
         status_style = "green" if cell.status == "ok" else "red"
         oracle_style = "green" if cell.oracle_passed else "red"
@@ -30,5 +30,5 @@ def print_score_table(console: Console, summary: RunSummary) -> None:
         )
     console.print(table)
     style = "green" if summary.passed == summary.total else "yellow"
-    msg = f"{summary.passed}/{summary.total} cells oracle-passed"
+    msg = f"{summary.passed}/{summary.total} trials oracle-passed"
     console.print(Text(msg, style=f"bold {style}"))

@@ -22,7 +22,7 @@ HARVEST_DIR_OPT = typer.Option(
     Path("harvest"),
     "--harvest-dir",
     envvar="EXPERIMENT_HARVEST_DIR",
-    help="Directory containing downloaded or local cell outputs",
+    help="Directory containing downloaded or local trial outputs",
 )
 OUTPUT_ZIP_OPT = typer.Option(
     None, "--output", envvar="EXPERIMENT_ARCHIVE_OUT", help="Output zip file path"
@@ -37,7 +37,7 @@ FAIL_MISSING_OPT = typer.Option(
     _CFG.archive.fail_on_missing,
     "--fail-on-missing/--no-fail-on-missing",
     envvar="EXPERIMENT_FAIL_ON_MISSING",
-    help="Fail loudly when any expected cell is missing",
+    help="Fail loudly when any expected trial is missing",
 )
 SKIP_ORACLE_OPT = typer.Option(
     _CFG.archive.skip_oracle,
@@ -94,7 +94,7 @@ def pack(  # noqa: CC102
     run_harvest: bool = HARVEST_FLAG_OPT,
     stage: RunStage = STAGE_OPT,
 ) -> None:
-    """Merge cell outputs into one validated RunArchive zip and render summary."""
+    """Merge trial outputs into one validated RunArchive zip and render summary."""
     parsed_arms = tuple(p.strip() for p in arms.split(",") if p.strip()) or ("A", "B")
     opts = archive_service.PackOptions(
         source_dir=harvest_dir,

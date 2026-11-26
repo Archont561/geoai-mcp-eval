@@ -1,4 +1,4 @@
-"""Pure cache key computation and per-cell cache statistics.
+"""Pure cache key computation and per-trial cache statistics.
 
 Zero I/O and zero framework imports. Keys are SHA-256 hashes over canonical JSON
 carrying ``backend_id``, ``model_digest`` (never a bare tag), ``messages``,
@@ -69,7 +69,7 @@ def is_cacheable_response(payload: Any) -> bool:
 
 
 class CacheStats(BaseModel):
-    """Counts cache hits and misses across all completions in one cell."""
+    """Counts cache hits and misses across all completions in one trial."""
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 

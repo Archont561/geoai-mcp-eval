@@ -10,7 +10,7 @@ study tool and analysis code.
 | `pilot-suite.feature` | Task discovery, result formats, machine-readable reports, validation, and repeated oracle checks |
 | `oracle-grading.feature` | Determinism checks and unreliable grading verdicts |
 | `prototype-runs.feature` | Prototype runs, scoring, token budgets, and caching |
-| `experiment-runs.feature` | Model preparation, tool sessions, and experiment cells with response reuse |
+| `experiment-runs.feature` | Model preparation, tool sessions, and experiment trials with response reuse |
 | `qgis-sandbox.feature` | GIS runtime availability, version reports, and isolated script execution |
 | `workflow.feature` | Research workflow from task validation to archive |
 | `run-archives.feature` | Archive packing, inspection, integrity, and missing trial evidence |

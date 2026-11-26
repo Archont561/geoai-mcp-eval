@@ -55,7 +55,7 @@ def _artifact_lines(run_url: str, rid: str) -> list[str]:
 
 def _oracle_table_lines(oracle_rows: tuple[tuple[str, str], ...]) -> list[str]:
     rows = [(f"`{cell}`", verdict) for cell, verdict in oracle_rows] or [("_none recorded_", "")]
-    table = tabulate(rows, headers=("Cell", "Gate"), tablefmt="github")
+    table = tabulate(rows, headers=("Trial", "Gate"), tablefmt="github")
     return ["### Oracle verdicts", "", *table.splitlines()]
 
 
@@ -63,15 +63,15 @@ def _what_happened_lines(report: CompletenessReport | None) -> list[str]:
     lines = ["## What happened", ""]
     if report is None:
         lines.append(
-            "Preflight-only dispatch (or harvest artifact missing): no cells were "
+            "Preflight-only dispatch (or harvest artifact missing): no trials were "
             "expected and none were run. Re-dispatch with `stage=smoke` to exercise "
             "the pipeline end-to-end."
         )
         return lines
     label = "complete" if report.complete else "INCOMPLETE"
     lines += [
-        f"- Expected cells: {len(report.expected_cells)}",
-        f"- Logged cells (manifest.json lines): {len(report.logged_cells)}",
+        f"- Expected trials: {len(report.expected_cells)}",
+        f"- Logged trials (manifest.json lines): {len(report.logged_cells)}",
         f"- Completeness: {label}",
         "",
     ]
@@ -123,8 +123,8 @@ def render_summary(
         "",
         "## Next steps",
         "",
-        "- If cells failed: inspect the per-cell artifact before re-running.",
-        "- If INCOMPLETE: fix the failing cells; missing runs are never invented.",
+        "- If trials failed: inspect the per-trial artifact before re-running.",
+        "- If INCOMPLETE: fix the failing trials; missing runs are never invented.",
         "- Protocol deviations must be logged in docs/study/implementation.md.",
         f"_(generated {datetime.now(UTC).isoformat()})_",
         "",

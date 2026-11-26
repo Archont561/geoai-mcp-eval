@@ -14,6 +14,18 @@ description: >-
 
 ---
 
+## Study terms
+
+A **treatment** specifies the approach and enforcement settings. A **condition**
+combines a task with a treatment. A **trial** is one execution of that condition,
+identified by its repetition. A **run** is a batch of trials. For example, four
+repetitions of one task and treatment yield four trials in one condition.
+
+Existing records and APIs may use `cell` for either a trial or a condition. The
+legacy names remain unchanged for compatibility: a `cell-*` directory and a
+`cells` summary entry represent individual trials, while `cell_summary_df()`
+aggregates by condition. New analysis code can use `condition_summary_df()`.
+
 ## 6.6 Measurements, graded by asserting complexity
 
 | Tier | Assert (what Python must do) | Examples | Cost to build |
@@ -31,9 +43,9 @@ description: >-
 
 - `WSZ(run) = 1` iff every assertion in `oracle.assertions` passes. No partial
   credit inside WSZ.
-- `OQS(run) = mean(assert_pass_i)` ∈ [0,1] — report mean and median per cell;
+- `OQS(run) = mean(assert_pass_i)` ∈ [0,1] — report mean and median per condition;
   beware skew (bimodal pass/fail).
-- Aggregates per arm×task cell: WSZ̄, OQS, pass^4 (all r pass), ICC; per global:
+- Aggregates per task × treatment condition: WSZ̄, OQS, pass^4 (all r pass), ICC; per global:
   ΔWSZ(A,B) ∈ [−1,1], paired by task.
 - Failure classes (coded from logs, double-coded on ≥15 %):
   `interface-adjacent` (tool pick/params), `workflow-silent` (CRS/units/aggregation),

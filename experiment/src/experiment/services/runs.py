@@ -1,6 +1,6 @@
-"""Prepare and execute experiment runs and their individual cells.
+"""Prepare and execute experiment runs and their individual trials.
 
-Runners live in :mod:`experiment.services.runners`; cell I/O plumbing lives in
+Runners live in :mod:`experiment.services.runners`; trial I/O plumbing lives in
 :mod:`experiment.adapters.harness_io`. These runs verify the pipeline, not study
 results: outputs stay under --output-dir and retain their ``prototype`` label.
 """
@@ -36,12 +36,13 @@ from experiment.services.reports import CellSummary, RunSummary
 from experiment.services.run_spec import RunSpecError, RunSpecInput, parse_enforce, parse_run_spec
 from experiment.services.runners import ollama as drivers
 from experiment.services.runners import scripted
-from experiment.services.runners.ports import CellRequest, RunSpec
+from experiment.services.runners.ports import CellRequest, RunSpec, TrialRequest
 from experiment.services.scoring import score_cell
 
 __all__ = [
     "TASK_ROOT",
     "CellRequest",
+    "TrialRequest",
     "RunSpec",
     "RunSpecError",
     "RunSpecInput",
@@ -51,6 +52,7 @@ __all__ = [
     "parse_run_spec",
     "resolve_output_dir",
     "run_cell",
+    "run_trial",
     "run_experiment",
 ]
 
@@ -90,7 +92,7 @@ def _execute_driver(active_req: CellRequest) -> _CellOutcome:
     driver_fn = _DRIVER_DISPATCH.get((active_req.driver, active_req.arm))
     if driver_fn is None:
         error = f"unknown driver/arm {active_req.driver}/{active_req.arm}"
-        append_transcript(active_req.cell, {"role": "harness", "content": f"cell error: {error}"})
+        append_transcript(active_req.cell, {"role": "harness", "content": f"trial error: {error}"})
         return _CellOutcome(
             status="error", error=error, abort_reason=None, wall_s=round(time.time() - started, 2)
         )
@@ -107,7 +109,7 @@ def _execute_driver(active_req: CellRequest) -> _CellOutcome:
             wall_s=round(time.time() - started, 2),
         )
     except Exception as exc:
-        append_transcript(active_req.cell, {"role": "harness", "content": f"cell error: {exc}"})
+        append_transcript(active_req.cell, {"role": "harness", "content": f"trial error: {exc}"})
         return _CellOutcome(
             status="error",
             error=str(exc),
@@ -184,6 +186,10 @@ def run_cell(req: CellRequest) -> dict[str, Any]:
         {**score, "meta": meta, "measurement": measurement.model_dump(mode="json")},
     )
     return {**meta, "checks": score["checks"], "measurement": measurement.model_dump(mode="json")}
+
+
+# Existing callers and integrations may continue using ``run_cell``.
+run_trial = run_cell
 
 
 def _resolve_run_digest(spec: RunSpec) -> str | None:

@@ -282,7 +282,9 @@ def run_targeted_scripted_pass(cli: CliRunner, output: Path, task_ids: str) -> d
 
 
 @when(
-    parsers.parse('I verify determinism on that cell for task "{task_id}" in code-generation mode'),
+    parsers.parse(
+        'I verify determinism on that trial for task "{task_id}" in code-generation mode'
+    ),
     target_fixture="result",
 )
 def verify_determinism_on_codegen_cell(
@@ -317,16 +319,16 @@ def archive_reports_six(result: dict) -> None:
     assert "TSR=100.00%" in result["output"]
 
 
-@then("the run reports all six cells passed the oracle")
+@then("the run reports all six trials passed the oracle")
 def run_reports_six(result: dict) -> None:
     assert result["exit_code"] == 0, result["output"]
-    assert "6/6 cells oracle-passed" in result["output"], result["output"]
+    assert "6/6 trials oracle-passed" in result["output"], result["output"]
 
 
-@then("the run reports all four cells passed the oracle")
+@then("the run reports all four trials passed the oracle")
 def run_reports_four(result: dict) -> None:
     assert result["exit_code"] == 0, result["output"]
-    assert "4/4 cells oracle-passed" in result["output"], result["output"]
+    assert "4/4 trials oracle-passed" in result["output"], result["output"]
 
 
 @then("every pilot task appears in both paradigms")
@@ -348,7 +350,7 @@ def run_omits_task(output: Path, task_id: str) -> None:
     assert task_id not in {cell["task"] for cell in summary["cells"]}
 
 
-@then("every cell saves a transcript and an oracle score")
+@then("every trial saves a transcript and an oracle score")
 def every_cell_saves_artifacts(output: Path) -> None:
     summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
     assert summary["prototype"] is True
@@ -599,13 +601,13 @@ def request_hosted_model_run(cli: CliRunner, output: Path) -> dict:
     return run_cli(cli, f"run all --driver ollama --backend free-open --output-dir {output}")
 
 
-@when("I request a run with a zero token budget per cell", target_fixture="result")
+@when("I request a run with a zero token budget per trial", target_fixture="result")
 def request_zero_token_budget(cli: CliRunner, output: Path) -> dict:
-    return run_cli(cli, f"run all --max-cell-tokens 0 --output-dir {output}")
+    return run_cli(cli, f"run all --max-trial-tokens 0 --output-dir {output}")
 
 
 @when(
-    parsers.parse('I run a model-driven code-generation cell for task "{task_id}"'),
+    parsers.parse('I run a model-driven code-generation trial for task "{task_id}"'),
     target_fixture="result",
 )
 def run_model_codegen_cell(cli: CliRunner, output: Path, task_id: str) -> dict:
@@ -614,7 +616,7 @@ def run_model_codegen_cell(cli: CliRunner, output: Path, task_id: str) -> dict:
 
 @when(
     parsers.parse(
-        'I run a model-driven code-generation cell for task "{task_id}" '
+        'I run a model-driven code-generation trial for task "{task_id}" '
         "with a budget of {cap:d} tokens"
     ),
     target_fixture="result",
@@ -650,9 +652,9 @@ def selftest_reports_relation(result: dict) -> None:
     assert "FF2F11212" in result["output"]
 
 
-@then("the run summary reports one of one cells passed the oracle")
+@then("the run summary reports one of one trials passed the oracle")
 def run_reports_one_of_one(result: dict) -> None:
-    assert "1/1 cells oracle-passed" in result["output"]
+    assert "1/1 trials oracle-passed" in result["output"]
 
 
 @then("the output folder holds a run summary")
@@ -665,9 +667,9 @@ def output_warns_not_study(result: dict) -> None:
     assert "pipeline verification only, not a study result." in result["output"]
 
 
-@then("the explanation states that no cells were found")
+@then("the explanation states that no trials were found")
 def explanation_no_cells(result: dict, output: Path) -> None:
-    assert f"no cells under {output}" in _unwrapped_output(result)
+    assert f"no trials under {output}" in _unwrapped_output(result)
 
 
 @then("the explanation states that the summary is missing")
@@ -675,10 +677,10 @@ def explanation_summary_missing(result: dict, output: Path) -> None:
     assert f"missing {output / 'summary.json'}" in _unwrapped_output(result)
 
 
-@then("the rescore reports one of one cells passed the oracle")
+@then("the rescore reports one of one trials passed the oracle")
 def rescore_passed_one(rescored: dict) -> None:
     assert rescored["exit_code"] == 0, rescored["output"]
-    assert "1/1 cells oracle-passed" in rescored["output"]
+    assert "1/1 trials oracle-passed" in rescored["output"]
 
 
 @then("displaying the run shows its oracle verdicts")
@@ -697,10 +699,10 @@ def corrupt_and_rescore(cli: CliRunner, output: Path) -> dict:
     return run_cli(cli, f"score eval {output}")
 
 
-@then("the rescore reports zero cells passed the oracle")
+@then("the rescore reports zero trials passed the oracle")
 def rescore_zero_passed(rescored: dict) -> None:
     assert rescored["exit_code"] == 0, rescored["output"]
-    assert "0/1 cells oracle-passed" in rescored["output"]
+    assert "0/1 trials oracle-passed" in rescored["output"]
     assert "✗" in rescored["output"]
 
 
@@ -785,7 +787,7 @@ def transcript_unavailable_usage(output: Path) -> None:
 
 @then(
     parsers.parse(
-        "the run records report unavailable token totals with {missing:d} missing-usage cell"
+        "the run records report unavailable token totals with {missing:d} missing-usage trial"
     )
 )
 def run_records_unavailable_totals(output: Path, missing: int) -> None:
@@ -799,7 +801,7 @@ def run_records_unavailable_totals(output: Path, missing: int) -> None:
         assert usage["warnings"]
 
 
-@then("the cell stops for exceeding the token budget without running generated code")
+@then("the trial stops for exceeding the token budget without running generated code")
 def cell_aborted_token_budget(output: Path) -> None:
     cell_dir = output / "cell-B-analysis-de9im-001-r1"
     assert not (cell_dir / "result.json").exists()
@@ -813,7 +815,7 @@ def cell_aborted_token_budget(output: Path) -> None:
     assert score["meta"]["abort_reason"] == "token_cap_exceeded"
 
 
-@then(parsers.parse("the run records show {aborted:d} aborted cell and {tot:d} total tokens"))
+@then(parsers.parse("the run records show {aborted:d} aborted trial and {tot:d} total tokens"))
 def run_records_aborted(output: Path, aborted: int, tot: int) -> None:
     summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
     manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
@@ -846,7 +848,7 @@ def simulated_endpoint_counting(monkeypatch: pytest.MonkeyPatch, digest: str) ->
 
 
 @when(
-    "I run the same cached cell twice and a third time with caching bypassed",
+    "I run two trials of the same cached condition and a third with caching bypassed",
     target_fixture="cache_runs",
 )
 def run_cached_cell_three_times(cli: CliRunner, output: Path, tmp_path: Path) -> list[dict]:
@@ -1063,11 +1065,11 @@ def prepared_workflow_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     return {"root": tmp_path, "seen": seen}
 
 
-@when("the researcher runs a pilot cell and a smoke cell")
+@when("the researcher runs a pilot trial and a smoke trial")
 def run_pilot_and_smoke(cli: CliRunner, workflow_runtime: dict) -> None:
     workflow_runtime["pilot"] = run_cli(
         cli,
-        "run cell --arm A --task-id analysis-de9im-001 --stage pilot "
+        "run trial --arm A --task-id analysis-de9im-001 --stage pilot "
         "--model qwen2.5:3b --run-id rid-p",
     )
     workflow_runtime["smoke"] = run_cli(
@@ -1085,7 +1087,7 @@ def pilot_identity_and_grade(workflow_runtime: dict) -> None:
     assert manifest["status"] == "ok" and manifest["oracle_passed"] is True
 
 
-@then("the smoke cell records a simulated check")
+@then("the smoke trial records a simulated check")
 def smoke_cell_is_simulated(workflow_runtime: dict) -> None:
     assert workflow_runtime["smoke"]["exit_code"] == 0, workflow_runtime["smoke"]
     cell = workflow_runtime["root"] / "results/rid-s/cell-B-analysis-de9im-001-r1"
@@ -1104,7 +1106,7 @@ def mixed_workflow_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     return {"captured": captured}
 
 
-@when("the researcher starts a workflow cell with response reuse enabled")
+@when("the researcher starts a workflow trial with response reuse enabled")
 def start_cell_with_reuse(cli: CliRunner, workflow_settings: dict) -> None:
     current = cli.invoke(
         app,
@@ -1120,7 +1122,7 @@ def start_cell_with_reuse(cli: CliRunner, workflow_settings: dict) -> None:
     workflow_settings["current"] = workflow_settings["captured"][-1]
 
 
-@then("the cell uses the current settings and enables reuse")
+@then("the trial uses the current settings and enables reuse")
 def current_settings_are_used(workflow_settings: dict) -> None:
     spec = workflow_settings["current"]
     assert (spec.run_id, spec.model, spec.use_cache) == ("new-run-id", "new-model:7b", True)
@@ -1142,7 +1144,7 @@ def legacy_settings_are_supported(
     assert (spec.run_id, spec.model, spec.use_cache) == ("legacy-run-id", "legacy-model:3b", True)
 
 
-@then("the cell uses the older settings and enables reuse")
+@then("the trial uses the older settings and enables reuse")
 def legacy_settings_are_used(workflow_settings: dict) -> None:
     spec = workflow_settings["captured"][-1]
     assert (spec.run_id, spec.model, spec.use_cache) == ("legacy-run-id", "legacy-model:3b", True)
@@ -1379,7 +1381,7 @@ def missing_credential_explained(result: dict) -> None:
 
 @then("the explanation says the token budget must be positive")
 def token_budget_explained(result: dict) -> None:
-    assert "--max-cell-tokens must be a positive integer" in _plain_output(result)
+    assert "--max-trial-tokens must be a positive integer" in _plain_output(result)
 
 
 @given(
@@ -1494,3 +1496,21 @@ def fallback_config_is_used(study_config_case: dict) -> None:
     config = study_config_case["result"]
     assert config.experiment.default_backend == "local"
     assert config.backends == {}
+
+
+@when(
+    "I request invalid trial budgets using the current and earlier options",
+    target_fixture="budget_aliases",
+)
+def request_both_budget_spellings(cli: CliRunner, output: Path) -> list[dict]:
+    return [
+        run_cli(cli, f"run all {option} 0 --output-dir {output}")
+        for option in ("--max-trial-tokens", "--max-cell-tokens")
+    ]
+
+
+@then("both options report the same invalid-budget explanation")
+def both_budget_spellings_rejected(budget_aliases: list[dict]) -> None:
+    for result in budget_aliases:
+        assert result["exit_code"] == 2
+        assert "--max-trial-tokens must be a positive integer" in _plain_output(result)

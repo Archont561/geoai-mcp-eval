@@ -42,7 +42,7 @@ class PathsConfig(BaseModel):
 
 
 class RunnerConfig(BaseModel):
-    """Per-cell execution guardrails for LLM and sandbox runners."""
+    """Per-trial execution guardrails for LLM and sandbox runners."""
 
     model_config = _STRICT_CONFIG
 

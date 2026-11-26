@@ -40,10 +40,10 @@ from experiment.domain.usage import (
     extract_response_usage,
 )
 from experiment.services.runners.ports import (
-    CellRequest,
     CompletionCachePort,
     HarnessPorts,
     ToolSession,
+    TrialRequest,
 )
 
 _MAX_TOOL_STEPS = 8
@@ -51,16 +51,16 @@ _TOOL_RESULT_CAP = 12000
 _TRANSCRIPT_USER_CAP = 2000
 
 
-# Kept as dataclass (not BaseModel): binds CellRequest with non-serializable HarnessPorts.
+# Kept as dataclass (not BaseModel): binds TrialRequest with non-serializable HarnessPorts.
 @dataclass(frozen=True)
 class _CellContext:
-    """Bundled request and injected ports for executing one cell."""
+    """Bundled request and injected ports for executing one trial."""
 
-    req: CellRequest
+    req: TrialRequest
     ports: HarnessPorts
 
 
-def _build_default_ports(req: CellRequest) -> HarnessPorts:
+def _build_default_ports(req: TrialRequest) -> HarnessPorts:
     profile = req.profile or backends.fallback_profile(req.host, req.model)
     cache: CompletionCachePort | None = (
         CompletionCache(req.cache_dir) if (req.use_cache and req.model_digest) else None
@@ -86,7 +86,7 @@ def _initial_messages(ctx: _CellContext, system: str, user: str) -> list[dict[st
     return messages
 
 
-def _record_completion_usage(req: CellRequest, reply: dict[str, Any]) -> UsageSnapshot:
+def _record_completion_usage(req: TrialRequest, reply: dict[str, Any]) -> UsageSnapshot:
     snapshot = extract_response_usage(reply)
     if req.usage is not None:
         req.usage.record(snapshot)
@@ -278,8 +278,8 @@ def _run_arm_b(ctx: _CellContext) -> None:
     _execute_arm_b_reply(ctx, content, fixture_src)
 
 
-def ollama_arm_a(req: CellRequest, *, ports: HarnessPorts | None = None) -> None:
-    """Execute one Arm A (Typed MCP) cell over live or injected ports."""
+def ollama_arm_a(req: TrialRequest, *, ports: HarnessPorts | None = None) -> None:
+    """Execute one Arm A (Typed MCP) trial over live or injected ports."""
     active_ports = ports if ports is not None else _build_default_ports(req)
     try:
         _run_arm_a(_CellContext(req=req, ports=active_ports))
@@ -288,8 +288,8 @@ def ollama_arm_a(req: CellRequest, *, ports: HarnessPorts | None = None) -> None
             active_ports.chat.close()
 
 
-def ollama_arm_b(req: CellRequest, *, ports: HarnessPorts | None = None) -> None:
-    """Execute one Arm B (Codegen) cell over live or injected ports."""
+def ollama_arm_b(req: TrialRequest, *, ports: HarnessPorts | None = None) -> None:
+    """Execute one Arm B (Codegen) trial over live or injected ports."""
     active_ports = ports if ports is not None else _build_default_ports(req)
     try:
         _run_arm_b(_CellContext(req=req, ports=active_ports))

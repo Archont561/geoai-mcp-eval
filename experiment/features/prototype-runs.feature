@@ -49,11 +49,11 @@ Feature: Experiment runs, oracle rescoring, token budgets, and caching
 
   Rule: Scripted runs produce scored outputs that can be rescored and audited
 
-    Scenario: Scripted single-task run produces a scored cell with a study disclaimer
+    Scenario: Scripted single-task run produces a scored trial with a study disclaimer
       Given a fresh experiment output folder
       When I run a scripted benchmark for task "analysis-de9im-001" in code-generation mode
       Then the action succeeds
-      And the run summary reports one of one cells passed the oracle
+      And the run summary reports one of one trials passed the oracle
       And the output folder holds a run summary
       And the output warns that this is not a study result
 
@@ -61,17 +61,17 @@ Feature: Experiment runs, oracle rescoring, token budgets, and caching
       Given a fresh experiment output folder
       When I run a scripted benchmark for task "analysis-de9im-001" in code-generation mode
       And I rescore that completed run
-      Then the rescore reports one of one cells passed the oracle
+      Then the rescore reports one of one trials passed the oracle
       And displaying the run shows its oracle verdicts
       When I corrupt the saved result and rescore again
-      Then the rescore reports zero cells passed the oracle
+      Then the rescore reports zero trials passed the oracle
 
     @edge_case
     Scenario: Scoring an empty output folder fails clearly
       Given an empty experiment output folder with a long path
       When I attempt to score that empty output folder
       Then the action exits with status 1
-      And the explanation states that no cells were found
+      And the explanation states that no trials were found
 
     @edge_case
     Scenario: Displaying scores for a folder without a summary fails clearly
@@ -125,11 +125,19 @@ Feature: Experiment runs, oracle rescoring, token budgets, and caching
       And no output folder is created
 
     @edge_case
-    Scenario: Non-positive per-cell token budget is refused before starting
+    Scenario: Non-positive per-trial token budget is refused before starting
       Given a fresh experiment output folder
-      When I request a run with a zero token budget per cell
+      When I request a run with a zero token budget per trial
       Then the action exits with status 2
       And the explanation says the token budget must be positive
+      And no output folder is created
+
+  Rule: Earlier token-budget settings remain compatible
+
+    Scenario: Current and earlier token-budget options reject the same invalid value
+      Given a fresh experiment output folder
+      When I request invalid trial budgets using the current and earlier options
+      Then both options report the same invalid-budget explanation
       And no output folder is created
 
   Rule: Model runs record token usage, enforce token budgets, and reuse cached responses
@@ -137,7 +145,7 @@ Feature: Experiment runs, oracle rescoring, token budgets, and caching
     Scenario: Model token counts are recorded in the transcript and run records
       Given a fresh experiment output folder
       And a simulated model endpoint reporting 120 input and 35 output tokens
-      When I run a model-driven code-generation cell for task "analysis-de9im-001"
+      When I run a model-driven code-generation trial for task "analysis-de9im-001"
       Then the action succeeds
       And the transcript records 120 input and 35 output tokens without warnings
       And the run records report totals of 120 input, 35 output, and 155 total tokens
@@ -145,22 +153,22 @@ Feature: Experiment runs, oracle rescoring, token budgets, and caching
     Scenario: Missing token usage is recorded as unavailable with an explicit warning
       Given a fresh experiment output folder
       And a simulated model endpoint reporting no token usage
-      When I run a model-driven code-generation cell for task "analysis-de9im-001"
+      When I run a model-driven code-generation trial for task "analysis-de9im-001"
       Then the action succeeds
       And the transcript records unavailable usage with an explicit warning
-      And the run records report unavailable token totals with 1 missing-usage cell
+      And the run records report unavailable token totals with 1 missing-usage trial
 
     @edge_case
-    Scenario: Exceeding the cell token budget aborts cleanly before executing code
+    Scenario: Exceeding the trial token budget aborts cleanly before executing code
       Given a fresh experiment output folder
       And a simulated model endpoint reporting 400 input and 100 output tokens
-      When I run a model-driven code-generation cell for task "analysis-de9im-001" with a budget of 100 tokens
+      When I run a model-driven code-generation trial for task "analysis-de9im-001" with a budget of 100 tokens
       Then the action exits with status 1
-      And the cell stops for exceeding the token budget without running generated code
-      And the run records show 1 aborted cell and 500 total tokens
+      And the trial stops for exceeding the token budget without running generated code
+      And the run records show 1 aborted trial and 500 total tokens
 
     Scenario: Digest-pinned caching reuses valid replies unless caching is disabled
       Given a fresh experiment output folder
       And a simulated model endpoint pinned to digest "sha256:pin-1" counting requests
-      When I run the same cached cell twice and a third time with caching bypassed
+      When I run two trials of the same cached condition and a third with caching bypassed
       Then the endpoint answered 2 requests with cache reuse false, true, false

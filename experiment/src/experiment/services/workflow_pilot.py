@@ -1,4 +1,4 @@
-"""Pilot cell execution helper backing ``workflow.run_workflow_cell(stage="pilot")``."""
+"""Pilot trial execution helper backing ``workflow.run_workflow_cell(stage="pilot")``."""
 
 from __future__ import annotations
 
@@ -13,13 +13,13 @@ from experiment.adapters.harness_io import append_transcript
 from experiment.adapters.task_repository import find_task_file, load_task
 from experiment.domain.run import Arm, Driver
 from experiment.services import runs as runs_service
-from experiment.services.runners.ports import CellRequest
+from experiment.services.runners.ports import TrialRequest
 
 OLLAMA_API = ollama_adapter.DEFAULT_BASE_URL
 
 
 class WorkflowCellSpec(BaseModel):
-    """Parameters for one workflow cell execution."""
+    """Parameters for one workflow trial execution."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -51,10 +51,10 @@ def _build_pilot_request(
     spec: WorkflowCellSpec,
     run_id: str,
     digest: str | None,
-) -> CellRequest:
+) -> TrialRequest:
     task_path = find_task_file(paths.tasks_root(repo_root), spec.task_id)
     profile = backends.resolve_profile(backends.LOCAL_BACKEND, host=OLLAMA_API, model=spec.model)
-    return CellRequest(
+    return TrialRequest(
         task_path=task_path,
         task=load_task(task_path),
         arm=spec.arm,
@@ -80,7 +80,7 @@ def execute_pilot_cell(
     base: dict[str, object],
     ollama_bin: str,
 ) -> dict[str, object]:
-    """Run one pilot cell through ``runs.run_cell`` and return its manifest payload."""
+    """Run one pilot trial through ``runs.run_cell`` and return its manifest payload."""
     digest = resolve_pilot_digest(ollama_bin, spec.model)
     append_transcript(cell_dir, {"role": "meta", **base, "model_digest": digest})
     req = _build_pilot_request(repo_root, cell_dir, spec, str(base["run_id"]), digest)

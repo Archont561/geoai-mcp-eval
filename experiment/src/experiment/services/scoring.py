@@ -1,4 +1,4 @@
-"""Score experiment cells, rescore runs/archives, run determinism gate, and load summaries."""
+"""Score experiment trials, rescore runs/archives, run determinism gate, and load summaries."""
 
 from __future__ import annotations
 
