@@ -85,9 +85,9 @@ per_trial
 ## Cell 3 — Predicate Score (`predicate_score` / OQS) per trial
 
 **Result.** `predicate_score = mean(assert pass_i)` over the task's own named predicates, ∈ [0, 1];
-per-cell contract reports mean **and** median (bimodal pass/fail skew expected with real data).
+per-condition contract reports mean **and** median (bimodal pass/fail skew expected with real data).
 Illustration rows give `predicate_score = 0.0000` everywhere; the mean/median split the contract
-asks for is still computed below so the cells are ready for real rows.
+asks for is still computed below so the summaries are ready for real rows.
 
 ```{marimo} python
 def predicate_score(row: pd.Series) -> float:
@@ -103,12 +103,12 @@ print(
 per_trial
 ```
 
-## Cell 4 — Aggregates per `task_id × paradigm × enforcement_level` cell
+## Cell 4 — Aggregates per `task_id × paradigm × enforcement_level` condition
 
-**Result.** Mirrors `RunDataset.cell_summary_df()`: `n_trials`, `task_success_rate` (TSR / WSZ̄),
+**Result.** Mirrors `RunDataset.condition_summary_df()`: `n_trials`, `task_success_rate` (TSR / WSZ̄),
 `predicate_score_mean` (MPS / OQS̄), `predicate_score_median`, and `pass_at_k` (all `k` trials in
-the cell pass). Repetitions per cell in the preregistered study grid are `r = 4` (pilot `r = 2`);
-the illustration carries one synthetic row per cell, so every `pass_at_k` is `False` and rates
+the condition pass). Repetitions per condition in the preregistered study grid are `r = 4` (pilot `r = 2`);
+the illustration carries one synthetic row per condition, so every `pass_at_k` is `False` and rates
 are `0`.
 
 ```{marimo} python

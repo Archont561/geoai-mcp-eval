@@ -43,7 +43,7 @@ class Arm(StrEnum):
 
 
 class Driver(StrEnum):
-    """Cell execution driver backend."""
+    """Trial execution driver backend."""
 
     SCRIPTED = "scripted"
     OLLAMA = "ollama"

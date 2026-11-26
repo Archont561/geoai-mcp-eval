@@ -7,7 +7,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from experiment.services.runners.ports import CellRequest, RunSpec
+from experiment.services.runners.ports import CellRequest, RunSpec, TrialRequest
 
 
 @given(repetitions=st.integers(min_value=1, max_value=50))
@@ -28,6 +28,7 @@ def test_run_spec_roundtrips_positive_repetitions(repetitions: int) -> None:
 def test_run_spec_and_cell_request_reject_non_positive_repetitions(
     sample_cell_request: CellRequest, bad_rep: int
 ) -> None:
+    assert TrialRequest is CellRequest
     with pytest.raises(ValidationError):
         RunSpec(
             arms=("A",),

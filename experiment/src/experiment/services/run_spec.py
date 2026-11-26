@@ -82,7 +82,7 @@ def _validate_run_inputs(driver: str, max_cell_tokens: int | None, repetitions: 
     except ValueError as exc:
         raise RunSpecError(str(exc)) from exc
     if max_cell_tokens is not None and max_cell_tokens < 1:
-        raise RunSpecError("--max-cell-tokens must be a positive integer")
+        raise RunSpecError("--max-trial-tokens must be a positive integer")
     if repetitions < 1:
         raise RunSpecError("--repetitions must be a positive integer")
 

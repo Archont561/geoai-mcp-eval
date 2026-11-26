@@ -1,4 +1,4 @@
-"""Pure token usage accounting and per-cell budget enforcement.
+"""Pure token usage accounting and per-trial budget enforcement.
 
 Zero I/O and zero framework imports. Token counts come strictly from endpoint
 responses; missing values stay ``None`` with an explicit warning and are never
@@ -21,14 +21,14 @@ ABORT_REASON_TOKEN_CAP = "token_cap_exceeded"
 
 
 class TokenCapExceededError(Exception):
-    """Raised when reported cell token usage exceeds ``--max-cell-tokens``."""
+    """Raised when reported trial token usage exceeds the trial budget."""
 
     def __init__(self, tokens_used: int, max_cell_tokens: int) -> None:
         self.tokens_used = tokens_used
         self.max_cell_tokens = max_cell_tokens
         self.reason = ABORT_REASON_TOKEN_CAP
         super().__init__(
-            f"{ABORT_REASON_TOKEN_CAP}: cell used {tokens_used} tokens (cap: {max_cell_tokens})"
+            f"{ABORT_REASON_TOKEN_CAP}: trial used {tokens_used} tokens (cap: {max_cell_tokens})"
         )
 
 
@@ -96,7 +96,7 @@ def extract_response_usage(reply: Mapping[str, Any]) -> UsageSnapshot:
 
 
 class UsageAccumulator(BaseModel):
-    """Accumulates reported token usage across all completions in one cell."""
+    """Accumulates reported token usage across all completions in one trial."""
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
@@ -155,7 +155,7 @@ class UsageAccumulator(BaseModel):
         return TokenUsage.from_summary_dict(self.to_summary())
 
     def to_summary(self) -> dict[str, Any]:
-        """Return a JSON-safe per-cell usage summary without imputing missing values."""
+        """Return a JSON-safe per-trial usage summary without imputing missing values."""
         if self.llm_calls == 0:
             warnings = list(self.warnings)
             if WARNING_NO_LLM_CALLS not in warnings:
@@ -217,7 +217,7 @@ def _is_missing_usage_cell(cell: Mapping[str, Any]) -> bool:
 
 
 def aggregate_run_usage(cell_usages: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """Sum token counts across cells; keep a total ``None`` if any cell lacks it."""
+    """Sum token counts across trials; keep a total ``None`` if any trial lacks it."""
     llm_calls = sum(int(cell.get("llm_calls") or 0) for cell in cell_usages)
     cells_with_usage = sum(1 for cell in cell_usages if _is_complete_cell(cell))
     cells_missing_usage = sum(1 for cell in cell_usages if _is_missing_usage_cell(cell))

@@ -17,7 +17,7 @@ from experiment.domain.run._common import (
 
 
 class Treatment(BaseModel):
-    """Experimental condition applied to a task (paradigm + boundary enforcement)."""
+    """Approach and enforcement settings applied to a task, independent of the task."""
 
     model_config = STRICT_MODEL
 
@@ -39,7 +39,7 @@ class Treatment(BaseModel):
 
 
 class TrialKey(BaseModel):
-    """Unique observational key: (task, paradigm, enforcement_level, repetition)."""
+    """Identify one trial: a condition (task and treatment) plus repetition."""
 
     model_config = STRICT_MODEL
 

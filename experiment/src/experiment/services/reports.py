@@ -56,7 +56,7 @@ class CheckView(BaseModel):
 
 
 class CellSummary(BaseModel):
-    """Typed summary of one executed or rescored cell."""
+    """Typed summary of one executed or rescored trial."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -121,6 +121,10 @@ class CellSummary(BaseModel):
         )
 
 
+# Preserve the historic class while exposing the study terminology.
+TrialSummary = CellSummary
+
+
 class RunSummary(BaseModel):
     """Typed summary of an experiment run (live, scripted, rescored, or loaded from archive)."""
 
@@ -139,6 +143,11 @@ class RunSummary(BaseModel):
     use_cache: bool | None = None
     max_cell_tokens: int | None = None
     usage: dict[str, Any] | None = None
+
+    @property
+    def trials(self) -> tuple[TrialSummary, ...]:
+        """Trial summaries; the serialized ``cells`` field remains compatible."""
+        return self.cells
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {

@@ -1,4 +1,4 @@
-"""Experiment pipeline services (preflight, model pin, cell smoke/pilot, harvest).
+"""Experiment pipeline services (preflight, model pin, trial smoke/pilot, harvest).
 
 Pure service layer (no CLI/presentation framework imports, no direct transport
 or subprocess I/O) backing ``experiment env|run|archive`` and Tasknest manifest
@@ -132,7 +132,7 @@ def _ensure_cell_ollama(
     )
     if owner is not None and not ollama_adapter.wait_ready(OLLAMA_API):
         ollama_adapter.stop_ollama(owner)
-        raise RuntimeError("ollama did not become ready; see cell ollama-serve.log")
+        raise RuntimeError("ollama did not become ready; see trial ollama-serve.log")
     return owner
 
 
@@ -177,7 +177,7 @@ def _cell_base_metadata(spec: WorkflowCellSpec, rid: str) -> dict[str, object]:
 
 
 def run_workflow_cell(spec: WorkflowCellSpec) -> Path:
-    """Run one (arm, task, repetition) cell for either smoke or pilot stage."""
+    """Run one trial (approach, task, repetition) for either smoke or pilot stage."""
     repo_root = find_repo_root()
     rid = resolve_run_id(spec.run_id)
     cell_dir = run_store.ensure_dir(
@@ -206,7 +206,7 @@ def run_workflow_cell(spec: WorkflowCellSpec) -> Path:
 
 
 class HarvestConfig(BaseModel):
-    """Parameters for harvesting experiment cell outputs."""
+    """Parameters for harvesting experiment trial outputs."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -313,7 +313,7 @@ def _build_harvest_summary(
 
 
 def run_harvest(cfg: HarvestConfig) -> dict[str, object]:
-    """Merge cell manifests, run the oracle determinism gate, and check completeness."""
+    """Merge trial manifests, run the oracle determinism gate, and check completeness."""
     repo_root = find_repo_root()
     rid = resolve_run_id(cfg.run_id)
     harvest = cfg.harvest_dir if cfg.harvest_dir.is_absolute() else (repo_root / cfg.harvest_dir)
@@ -336,6 +336,6 @@ def run_harvest(cfg: HarvestConfig) -> dict[str, object]:
         missing_str = ", ".join(_cell_label(a, t, r) for a, t, r in comp.missing)
         raise RuntimeError(
             f"completeness assertion failed: {len(comp.missing)} missing run(s): "
-            f"{missing_str} — never invented; fix the cells and re-run"
+            f"{missing_str} — never invented; fix the trials and re-run"
         )
     return summary

@@ -1,5 +1,5 @@
 @runs
-Feature: Model-driven experiment cells
+Feature: Model-driven experiment trials
   Study runs compare typed GIS tools with generated code under controlled conditions.
 
   Rule: Model instructions remain consistent with the ratified study
@@ -27,20 +27,20 @@ Feature: Model-driven experiment cells
 
     Scenario: A model uses a GIS tool before giving its result
       Given a model response requesting geographic feature information
-      When the researcher runs a typed-tool experiment cell
+      When the researcher runs a typed-tool experiment trial
       Then the requested GIS operation is performed in one tool session
       And the model's final geographic result is saved
 
-    Scenario: A typed-tool cell records and grades a geographic result
+    Scenario: A typed-tool trial records and grades a geographic result
       Given a model requests a geographic tool and then returns a result
-      When the researcher runs a typed-tool cell end to end
+      When the researcher runs a typed-tool trial end to end
       Then the result passes grading and the tool use is recorded
 
     @edge_case
     Scenario: An unavailable tool is recorded without losing the model's final answer
       Given a model requests an unavailable geographic tool before giving its result
-      When the researcher runs a typed-tool experiment cell with that response
-      Then the cell completes and its transcript records the unavailable tool
+      When the researcher runs a typed-tool experiment trial with that response
+      Then the trial completes and its transcript records the unavailable tool
 
   Rule: Typed geographic tools stay available throughout a model session
 
@@ -56,33 +56,33 @@ Feature: Model-driven experiment cells
       When the researcher requests that operation
       Then the tool service identifies the unknown operation
 
-  Rule: Successful model replies can be reused for identical code-generation cells
+  Rule: Successful model replies can be reused for identical code-generation trials
 
-    Scenario: A repeated code-generation cell reuses the model reply
+    Scenario: A repeated code-generation condition reuses the model reply
       Given a model supplies code for a geographic result
-      When the researcher runs the same code-generation cell twice
+      When the researcher runs two trials of the same code-generation condition
       Then the generated code runs against the task fixture
       And the result is saved
-      And the second cell reuses the first model response
+      And the second trial reuses the first model response
 
     Scenario: Changing or omitting model identity prevents unsafe reuse
       Given a model response and a shared response cache
-      When the researcher repeats cells with changed, absent, and bypassed model identities
+      When the researcher repeats trials with changed, absent, and bypassed model identities
       Then reuse occurs only for the matching pinned identity
 
     @edge_case
     Scenario: A failed model response is not stored for reuse
       Given a model service that fails the response request
-      When the researcher runs a cached model cell
-      Then the cell fails and the response cache stays empty
+      When the researcher runs a cached model trial
+      Then the trial fails and the response cache stays empty
 
-  Rule: A failing driver is recorded as a failed cell
+  Rule: A failing driver is recorded as a failed trial
 
     @edge_case
     Scenario: A driver fails unexpectedly
-      Given a cell whose driver fails unexpectedly
-      When the researcher executes that cell
-      Then the cell records a failed status and failed grading
+      Given a trial whose driver fails unexpectedly
+      When the researcher executes that trial
+      Then the trial records a failed status and failed grading
 
   Rule: Scripted runs explicitly report unavailable model usage
 
@@ -95,12 +95,12 @@ Feature: Model-driven experiment cells
 
     Scenario: Generated code sees only its input and produces a graded result
       Given the model supplies executable code that inspects its input workspace
-      When the researcher runs a code-generation cell end to end
-      Then the result passes grading and the input is not left in the cell directory
+      When the researcher runs a code-generation trial end to end
+      Then the result passes grading and the input is not left in the trial directory
 
     Scenario Outline: Supported code presentation styles produce a result
       Given the model supplies executable code in the <style> presentation style
-      When the researcher runs a code-generation cell end to end
+      When the researcher runs a code-generation trial end to end
       Then the generated result passes grading
 
       Examples:
@@ -111,8 +111,8 @@ Feature: Model-driven experiment cells
     @edge_case
     Scenario Outline: Responses without executable code do not produce a result
       Given the model supplies <response> instead of executable code
-      When the researcher runs a code-generation cell end to end
-      Then the cell fails grading without saving a result
+      When the researcher runs a code-generation trial end to end
+      Then the trial fails grading without saving a result
       And the transcript explains that executable code was missing
 
       Examples:
@@ -131,18 +131,18 @@ Feature: Model-driven experiment cells
       When the researcher runs a geographic-library script in isolation
       Then the geographic script completes without diagnostics
 
-  Rule: Token budgets apply across all model responses in a cell
+  Rule: Token budgets apply across all model responses in a trial
 
-    Scenario: A cell within its budget records the total model usage
+    Scenario: A trial within its budget records the total model usage
       Given a model requests a geographic tool and then returns a result
-      And the cell has enough tokens for both responses
-      When the researcher runs the cell with its budget
-      Then the cell completes and records the combined token usage
+      And the trial has enough tokens for both responses
+      When the researcher runs the trial with its budget
+      Then the trial completes and records the combined token usage
 
     @edge_case
-    Scenario: Exceeding the budget stops the cell before the requested tool runs
+    Scenario: Exceeding the budget stops the trial before the requested tool runs
       Given a model requests a geographic tool and then returns a result
-      And the first response exceeds the cell's token budget
-      When the researcher runs the cell with its budget
-      Then the cell is stopped for exceeding its budget
+      And the first response exceeds the trial's token budget
+      When the researcher runs the trial with its budget
+      Then the trial is stopped for exceeding its budget
       And the requested geographic tool is not executed

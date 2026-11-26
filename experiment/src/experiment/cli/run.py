@@ -1,4 +1,4 @@
-"""Paradigm-specific experiment execution commands (mcp, codegen, all, cell, smoke)."""
+"""Paradigm-specific experiment execution commands (mcp, codegen, all, trial, smoke)."""
 
 from __future__ import annotations
 
@@ -48,13 +48,14 @@ REPETITIONS_OPTION = typer.Option(
     _CFG.experiment.default_repetitions,
     "--repetitions",
     envvar="EXPERIMENT_REPETITIONS",
-    help="Repetitions per (task, arm) cell",
+    help="Trials per condition (task, approach and enforcement level)",
 )
 OUTPUT_OPTION = typer.Option(None, "--output-dir", help="Output directory for run artifacts")
 MAX_CELL_TOKENS_OPTION = typer.Option(
     _CFG.runner.max_cell_tokens,
+    "--max-trial-tokens",
     "--max-cell-tokens",
-    help="Abort cell if reported tokens exceed this positive integer",
+    help="Abort a trial if reported tokens exceed this positive integer",
 )
 CACHE_OPTION = typer.Option(
     _CFG.experiment.use_llm_cache,
@@ -141,9 +142,9 @@ def _run_with_progress(root: Path, spec: RunSpec, out: Path) -> runs.RunSummary:
         console=console,
         transient=True,
     ) as progress:
-        overall = progress.add_task("cells …", total=None)
+        overall = progress.add_task("trials …", total=None)
         summary = runs.run_experiment(root, spec, out)
-        progress.update(overall, description="cells done")
+        progress.update(overall, description="trials done")
     return summary
 
 
@@ -244,7 +245,8 @@ def run_codegen(  # noqa: CC102
     _execute_run(_RunOptions.model_validate(dict(zip(_RUN_FIELDS, t1 + t2 + t3, strict=True))))
 
 
-@app.command("cell")
+@app.command("cell", hidden=True)
+@app.command("trial")
 def run_cell(  # noqa: CC102
     arm: Arm = CELL_ARM_OPT,
     task_id: str = CELL_TASK_OPT,
@@ -255,7 +257,7 @@ def run_cell(  # noqa: CC102
     run_id: str = CELL_RUN_ID_OPT,
     use_cache: bool = CELL_CACHE_OPT,
 ) -> None:
-    """Run one CI matrix cell (arm, task, repetition) for smoke or pilot stage."""
+    """Run one trial (task, approach and repetition) for smoke or pilot stage."""
     spec = workflow_service.WorkflowCellSpec(
         arm=arm,
         task_id=task_id,
@@ -271,7 +273,7 @@ def run_cell(  # noqa: CC102
     except RuntimeError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
-    typer.echo(f"cell complete: arm={arm} task={task_id} rep={repetition} -> {cell_dir}")
+    typer.echo(f"trial complete: arm={arm} task={task_id} rep={repetition} -> {cell_dir}")
 
 
 @app.command("smoke")

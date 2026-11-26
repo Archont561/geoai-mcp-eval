@@ -6,6 +6,18 @@ Thesis experiment code: **does the integration interface matter?** Expose geopro
 
 > **Status: pre-experiment.** The repository contains a Typer experiment CLI and a QGIS plugin prototype. The protocol isn't frozen, no confirmatory runs have been made, and nothing here is a study result. The preregistration tag `v1.0-prereg` is the intended freeze point.
 
+## Study terminology
+
+- A **treatment** specifies an approach and enforcement settings, independent of the task.
+- A **condition** combines one task with one treatment.
+- A **trial** is one execution of a condition; repeated trials have different repetition numbers.
+- A **run** is a batch of trials. Analysis tables aggregate trials by condition.
+
+Legacy names such as `cell`, `cells`, and `max_cell_tokens` remain in stored records,
+configuration, APIs, and artifact paths for compatibility. The CLI accepts the old
+`run cell` and `--max-cell-tokens` spellings alongside `run trial` and
+`--max-trial-tokens`; existing archives and automation need no migration.
+
 ## Layout
 
 ```text

@@ -40,7 +40,7 @@ class RunSpec(BaseModel):
 
 
 class CellRequest(BaseModel):
-    """Everything one (task, arm) cell needs; threaded through runners."""
+    """Inputs for one trial, including its legacy ``cell`` artifact path."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -62,6 +62,10 @@ class CellRequest(BaseModel):
     cache_stats: CacheStats | None = None
     enforce: str = "semantic_repair"
     repetition: int = Field(default=1, ge=1)
+
+
+# The legacy class and field names remain readable for callers and stored payloads.
+TrialRequest = CellRequest
 
 
 class ChatGateway(Protocol):

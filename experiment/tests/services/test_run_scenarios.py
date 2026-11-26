@@ -48,7 +48,7 @@ def model_requests_feature_info(fake_chat_gateway: MagicMock) -> None:
     fake_chat_gateway.complete.side_effect = [tool_reply, final_reply]
 
 
-@when("the researcher runs a typed-tool experiment cell")
+@when("the researcher runs a typed-tool experiment trial")
 def run_typed_cell(sample_cell_request: CellRequest, fake_harness_ports: HarnessPorts) -> None:
     ollama_arm_a(sample_cell_request, ports=fake_harness_ports)
 
@@ -79,7 +79,10 @@ def model_supplies_code(fake_chat_gateway: MagicMock, fake_code_sandbox: MagicMo
     )
 
 
-@when("the researcher runs the same code-generation cell twice", target_fixture="repeated_request")
+@when(
+    "the researcher runs two trials of the same code-generation condition",
+    target_fixture="repeated_request",
+)
 def run_codegen_twice(
     sample_cell_request: CellRequest, fake_harness_ports: HarnessPorts
 ) -> CellRequest:
@@ -106,7 +109,7 @@ def code_result_saved(fake_cell_workspace: MagicMock) -> None:
     assert fake_cell_workspace.deliverables == [{"ok": 1}, {"ok": 1}]
 
 
-@then("the second cell reuses the first model response")
+@then("the second trial reuses the first model response")
 def model_response_reused(repeated_request: CellRequest, fake_chat_gateway: MagicMock) -> None:
     assert fake_chat_gateway.complete.call_count == 1
     assert repeated_request.cache_stats is not None
@@ -157,12 +160,12 @@ def budget_model_responses(
     return {"cell": tmp_path, "chat": chat}
 
 
-@given("the cell has enough tokens for both responses")
+@given("the trial has enough tokens for both responses")
 def sufficient_budget(budget_run: dict) -> None:
     budget_run["limit"] = 250
 
 
-@given("the first response exceeds the cell's token budget")
+@given("the first response exceeds the trial's token budget")
 def insufficient_budget(budget_run: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     from experiment.adapters.mcp.client import McpToolSession
 
@@ -173,7 +176,7 @@ def insufficient_budget(budget_run: dict, monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(McpToolSession, "call_tool", budget_run["tool"])
 
 
-@when("the researcher runs the cell with its budget")
+@when("the researcher runs the trial with its budget")
 def run_with_budget(budget_run: dict, sample_cell_request: CellRequest) -> None:
     from experiment.services import runs
 
@@ -188,7 +191,7 @@ def run_with_budget(budget_run: dict, sample_cell_request: CellRequest) -> None:
     )
 
 
-@then("the cell completes and records the combined token usage")
+@then("the trial completes and records the combined token usage")
 def budget_success(budget_run: dict) -> None:
     result = budget_run["result"]
     assert result["status"] == "ok"
@@ -196,7 +199,7 @@ def budget_success(budget_run: dict) -> None:
     assert budget_run["chat"].call_count == 2
 
 
-@then("the cell is stopped for exceeding its budget")
+@then("the trial is stopped for exceeding its budget")
 def budget_exceeded(budget_run: dict) -> None:
     result = budget_run["result"]
     assert result["status"] == "aborted"
@@ -252,14 +255,14 @@ def model_requests_unavailable_tool(monkeypatch: pytest.MonkeyPatch) -> dict:
     return {}
 
 
-@when("the researcher runs a typed-tool experiment cell with that response")
+@when("the researcher runs a typed-tool experiment trial with that response")
 def run_with_unavailable_tool(unavailable_tool_run: dict, sample_cell_request: CellRequest) -> None:
     from experiment.services import runs
 
     unavailable_tool_run["result"] = runs.run_cell(sample_cell_request)
 
 
-@then("the cell completes and its transcript records the unavailable tool")
+@then("the trial completes and its transcript records the unavailable tool")
 def unavailable_tool_recorded(unavailable_tool_run: dict, sample_cell_request: CellRequest) -> None:
     assert unavailable_tool_run["result"]["status"] == "ok"
     assert "no_such_tool" in (sample_cell_request.cell / "transcript.jsonl").read_text(
@@ -267,7 +270,7 @@ def unavailable_tool_recorded(unavailable_tool_run: dict, sample_cell_request: C
     )
 
 
-@when("the researcher runs a typed-tool cell end to end")
+@when("the researcher runs a typed-tool trial end to end")
 def run_typed_integration(budget_run: dict, sample_cell_request: CellRequest) -> None:
     from experiment.services import runs
 
@@ -323,7 +326,7 @@ def non_code_reply(monkeypatch: pytest.MonkeyPatch, response: str) -> None:
     set_codegen_reply(monkeypatch, contents[response])
 
 
-@when("the researcher runs a code-generation cell end to end")
+@when("the researcher runs a code-generation trial end to end")
 def run_codegen_integration(codegen_run: dict, sample_cell_request: CellRequest) -> None:
     from experiment.services import runs
 
@@ -335,13 +338,13 @@ def codegen_passes(codegen_run: dict) -> None:
     assert codegen_run["result"]["oracle_passed"] is True
 
 
-@then("the result passes grading and the input is not left in the cell directory")
+@then("the result passes grading and the input is not left in the trial directory")
 def isolated_codegen_result(codegen_run: dict, sample_cell_request: CellRequest) -> None:
     codegen_passes(codegen_run)
     assert not (sample_cell_request.cell / "input.geojson").exists()
 
 
-@then("the cell fails grading without saving a result")
+@then("the trial fails grading without saving a result")
 def non_code_not_graded(codegen_run: dict, sample_cell_request: CellRequest) -> None:
     assert codegen_run["result"]["oracle_passed"] is False
     assert not (sample_cell_request.cell / "result.json").exists()
@@ -487,7 +490,7 @@ def unknown_operation_identified(unknown_operation_result) -> None:
     assert "bogus_tool" in str(unknown_operation_result)
 
 
-@given("a cell whose driver fails unexpectedly", target_fixture="failing_driver")
+@given("a trial whose driver fails unexpectedly", target_fixture="failing_driver")
 def failing_cell_driver(monkeypatch: pytest.MonkeyPatch, sample_cell_request: CellRequest) -> dict:
     from experiment.services import runs
 
@@ -499,14 +502,14 @@ def failing_cell_driver(monkeypatch: pytest.MonkeyPatch, sample_cell_request: Ce
     return {"request": sample_cell_request.model_copy(update={"driver": "scripted"})}
 
 
-@when("the researcher executes that cell")
+@when("the researcher executes that trial")
 def execute_failing_driver(failing_driver: dict) -> None:
     from experiment.services import runs
 
     failing_driver["result"] = runs.run_cell(failing_driver["request"])
 
 
-@then("the cell records a failed status and failed grading")
+@then("the trial records a failed status and failed grading")
 def cell_failure_is_recorded(failing_driver: dict) -> None:
     assert failing_driver["result"]["status"] == "error"
     assert failing_driver["result"]["oracle_passed"] is False
@@ -545,7 +548,7 @@ def model_response_with_cache(
     return {"request": request, "chat": fake_chat, "root": tmp_path}
 
 
-@when("the researcher repeats cells with changed, absent, and bypassed model identities")
+@when("the researcher repeats trials with changed, absent, and bypassed model identities")
 def run_cells_with_varied_identities(identity_cache: dict) -> None:
     from experiment.services import runs
 
@@ -623,14 +626,14 @@ def failed_model_service(
     return {"request": request, "cache": cache}
 
 
-@when("the researcher runs a cached model cell")
+@when("the researcher runs a cached model trial")
 def run_failed_cached_cell(failed_cached_cell: dict) -> None:
     from experiment.services import runs
 
     failed_cached_cell["result"] = runs.run_cell(failed_cached_cell["request"])
 
 
-@then("the cell fails and the response cache stays empty")
+@then("the trial fails and the response cache stays empty")
 def failed_response_not_cached(failed_cached_cell: dict) -> None:
     from experiment.adapters.llm_cache import CompletionCache
 

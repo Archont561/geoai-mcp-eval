@@ -14,6 +14,7 @@ from experiment.services.reports import (
     CompletenessReport,
     RunSummary,
     TrialOverview,
+    TrialSummary,
 )
 
 
@@ -26,7 +27,8 @@ from experiment.services.reports import (
 def test_typed_service_report_dtos_roundtrip_and_strict_validation(
     run_id: str, passed: bool, duration: float
 ) -> None:
-    cell = CellSummary(
+    assert TrialSummary is CellSummary
+    cell = TrialSummary(
         task="t1",
         arm="A",
         status="ok",
@@ -46,6 +48,8 @@ def test_typed_service_report_dtos_roundtrip_and_strict_validation(
     )
     rebuilt = RunSummary.from_mapping(summary.to_dict())
     assert rebuilt.run_id == run_id
+    assert rebuilt.trials == rebuilt.cells
+    assert "cells" in summary.to_dict() and "trials" not in summary.to_dict()
     assert rebuilt.cells[0].checks[0].assertion_id == "c1"
     assert RunSummary.model_validate_json(summary.model_dump_json()) == summary
 

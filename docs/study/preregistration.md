@@ -71,7 +71,7 @@ You solve one GIS task by writing a Python script. Use only the standard library
 - **Archive bundle:**
   `experiment-run-45505815319-4a7efe5b2742dfa175e7c3581acc994cb41305a2`
   (artifact ID `14972624264`, 169,754 bytes; contains verbatim `score.json` and
-  `transcript.jsonl` for all 12 pilot cells; 3× oracle determinism gate passed)
+  `transcript.jsonl` for all 12 pilot trials; 3× oracle determinism gate passed)
 
 | Task | Rep | Python fence | Script exit | TSR | MPS | Silent invalid | Tokens | Wall (s) | Verbatim outcome |
 | --- | ---: | --- | ---: | ---: | ---: | --- | ---: | ---: | --- |
@@ -82,7 +82,7 @@ You solve one GIS task by writing a Python script. Use only the standard library
 | `prep-axis-order-001` | 1 | No | — | 0 | 0.00 | No | 2,345 | 48.59 | Emitted raw `` ```json `` `FeatureCollection` (1,396 chars); harness logged `no python block found`. |
 | `prep-axis-order-001` | 2 | No | — | 0 | 0.00 | No | 2,345 | 42.63 | Emitted raw `` ```json `` `FeatureCollection` (1,396 chars); harness logged `no python block found`. |
 
-**Summary (`qwen2.5-coder:0.5b`, Arm B):** Python fence emitted in `1/6` cells;
+**Summary (`qwen2.5-coder:0.5b`, Arm B):** Python fence emitted in `1/6` trials;
 TSR `0/6` (`0.00%`); mean predicate score `0.0000`; silent-invalid `0/6`. (Arm
 A reference in the same run: TSR `0/6`, MPS `0.0000`, silent-invalid `2/6` on
 `analysis-de9im-001` reps 1–2.)
@@ -97,7 +97,7 @@ A reference in the same run: TSR `0/6`, MPS `0.0000`, silent-invalid `2/6` on
 - **Archive bundle:**
   `experiment-run-45505826575-4a7efe5b2742dfa175e7c3581acc994cb41305a2`
   (artifact ID `14974065703`, 172,083 bytes; contains verbatim `score.json` and
-  `transcript.jsonl` for all 12 pilot cells; 3× oracle determinism gate passed)
+  `transcript.jsonl` for all 12 pilot trials; 3× oracle determinism gate passed)
 
 | Task | Rep | Python fence | Script exit | TSR | MPS | Silent invalid | Tokens | Wall (s) | Verbatim outcome |
 | --- | ---: | --- | ---: | ---: | ---: | --- | ---: | ---: | --- |
@@ -108,7 +108,7 @@ A reference in the same run: TSR `0/6`, MPS `0.0000`, silent-invalid `2/6` on
 | `prep-axis-order-001` | 1 | Yes | 0 | 0 | 0.50 | Yes | 1,506 | 44.69 | Emitted `geopandas`/`shapely` script (852 chars); exited 0 and printed valid GeoJSON `FeatureCollection` to stdout (with `PROJ` warning on stderr). Oracle: `single-output-feature` **passed** (`feature count 1; expected 1`), `representative-point-axis-order` **failed** (`output geometry must be a GeoJSON Point`). |
 | `prep-axis-order-001` | 2 | Yes | 1 | 0 | 0.00 | No | 1,492 | 47.55 | Emitted `geopandas`/`shapely` script (846 chars); exited 1 (`ERROR 1: PROJ: proj_create_from_database: Open of .../share/proj failed` + traceback); both assertions failed (missing `result.geojson`). |
 
-**Summary (`qwen2.5:3b`, Arm B):** Python fence emitted in `4/6` cells overall
+**Summary (`qwen2.5:3b`, Arm B):** Python fence emitted in `4/6` trials overall
 (`4/4` on confirmatory A and P families; `0/2` on descriptive C-family
 `cartography-jenks-001`); TSR `0/6` (`0.00%`); mean predicate score `0.0833`
 (`0.5000` on `prep-axis-order-001` rep 1); silent-invalid `1/6`. (Arm A
@@ -215,9 +215,9 @@ reference in the same run: TSR `0/6`, MPS `0.0000`, silent-invalid `2/6` on
 1. The tightened Arm B prompt scaffold (`5c443781…`) is ratified as frozen for
    Appendix E without further prompt or harness edits.
 2. On confirmatory tasks (`analysis-de9im-001`, `prep-axis-order-001`), the
-   study pin `qwen2.5:3b` reliably emitted `` ```python `` blocks (`4/4` cells),
+   study pin `qwen2.5:3b` reliably emitted `` ```python `` blocks (`4/4` trials),
    whereas on the descriptive C-family counter-case (`cartography-jenks-001`) it
-   emitted prose without a code fence (`0/2` cells). This non-fence outcome is
+   emitted prose without a code fence (`0/2` trials). This non-fence outcome is
    recorded verbatim rather than patched post-hoc.
 3. All four executed `qwen2.5:3b` scripts logged a `PROJ` database path error on
    `stderr` inside the sandboxed Python subprocess; no harness patch accompanies
@@ -232,7 +232,7 @@ to Arm B's Python execution sandbox (`experiment/src/experiment/adapters/harness
 1. **Ephemeral temporary working directory (`4f56747`):** Each Arm B script
    now executes inside a fresh `tempfile.TemporaryDirectory(prefix="geoai-sandbox-")`
    containing only a copy of the task fixture staged at relative path
-   `input.geojson`, rather than executing inside the cell's output directory.
+   `input.geojson`, rather than executing inside the trial's output directory.
    The temporary directory and any scratch files are deleted automatically on
    exit, isolating generated scripts from `transcript.jsonl`, `score.json`, and
    `manifest.json`.

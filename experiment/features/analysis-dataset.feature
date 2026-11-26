@@ -9,7 +9,7 @@ Feature: Research datasets from archived runs
       When the researcher opens the archive for analysis
       Then the measurement table describes all six trials
       And the predicate table contains the expected pilot results
-      And the cell summaries report successful trials
+      And the condition summaries report successful trials
       And the assertion table describes the graded checks
       And the researcher can inspect a trial's transcript and deliverable
 
@@ -29,7 +29,7 @@ Feature: Research datasets from archived runs
 
     Scenario: An empty preparation run yields an empty summary
       Given an empty preparation run
-      When the researcher requests its cell summary
+      When the researcher requests its condition summary
       Then the summary is empty with the expected columns
 
   Rule: Researchers can retrieve runs safely and reuse local copies

@@ -24,7 +24,7 @@ from experiment.adapters.harness_io import (
     write_deliverable,
 )
 from experiment.adapters.mcp.client import McpToolSession
-from experiment.services.runners.ports import CellRequest, ToolSession
+from experiment.services.runners.ports import ToolSession, TrialRequest
 
 
 class _CallLog:
@@ -65,10 +65,10 @@ def _write_json(cell: Path, name: str, payload: dict[str, Any]) -> None:
     run_store.write_json(cell / name, payload, sort_keys=False)
 
 
-# Kept as dataclass (not BaseModel): binds CellRequest with live ToolSession & _CallLog.
+# Kept as dataclass (not BaseModel): binds TrialRequest with live ToolSession & _CallLog.
 @dataclass(frozen=True)
 class _PlanContext:
-    req: CellRequest
+    req: TrialRequest
     fixture: dict[str, Any]
     log: _CallLog
     tools: ToolSession
@@ -123,7 +123,7 @@ _SCRIPTED_ARM_A_PLANS = {
 }
 
 
-def scripted_arm_a(req: CellRequest) -> None:
+def scripted_arm_a(req: TrialRequest) -> None:
     """Canned plan: call the real MCP server for every step via one session."""
     fixture = fixture_fc(req.task_path, req.task)
     log = _CallLog(req.cell)
@@ -219,7 +219,7 @@ def _record_tool_result(cell: Path, completed) -> None:
     )
 
 
-def scripted_arm_b(req: CellRequest) -> None:
+def scripted_arm_b(req: TrialRequest) -> None:
     """Canned plan: stage fixture in a fresh temp dir, run canned code, capture stdout."""
     task, task_path, cell = req.task, req.task_path, req.cell
     code = _ARM_B_CODE.get(task.id)

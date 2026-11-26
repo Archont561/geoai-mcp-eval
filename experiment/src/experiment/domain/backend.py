@@ -82,7 +82,7 @@ class BackendError(Exception):
     """Backend problem with a stable class token.
 
     str(BackendError) is ``"<error_class>: <detail>"`` — the harness records it
-    verbatim as the cell error; the CLI turns config errors into exit code 2.
+    verbatim as the trial error; the CLI turns config errors into exit code 2.
     """
 
     def __init__(self, error_class: str, detail: str) -> None:

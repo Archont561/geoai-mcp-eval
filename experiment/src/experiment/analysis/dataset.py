@@ -70,7 +70,7 @@ class PredicateMatrixSchema(pa.DataFrameModel):
 
 
 class CellSummarySchema(pa.DataFrameModel):
-    """Pandera schema for ``RunDataset.cell_summary_df()`` aggregate cell rows."""
+    """Pandera schema for ``RunDataset.condition_summary_df()`` aggregate condition rows."""
 
     task_id: Series[str]
     paradigm: Series[str]
@@ -303,8 +303,8 @@ class RunDataset:
         df = pd.DataFrame(rows, columns=[*PREDICATE_KEY_COLUMNS, *predicate_cols])
         return validate_predicate_matrix(df, predicate_cols)
 
-    def cell_summary_df(self) -> pd.DataFrame:
-        """Per-cell summary table validated against ``CellSummarySchema``."""
+    def condition_summary_df(self) -> pd.DataFrame:
+        """One aggregate per task and treatment, validated against the summary schema."""
         df = self.measurements_df()
         if df.empty:
             empty = pd.DataFrame(columns=list(CELL_SUMMARY_COLUMNS))
@@ -313,6 +313,9 @@ class RunDataset:
         rows = [_aggregate_cell_group(key, group) for key, group in grouped]
         summary = pd.DataFrame(rows, columns=list(CELL_SUMMARY_COLUMNS))
         return CellSummarySchema.validate(summary)
+
+    # Historical API name kept for existing notebooks and callers.
+    cell_summary_df = condition_summary_df
 
     def assertions_df(self, tasks_root: Path | None = None) -> pd.DataFrame:
         """Long-form per-assertion verdicts validated against ``AssertionTableSchema``."""

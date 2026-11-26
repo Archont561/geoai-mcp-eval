@@ -116,7 +116,7 @@ description: >-
 - **OQS (mean predicate score)** — continuous: mean predicate-pass fraction
   per run ∈ [0,1] (report alongside WSZ).
 - **pass^k** — P(all k independent trials succeed) [yao2024taubench;
-  gupta2026reliabilitybench]; here k = r = 4 repeats/cell.
+  gupta2026reliabilitybench]; here k = r = 4 trials per condition.
 - **ICC** — intraclass correlation (task vs run variance), target-like reliability
   of the instrument.
 - **MDE** — minimum detectable effect; this design is powered for ≈ 11.5 pp

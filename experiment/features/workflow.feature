@@ -56,20 +56,20 @@ Feature: End-to-end researcher study workflow
       When the workflow prepares, harvests, summarizes, and checks readiness
       Then the hosted workflow receives the run details and readiness results
 
-  Rule: Workflow cells distinguish pilot measurements from smoke checks
+  Rule: Workflow trials distinguish pilot measurements from smoke checks
 
-    Scenario: Pilot and smoke cells record their different outcomes
+    Scenario: Pilot and smoke trials record their different outcomes
       Given a prepared model service and an isolated workflow
-      When the researcher runs a pilot cell and a smoke cell
+      When the researcher runs a pilot trial and a smoke trial
       Then the pilot records the model identity and successful grading
-      And the smoke cell records a simulated check
+      And the smoke trial records a simulated check
 
     Scenario: Current run settings take precedence over older settings
       Given current and older workflow settings are both present
-      When the researcher starts a workflow cell with response reuse enabled
-      Then the cell uses the current settings and enables reuse
+      When the researcher starts a workflow trial with response reuse enabled
+      Then the trial uses the current settings and enables reuse
       When only older workflow settings are present
-      Then the cell uses the older settings and enables reuse
+      Then the trial uses the older settings and enables reuse
 
   Rule: Harvesting reports missing or invalid trial evidence
 
@@ -79,26 +79,26 @@ Feature: End-to-end researcher study workflow
       When the researcher harvests the trial and checks determinism
       Then the harvest reports a failed determinism check with its detailed report
 
-  Rule: Complete and targeted scripted passes score every cell and pack cleanly
+  Rule: Complete and targeted scripted passes score every trial and pack cleanly
 
     @smoke
     Scenario: Full scripted pass covers all pilot tasks across both paradigms
       Given a fresh experiment output folder
       When I run a scripted pass over the full pilot suite in both paradigms
-      Then the run reports all six cells passed the oracle
+      Then the run reports all six trials passed the oracle
       And every pilot task appears in both paradigms
-      And every cell saves a transcript and an oracle score
+      And every trial saves a transcript and an oracle score
 
     Scenario: Targeted scripted pass runs only the requested tasks
       Given a fresh experiment output folder
       When I run a scripted pass for tasks "prep-axis-order-001,cartography-jenks-001" in both paradigms
-      Then the run reports all four cells passed the oracle
+      Then the run reports all four trials passed the oracle
       And the run omits task "analysis-de9im-001"
 
     Scenario: Outputs from a scripted run pass the three-pass determinism gate
       Given a fresh experiment output folder
       When I run a scripted benchmark for task "prep-axis-order-001" in code-generation mode
-      And I verify determinism on that cell for task "prep-axis-order-001" in code-generation mode
+      And I verify determinism on that trial for task "prep-axis-order-001" in code-generation mode
       Then the determinism report states the task passed
       And the determinism report covers three repeated checks
 
