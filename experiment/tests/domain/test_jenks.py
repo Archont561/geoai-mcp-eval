@@ -28,6 +28,7 @@ def test_validate_jenks_inputs_returns_sorted_floats_and_enforces_bounds(
         validate_jenks_inputs(values, 0)
 
 
-def test_validate_jenks_inputs_rejects_empty() -> None:
+@given(class_count=st.integers())
+def test_validate_jenks_inputs_rejects_empty(class_count: int) -> None:
     with pytest.raises(ValueError, match="at least one"):
-        validate_jenks_inputs([], 1)
+        validate_jenks_inputs([], class_count)

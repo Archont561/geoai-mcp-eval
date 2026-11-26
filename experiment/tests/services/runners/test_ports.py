@@ -41,14 +41,16 @@ def test_run_spec_and_cell_request_reject_non_positive_repetitions(
         CellRequest(**{**sample_cell_request.model_dump(), "repetition": bad_rep})
 
 
-def test_run_spec_forbids_extra_fields(sample_cell_request: CellRequest) -> None:
-    assert sample_cell_request.repetition == 1
+@given(extra=st.text(alphabet="xyz_", min_size=1, max_size=20))
+def test_run_spec_forbids_extra_fields(extra: str) -> None:
     with pytest.raises(ValidationError):
-        RunSpec(
-            arms=("A",),
-            task_ids=("analysis-de9im-001",),
-            driver="scripted",
-            model="scripted",
-            host="http://127.0.0.1:11434",
-            bogus=True,  # type: ignore[call-arg]
+        RunSpec.model_validate(
+            {
+                "arms": ("A",),
+                "task_ids": ("analysis-de9im-001",),
+                "driver": "scripted",
+                "model": "scripted",
+                "host": "http://127.0.0.1:11434",
+                extra: True,
+            }
         )

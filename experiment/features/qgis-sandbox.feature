@@ -1,62 +1,89 @@
-@cli @qgis
-Feature: The PyQGIS sandbox gate
-  Arm B generates PyQGIS code, so the study needs a way to run that code in a
-  known interpreter. The sandbox gate reports whether PyQGIS is importable and
-  runs a script in a scrubbed subprocess. Both commands refuse loudly rather
-  than pretending: an unavailable PyQGIS is an exit code, not a warning, and a
-  script's own exit code propagates unchanged.
+@cli @qgis @qgis_sandbox
+Feature: Isolated GIS script execution gate
+  As a GIS researcher executing generated geospatial scripts
+  I want an availability gate and an isolated script runner
+  So unavailable GIS runtimes, missing scripts, script failures, and hangs are reported cleanly
 
-  Scenario: A sandbox check reports the interpreter it found
-    When I ask the sandbox whether PyQGIS is available
-    Then the sandbox reports a definite verdict
-    And the command exits with the verdict's code
+  Rule: The availability check reports clearly whether the GIS runtime can be loaded
 
-  Scenario: An available sandbox reports its QGIS and library versions
-    Given a working PyQGIS harness
-    When I ask the sandbox whether PyQGIS is available
-    Then the command exits successfully
-    And the output reports the QGIS and library versions
+    @smoke
+    Scenario: Availability check returns a definite verdict on the current machine
+      When I check whether the GIS script runtime is available
+      Then the gate reports a definite availability verdict
+      And the exit status matches the availability verdict
 
-  Scenario: A harness with no PyQGIS is told how to get one
-    Given a harness that cannot import PyQGIS
-    When I ask the sandbox whether PyQGIS is available
-    Then the command exits with code 3
-    And the output names the sandbox environment to install
+    Scenario: Available GIS runtime reports its desktop and geospatial library versions
+      Given an environment with a working GIS runtime
+      When I check whether the GIS script runtime is available
+      Then the action succeeds
+      And the report lists the QGIS and geospatial library versions
 
-  Scenario: A script is refused when the file is not there
-    Given a harness that cannot import PyQGIS
-    And a long sandbox script path that does not exist
-    When I run that script in the sandbox
-    Then the command exits with code 2
-    And the output says the script is missing
-    And no sandbox artifacts directory is created
+    @edge_case
+    Scenario: Unavailable GIS runtime explains how to install the sandbox environment
+      Given an environment without the GIS runtime
+      When I check whether the GIS script runtime is available
+      Then the action exits with status 3
+      And the explanation names the sandbox environment to install
 
-  Scenario: A script is refused when PyQGIS is unavailable
-    Given a harness that cannot import PyQGIS
-    And a sandbox script that prints "hello-sandbox"
-    When I run that script in the sandbox
-    Then the command exits with code 3
-    And the output names the sandbox environment to install
-    And the sandbox artifacts directory exists
+  Rule: Version reports describe the available GIS environment
 
-  Scenario: A scrubbed run reports the script's own output
-    Given a working PyQGIS harness
-    And a sandbox script that prints "hello-sandbox"
-    When I run that script in the sandbox
-    Then the command exits successfully
-    And the output contains "hello-sandbox"
-    And the script runs isolated in the artifacts directory
+    @edge_case
+    Scenario: A missing GIS host has no version report
+      Given a machine without the GIS host libraries
+      When the researcher requests the GIS environment versions
+      Then no GIS version report is available
 
-  Scenario: A failing script keeps its own exit code
-    Given a working PyQGIS harness
-    And a sandbox script that exits with code 7
-    When I run that script in the sandbox
-    Then the command exits with code 7
-    And the output shows the script's error output
+    Scenario: A current GIS host reports its geospatial library versions
+      Given a GIS host reporting versions for its desktop and geospatial libraries
+      When the researcher requests the GIS environment versions
+      Then the report includes the desktop and all available library versions
 
-  Scenario: A script that never finishes is stopped
-    Given a working PyQGIS harness
-    And a sandbox script that never finishes
-    When I run that script in the sandbox with a one second timeout
-    Then the command exits with code 4
-    And the output says the script timed out
+    Scenario: A legacy GIS host reports available versions and marks missing libraries
+      Given a legacy GIS host without some geospatial libraries
+      When the researcher requests the GIS environment versions
+      Then the report includes the legacy desktop and projection versions
+      And unavailable library versions are marked unknown
+
+  Rule: Running a GIS script isolates outputs and propagates failures accurately
+
+    @edge_case
+    Scenario: Missing script file is refused without creating an output folder
+      Given an environment without the GIS runtime
+      And a non-existent script path with a long directory name
+      When I execute that script in the isolated GIS runner
+      Then the action exits with status 2
+      And the explanation states that the script is missing
+      And no isolated artifacts folder is created
+
+    @edge_case
+    Scenario: Running a script without the GIS runtime fails with setup guidance
+      Given an environment without the GIS runtime
+      And a GIS script that prints "hello-sandbox"
+      When I execute that script in the isolated GIS runner
+      Then the action exits with status 3
+      And the explanation names the sandbox environment to install
+      And the isolated artifacts folder exists
+
+    Scenario: Valid script runs inside the isolated artifacts folder and prints its output
+      Given an environment with a working GIS runtime
+      And a GIS script that prints "hello-sandbox"
+      When I execute that script in the isolated GIS runner
+      Then the action succeeds
+      And the researcher sees "hello-sandbox"
+      And the script executes inside the isolated artifacts folder
+
+    @edge_case
+    Scenario: Failing script preserves its own non-zero exit status and error message
+      Given an environment with a working GIS runtime
+      And a GIS script that exits with status 7
+      When I execute that script in the isolated GIS runner
+      Then the action exits with status 7
+      And the output shows the script error message
+
+    @edge_case
+    Scenario: Runaway script is stopped when its time limit expires
+      Given an environment with a working GIS runtime
+      And a GIS script that never finishes
+      When I execute that script in the isolated GIS runner with a one-second limit
+      Then the action exits with status 4
+      And the explanation states that the script timed out

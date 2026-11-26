@@ -1,7 +1,7 @@
 ---
 id: GEO-027
 title: Refactor behavioral tests into non-programmer BDD scenarios and restrict unit tests to Hypothesis property tests
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-24T00:00:00Z'
 labels:
@@ -66,12 +66,12 @@ Rebalance the repository's test architecture around two crisp, non-overlapping l
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All existing `.feature` files under `experiment/features/` and `experiment-qgis-plugin/features/` are reviewed and updated following `.agents/skills/bdd-scenarios/SKILL.md` so every feature uses plain, declarative domain language understandable by non-programmers (zero raw Python symbols, JSON keys, or cryptic CLI flags in scenario prose), `Rule:`-grouped acceptance criteria, 3–7 step scenarios, and clean domain tags.
-- [ ] #2 Behavioral test cases currently living in example-based unit tests (oracle grading & determinism, experiment runs & token-cap/cache semantics, run archive packing/merging/tamper detection, backend preflight & SSH/Ollama/OpenRouter diagnostics, analysis dataset & GitHub client loading, and QGIS plugin session/review/host behavior) are migrated into executable `.feature` files and modular `pytest-bdd` step bindings backed by shared pytest & `unittest.mock` fake fixtures.
-- [ ] #3 Non-BDD unit test modules (outside the explicit structural gates `test_smoke.py`, `test_architecture.py`, `test_clean_code_gate.py`) are strictly scoped to Hypothesis `@given(...)` property-based tests verifying mathematical, validation, serialization, and security invariants; redundant example-only unit test files are removed after their behaviors are covered by BDD scenarios.
-- [ ] #4 `experiment/tests/test_architecture.py` enforces the testing pyramid contract cleanly (accounting for BDD-covered modules vs. Hypothesis property unit modules) and verifies all `.feature` files have bound scenarios.
-- [ ] #5 `experiment/features/README.md` (and `experiment-qgis-plugin/features/README.md`) accurately index all feature files and document the non-programmer BDD guidelines from `.agents/skills/bdd-scenarios/SKILL.md`.
-- [ ] #6 `pixi run tools run check` (including `alint`, `ruff`, `clean_code`, `import-linter`, `mypy`, `pytest` with `>=90%` coverage), `gherlint`, `md`, and `links` all pass with zero errors and zero lost behavioral coverage.
+- [x] #1 All existing `.feature` files under `experiment/features/` and `experiment-qgis-plugin/features/` are reviewed and updated following `.agents/skills/bdd-scenarios/SKILL.md` so every feature uses plain, declarative domain language understandable by non-programmers (zero raw Python symbols, JSON keys, or cryptic CLI flags in scenario prose), `Rule:`-grouped acceptance criteria, 3–7 step scenarios, and clean domain tags.
+- [x] #2 Behavioral test cases currently living in example-based unit tests (oracle grading & determinism, experiment runs & token-cap/cache semantics, run archive packing/merging/tamper detection, backend preflight & SSH/Ollama/OpenRouter diagnostics, analysis dataset & GitHub client loading, and QGIS plugin session/review/host behavior) are migrated into executable `.feature` files and modular `pytest-bdd` step bindings backed by shared pytest & `unittest.mock` fake fixtures.
+- [x] #3 Non-BDD unit test modules (outside the explicit structural gates `test_smoke.py`, `test_architecture.py`, `test_clean_code_gate.py`) are strictly scoped to Hypothesis `@given(...)` property-based tests verifying mathematical, validation, serialization, and security invariants; redundant example-only unit test files are removed after their behaviors are covered by BDD scenarios.
+- [x] #4 `experiment/tests/test_architecture.py` enforces the testing pyramid contract cleanly (accounting for BDD-covered modules vs. Hypothesis property unit modules) and verifies all `.feature` files have bound scenarios.
+- [x] #5 `experiment/features/README.md` (and `experiment-qgis-plugin/features/README.md`) accurately index all feature files and document the non-programmer BDD guidelines from `.agents/skills/bdd-scenarios/SKILL.md`.
+- [x] #6 `pixi run tools run check` (including `alint`, `ruff`, `clean_code`, `import-linter`, `mypy`, `pytest` with `>=90%` coverage), `gherlint`, `md`, and `links` all pass with zero errors and zero lost behavioral coverage.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -83,3 +83,12 @@ Rebalance the repository's test architecture around two crisp, non-overlapping l
 4. **Restrict unit tests to Hypothesis property tests & prune migrated example-only files:** Convert remaining pure invariant checks to `@given(...)` properties, remove example-only unit tests whose behaviors now live in BDD features, and update `test_architecture.py` to enforce the BDD + Hypothesis testing contract cleanly.
 5. **Update feature READMEs & run all quality gates:** Refresh `experiment/features/README.md` and `experiment-qgis-plugin/features/README.md`, then run `pixi run tools run fmt`, `check`, `md`, `links`, and `gherlint` to verify `0` violations and `>=90%` coverage.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+- Rewrote the original feature specifications and added executable specifications for oracle grading, experiment runs, run archives, backend preflight, and analysis datasets. Scenario steps reuse the experiment fixtures and plugin harness.
+- Replaced example-only unit modules with BDD scenarios or general Hypothesis invariants. The architecture gate checks feature bindings, rule grouping, scenario step counts, explicit BDD module mappings, and the property-test pyramid; it also rejects fixed-only `just` strategies.
+- Audited the migration against the pre-migration `a96ac74` snapshot. Temporarily replayed 380 tests from 87 removed or changed non-BDD modules; all passed. After restoring a missing GIS-host scenario and the environment fallback check, every production source line exercised by that replay was also exercised by the migrated suite. Line coverage is evidence, not a substitute for checking behavioral assertions. Temporary audit tests were removed.
+- Final pinned verification: `fmt` and `check` passed with 583 tests and 94.11% coverage; both feature directories passed Gherkin lint; `md`, `links`, and `prose` passed. Prose reported 134 advisory warnings and no errors.
+<!-- SECTION:NOTES:END -->

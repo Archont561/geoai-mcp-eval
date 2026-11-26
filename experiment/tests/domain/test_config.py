@@ -60,10 +60,17 @@ def test_ssh_defaults_reject_out_of_range_port(bad_port: int) -> None:
         SshDefaults(remote_bind_port=bad_port)
 
 
-def test_config_forbids_unknown_keys_and_negative_bounds() -> None:
+@given(
+    suffix=st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=20),
+    negative=st.floats(max_value=-0.01, min_value=-1000, allow_nan=False, allow_infinity=False),
+    turns=st.integers(max_value=0, min_value=-1000),
+)
+def test_config_forbids_unknown_keys_and_negative_bounds(
+    suffix: str, negative: float, turns: int
+) -> None:
     with pytest.raises(ValidationError):
-        ExperimentConfig(unexpected_section={})  # type: ignore[call-arg]
+        ExperimentConfig.model_validate({f"unexpected_{suffix}": {}})
     with pytest.raises(ValidationError):
-        BackendCheckDefaults(poll_timeout_s=-1.0)
+        BackendCheckDefaults(poll_timeout_s=negative)
     with pytest.raises(ValidationError):
-        RunnerConfig(max_turns=0)
+        RunnerConfig(max_turns=turns)

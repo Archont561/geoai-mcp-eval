@@ -393,4 +393,325 @@ def original_session_dir_has_no_new_files(recorded_take: dict) -> None:
     assert current_files == recorded_take["initial_files"]
 
 
+# Translate reviewer-facing vocabulary into the concrete review inputs.
+@when("I complete a review adding a manually performed export")
+def complete_export_review(loaded, recorded_take, review_state) -> None:
+    review_with_manual_action_and_tool(
+        loaded, recorded_take, review_state, "exported GeoJSON", "qgis:save-features-as"
+    )
+
+
+@when("I add a manual inspection without completing the review")
+def draft_inspection_review(loaded, recorded_take, review_state) -> None:
+    review_draft_without_complete(loaded, recorded_take, review_state, "inspected layer CRS")
+
+
+@when("I complete a review in a separate output directory")
+def complete_review_separately(recorded_take, tmp_path, review_state) -> None:
+    run_review_cli_separate_output(recorded_take, tmp_path, review_state)
+
+
+@then("the reviewed record reports two steps and both observed tools")
+def reviewed_two_steps(review_state) -> None:
+    reviewed_record_marks_reviewed(review_state, 2, "native:reprojectlayer, qgis:save-features-as")
+
+
+@then("the reviewed record reports one buffer step and its tool")
+def reviewed_buffer_step(review_state) -> None:
+    reviewed_record_marks_reviewed(review_state, 1, "native:buffer")
+
+
+@then("the reviewed record identifies the original evidence by its fingerprints")
+def original_evidence_fingerprints(recorded_take, review_state) -> None:
+    reviewed_record_pins_source_hashes(recorded_take, review_state)
+
+
+@then("the reviewed trajectory contains only the two audited study steps")
+def reviewed_two_step_trajectory(review_state) -> None:
+    trajectory_contains_only_audited_steps(review_state, 2)
+
+
+@then("the reviewed record says manual review is pending")
+def manual_review_pending(review_state) -> None:
+    reviewed_record_keeps_pending_for_reason(review_state, "manual_review_pending")
+
+
+@then("the reviewed record says processing history is unavailable")
+def processing_history_unavailable(review_state) -> None:
+    reviewed_record_keeps_pending_for_reason(review_state, "processing_history_unavailable")
+
+
+@then("the reviewed record retains one manual action without a named tool")
+def manual_action_without_tool(review_state) -> None:
+    reviewed_record_retains_manual_action_null_tool(review_state, 1)
+
+
+@then("the reviewed record leaves study steps and tools unknown")
+def unknown_study_metrics(review_state) -> None:
+    reviewed_record_leaves_steps_and_tools_null(review_state)
+
+
+@then("the reviewed record identifies the external processing log")
+def external_log_fingerprint(review_state) -> None:
+    reviewed_record_records_processing_log_sha(review_state)
+
+
+@then("the reviewed trajectory contains the external processing execution")
+def external_processing_trajectory(review_state) -> None:
+    trajectory_contains_processing_log_execution(review_state)
+
+
+@then("the review succeeds")
+def review_succeeds(review_state) -> None:
+    review_cli_exits_zero(review_state)
+
+
+@then("the separate output directory contains the reviewed record and trajectory")
+def separate_review_outputs(review_state) -> None:
+    separate_output_contains_reviewed_files(review_state)
+
+
 scenarios(str(FEATURE_DIR / "post-session-review.feature"))
+
+
+@given("a session location that does not exist", target_fixture="missing_session")
+def missing_session(tmp_path: Path) -> Path:
+    return tmp_path / "missing"
+
+
+@when("the reviewer requests a terminal review of that location", target_fixture="missing_review")
+def review_missing_session(missing_session: Path, capsys) -> tuple[int, str]:
+    from experiment_plugin import _review_cli
+
+    args = [str(missing_session)]
+    assert _review_cli.build_parser().parse_args(args).session_dir == str(missing_session)
+    code = review.main(args)
+    return code, capsys.readouterr().err
+
+
+@then("the terminal review reports failure")
+def missing_review_fails(missing_review: tuple[int, str]) -> None:
+    code, stderr = missing_review
+    assert code == 1
+    assert "cannot review session:" in stderr
+
+
+@then("no session evidence is created at that location")
+def missing_session_remains_missing(missing_session: Path) -> None:
+    assert not missing_session.exists()
+
+
+@given("an empty external processing history", target_fixture="processing_log_file")
+def empty_processing_history(tmp_path: Path) -> Path:
+    path = tmp_path / "processing.log"
+    path.write_text("", encoding="utf-8")
+    return path
+
+
+@given(
+    "an external processing history with an unreadable execution",
+    target_fixture="processing_log_file",
+)
+def unreadable_processing_history(tmp_path: Path) -> Path:
+    path = tmp_path / "processing.log"
+    path.write_text("ALGORITHM|2026-11-24 12:03:00|corrupt-payload\n", encoding="utf-8")
+    return path
+
+
+@given(
+    "an external history matching its recorded processing execution",
+    target_fixture="processing_log_file",
+)
+def matching_processing_history(tmp_path: Path) -> Path:
+    path = tmp_path / "processing.log"
+    path.write_text(
+        'ALGORITHM|2026-11-24T12:00:05+00:00|processing.run("native:reprojectlayer", '
+        "{'TARGET_CRS': 'EPSG:2180'})\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+@when("the reviewer completes a manual-only review")
+def complete_manual_only_review(
+    loaded: PluginHandle, recorded_take: dict, processing_log_file: Path, review_state: dict
+) -> None:
+    review_state["reply"] = loaded.call(
+        "review_session",
+        session_dir=str(recorded_take["session_dir"]),
+        manual_actions=[{"action_group": "digitized boundary manually"}],
+        processing_log=str(processing_log_file),
+        mark_reviewed=True,
+    )
+    review_state["output_dir"] = recorded_take["session_dir"]
+
+
+@when("the reviewer completes the review using that history")
+def complete_review_with_damaged_history(
+    loaded: PluginHandle, recorded_take: dict, processing_log_file: Path, review_state: dict
+) -> None:
+    review_with_external_processing_log(loaded, recorded_take, processing_log_file, review_state)
+
+
+@when("the reviewer repeats the same completed review")
+def repeat_review(recorded_take: dict, processing_log_file: Path, review_state: dict) -> None:
+    results = []
+    for _ in range(2):
+        results.append(
+            review.review_session(
+                recorded_take["session_dir"],
+                manual_actions=[{"action_group": "saved output", "tool": "qgis:save-features-as"}],
+                processing_log=processing_log_file,
+                mark_reviewed=True,
+            )
+        )
+    review_state["results"] = results
+
+
+@then("the reviewed record reports one manual step and no tools")
+def reviewed_manual_step_no_tools(review_state: dict) -> None:
+    record = json.loads((review_state["output_dir"] / review.REVIEWED_RECORD_FILENAME).read_text())
+    assert record["session"]["metrics_status"] == "reviewed"
+    assert record["session"]["steps"] == 1
+    assert record["session"]["tools"] == []
+    entries = [
+        json.loads(line)
+        for line in (review_state["output_dir"] / "human_trajectory.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert len(entries) == 1
+    assert entries[0]["kind"] == "manual_action_group"
+    assert entries[0]["tool"] is None
+
+
+@then("the reviewed record says processing history is incomplete")
+def reviewed_processing_history_incomplete(review_state: dict) -> None:
+    reviewed_record_keeps_pending_for_reason(review_state, "processing_history_incomplete")
+
+
+@then("the reviewed trajectory retains only one copy of the execution and one manual action")
+def repeated_review_deduplicates(review_state: dict) -> None:
+    first, second = review_state["results"]
+    assert first.record["session"]["steps"] == 2
+    assert second.record["session"]["steps"] == 2
+    assert len(second.trajectory_entries) == 2
+
+
+@given("the review destination cannot publish the record")
+def review_record_unwritable(monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr(os, "replace", MagicMock(side_effect=OSError("disk full")))
+
+
+@when("the reviewer tries to complete the review")
+def attempt_unwritable_review(recorded_take: dict, review_state: dict) -> None:
+    with pytest.raises(OSError, match="disk full") as error:
+        review.review_session(recorded_take["session_dir"], mark_reviewed=True)
+    review_state["error"] = error.value
+
+
+@then("the save failure is reported and no partial reviewed record remains")
+def failed_review_leaves_no_partial_record(recorded_take: dict, review_state: dict) -> None:
+    path = recorded_take["session_dir"]
+    assert "disk full" in str(review_state["error"])
+    assert not list(path.glob(".human-reference-record-reviewed-*.tmp"))
+    assert not (path / review.REVIEWED_RECORD_FILENAME).exists()
+
+
+@given(parsers.parse("the review evidence has {problem}"))
+def damage_review_evidence(
+    recorded_take: dict, tmp_path: Path, review_state: dict, problem: str
+) -> None:
+    session_dir = recorded_take["session_dir"]
+    review_state["session_dir"] = session_dir
+    review_state["kwargs"] = {}
+    record = session_dir / "human-reference-record.json"
+    if problem == "a missing session":
+        review_state["session_dir"] = tmp_path / "missing"
+    elif problem == "a missing record":
+        record.unlink()
+    elif problem == "missing event history":
+        (session_dir / "events.jsonl").unlink()
+    elif problem == "an unsupported record":
+        record.write_text(json.dumps({"record_version": 1, "status": "recorded"}), encoding="utf-8")
+    elif problem == "an unreadable record":
+        record.write_text("{not-json", encoding="utf-8")
+    elif problem == "an unrecorded take":
+        record.write_text(
+            json.dumps({"record_version": 2, "status": "not_started"}), encoding="utf-8"
+        )
+    elif problem == "a missing processing log":
+        review_state["kwargs"]["processing_log"] = str(tmp_path / "missing.log")
+    elif problem == "a blank manual action":
+        review_state["kwargs"]["manual_actions"] = [{"action_group": "   "}]
+    else:
+        raise AssertionError(f"unexpected review evidence problem: {problem}")
+
+
+@when("the reviewer attempts to review the affected session")
+def attempt_review_affected_session(loaded: PluginHandle, review_state: dict) -> None:
+    review_state["reply"] = loaded.call(
+        "review_session", session_dir=str(review_state["session_dir"]), **review_state["kwargs"]
+    )
+
+
+@then(parsers.parse("the review reports {explanation}"))
+def review_reports_problem(review_state: dict, explanation: str) -> None:
+    expected = {
+        "the session does not exist": "does not exist",
+        "the record is missing": "human-reference-record.json",
+        "the event history is missing": "events.jsonl",
+        "the record version is unsupported": "record_version",
+        "the record cannot be read": "unreadable",
+        "the take has not been recorded": "expected 'recorded'",
+        "the processing log does not exist": "processing log does not exist",
+        "the manual action needs a description": "action_group",
+    }
+    assert "cannot review session:" in review_state["reply"]
+    assert expected[explanation] in review_state["reply"]
+
+
+@when(
+    "the reviewer supplies a tool without a manual action in the terminal",
+    target_fixture="cli_error",
+)
+def review_cli_with_unmatched_tool(missing_session: Path) -> int:
+    return review.main([str(missing_session), "--tool", "native:buffer"])
+
+
+@then("the terminal rejects the invalid review request")
+def terminal_rejects_invalid_review(cli_error: int) -> None:
+    assert cli_error == 2
+
+
+@given(
+    "a recorded session with a manual styling action and processing history",
+    target_fixture="recorded_take",
+)
+def session_with_manual_styling(
+    loaded: PluginHandle, suite: Path, monkeypatch: pytest.MonkeyPatch
+) -> dict:
+    project, canvas, history = FakeProject(), FakeCanvas(), FakeHistoryRegistry()
+    install_host(monkeypatch, project=project, canvas=lambda: canvas, history_registry=history)
+    loaded.call("start_session", task_id=DEMO_TASK_ID, base_dir=str(suite))
+    recorder = plugin._ACTIVE["session"]
+    assert recorder is not None
+    loaded.call("log_manual_action", action_group="styled layer")
+    loaded.call("end_session")
+    return {"session_dir": recorder.output_dir}
+
+
+@then("the review counts both manual actions and attributes only the export tool")
+def manual_actions_and_origins_preserved(review_state: dict) -> None:
+    path = review_state["output_dir"]
+    record = json.loads((path / review.REVIEWED_RECORD_FILENAME).read_text(encoding="utf-8"))
+    entries = [
+        json.loads(line)
+        for line in (path / "human_trajectory.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert record["session"]["steps"] == 2
+    assert record["session"]["tools"] == ["qgis:save-features-as"]
+    assert [entry["origin"] for entry in entries] == ["session_manual", "post_session_review"]

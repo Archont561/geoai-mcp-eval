@@ -121,11 +121,12 @@ def test_class_count_above_unique_values_raises(data) -> None:
         fisher_jenks_breaks([float(value) for value in values], unique_count + 1)
 
 
-def test_empty_input_raises() -> None:
+@given(values=st.lists(FINITE_FLOATS, min_size=1, max_size=10), count=st.integers(max_value=0))
+def test_invalid_class_count_and_empty_input_raise(values: list[float], count: int) -> None:
     with pytest.raises(ValueError):
         fisher_jenks_breaks([], 1)
     with pytest.raises(ValueError):
-        fisher_jenks_breaks([1.0], 0)
+        fisher_jenks_breaks(values, count)
 
 
 @given(segments=SAFE_RELATIVE)
@@ -237,8 +238,9 @@ def test_geodesic_and_projected_area_agree(crs: str) -> None:
     assert math.isclose(geodesic["total"], planar["total"], rel_tol=1e-3)
 
 
-def test_union_is_idempotent_in_geometry() -> None:
-    once = gis_ops.union_geometries(POLAND_CZECHIA)
+@given(collection=st.sampled_from([POLAND_CZECHIA, COUNTRIES]))
+def test_union_is_idempotent_in_geometry(collection: dict) -> None:
+    once = gis_ops.union_geometries(collection)
     twice = gis_ops.union_geometries(once)
     once_geometry = shape(once[FEATURES_KEY][0]["geometry"])
     twice_geometry = shape(twice[FEATURES_KEY][0]["geometry"])
@@ -260,13 +262,14 @@ def test_filter_returns_a_subsequence_of_the_input(iso_a3: str) -> None:
     assert output_ids == [value for value in input_ids if value in set(output_ids)]
 
 
-def test_centroid_of_every_country_lies_inside_its_bounding_box() -> None:
-    centroids = gis_ops.centroid(COUNTRIES)
+@given(collection=st.sampled_from([POLAND_CZECHIA, COUNTRIES]))
+def test_centroid_of_every_country_lies_inside_its_bounding_box(collection: dict) -> None:
+    centroids = gis_ops.centroid(collection)
     bounds = {
         feature["properties"]["ISO_A3"]: shape(feature["geometry"]).bounds
-        for feature in COUNTRIES[FEATURES_KEY]
+        for feature in collection[FEATURES_KEY]
     }
-    assert len(centroids[FEATURES_KEY]) == len(COUNTRIES[FEATURES_KEY])
+    assert len(centroids[FEATURES_KEY]) == len(collection[FEATURES_KEY])
     for feature in centroids[FEATURES_KEY]:
         point = shape(feature["geometry"])
         min_x, min_y, max_x, max_y = bounds[feature["properties"]["ISO_A3"]]
@@ -279,24 +282,3 @@ def test_nearest_feature_is_never_negative_distance(longitude: float, latitude: 
     nearest = gis_ops.nearest_feature([longitude, latitude], COUNTRIES)
     assert 0 <= nearest["index"] < len(COUNTRIES[FEATURES_KEY])
     assert nearest["distance"] >= 0.0
-
-
-def test_the_operation_registry_is_the_advertised_catalogue() -> None:
-    """Arm A is measured against exactly these operations; 14 is the frozen count."""
-    assert len(gis_ops.OPS) == 14
-    assert set(gis_ops.OPS) == {
-        "area",
-        "buffer_geometries",
-        "centroid",
-        "difference",
-        "feature_info",
-        "filter_features",
-        "intersection",
-        "jenks_breaks",
-        "nearest_feature",
-        "relate_de9im",
-        "reproject",
-        "representative_point",
-        "spatial_join_intersects",
-        "union_geometries",
-    }

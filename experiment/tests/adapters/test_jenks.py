@@ -29,13 +29,18 @@ def test_fisher_jenks_breaks_sorted_subset_with_max_endpoint(
     assert set(breaks).issubset(set(values))
 
 
-def test_fisher_jenks_breaks_known_clusters_and_validation() -> None:
-    values = [1.0, 2.0, 3.0, 100.0, 101.0, 102.0, 500.0, 501.0]
-    assert fisher_jenks_breaks(values, 3) == [3.0, 102.0, 501.0]
-    assert fisher_jenks_breaks(values, 1) == [501.0]
+@given(offset=st.integers(min_value=-1000, max_value=1000))
+def test_fisher_jenks_separates_translated_clusters(offset: int) -> None:
+    values = [float(value + offset) for value in [1, 2, 3, 100, 101, 102, 500, 501]]
+    assert fisher_jenks_breaks(values, 3) == [3 + offset, 102 + offset, 501 + offset]
+    assert fisher_jenks_breaks(values, 1) == [501 + offset]
+
+
+@given(value=st.integers(-1000, 1000), count=st.integers(max_value=0))
+def test_fisher_jenks_rejects_invalid_inputs(value: int, count: int) -> None:
     with pytest.raises(ValueError, match="at least one"):
         fisher_jenks_breaks([], 2)
     with pytest.raises(ValueError, match="class_count"):
-        fisher_jenks_breaks(values, 0)
+        fisher_jenks_breaks([float(value)], count)
     with pytest.raises(ValueError, match="class_count"):
-        fisher_jenks_breaks([1.0, 1.0, 1.0], 2)
+        fisher_jenks_breaks([float(value)] * 3, 2)

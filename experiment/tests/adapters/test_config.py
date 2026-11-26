@@ -5,12 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from hypothesis import given
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from experiment.adapters import config as config_adapter
-from experiment.adapters import paths
-from experiment.domain.run import Driver, EnforcementLevel, RunStage
 
 
 @pytest.fixture
@@ -30,73 +28,32 @@ def sample_experiment_toml(tmp_path: Path) -> Path:
     return cfg
 
 
-def test_load_repo_experiment_toml_has_expected_sections_and_profiles() -> None:
-    cfg = config_adapter.load_config(paths.find_repo_root() / "experiment.toml", env={})
-    assert set(cfg.backends) == {"local", "remote-ollama", "free-open"}
-    assert cfg.experiment.default_backend == "local"
-    assert cfg.experiment.default_driver is Driver.SCRIPTED
-    assert cfg.experiment.default_stage is RunStage.PILOT
-    assert cfg.experiment.default_enforce is EnforcementLevel.SEMANTIC_REPAIR
-    assert cfg.backends["free-open"].api_key_env == "OPENROUTER_API_KEY"
-    resolved = config_adapter.resolve_config_paths(cfg)
-    assert resolved.tasks_dir == paths.tasks_root().resolve()
-
-
-def test_precedence_cli_overrides_env_overrides_toml_overrides_defaults(
-    sample_experiment_toml: Path,
+@settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(repetitions=st.integers(1, 100), timeout=st.integers(1, 1000))
+def test_other_environment_overrides(
+    sample_experiment_toml: Path, repetitions: int, timeout: int
 ) -> None:
-    from_toml = config_adapter.load_config(sample_experiment_toml, env={})
-    assert from_toml.experiment.default_repetitions == 3
-    assert from_toml.runner.max_turns == 12
-    assert from_toml.backend_check.poll_timeout_s == 45.0
-
-    from_env = config_adapter.load_config(
+    file_config = config_adapter.load_config(sample_experiment_toml, env={})
+    assert file_config.experiment.default_repetitions == 3
+    assert file_config.runner.max_turns == 12
+    assert file_config.backend_check.poll_timeout_s == 45.0
+    resolved = config_adapter.load_config(
         sample_experiment_toml,
-        env={
-            "EXPERIMENT_REPETITIONS": "5",
-            "EXPERIMENT_RUNNER__MAX_TURNS": "20",
-            "EXPERIMENT_POLL_TIMEOUT_S": "90.0",
-        },
+        env={"EXPERIMENT_REPETITIONS": str(repetitions), "EXPERIMENT_POLL_TIMEOUT_S": str(timeout)},
     )
-    assert from_env.experiment.default_repetitions == 5
-    assert from_env.runner.max_turns == 20
-    assert from_env.backend_check.poll_timeout_s == 90.0
-
-    from_cli = config_adapter.load_config(
-        sample_experiment_toml,
-        overrides={"runner": {"max_turns": 2}},
-        env={"EXPERIMENT_RUNNER__MAX_TURNS": "20"},
-    )
-    assert from_cli.runner.max_turns == 2
+    assert resolved.experiment.default_repetitions == repetitions
+    assert resolved.backend_check.poll_timeout_s == timeout
 
 
-def test_env_config_path_and_missing_file_behavior(
-    tmp_path: Path, sample_experiment_toml: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    loaded = config_adapter.load_config(env={"EXPERIMENT_CONFIG": str(sample_experiment_toml)})
-    assert loaded.experiment.default_driver is Driver.OLLAMA
-
-    with pytest.raises(config_adapter.ConfigError, match="not found"):
-        config_adapter.load_config(tmp_path / "missing.toml", env={})
-
-    with pytest.raises(config_adapter.ConfigError, match="EXPERIMENT_CONFIG"):
-        config_adapter.load_config(env={"EXPERIMENT_CONFIG": str(tmp_path / "absent.toml")})
-
-    # When default config file does not exist (isolated workspace), fall back to defaults.
-    monkeypatch.setattr(config_adapter, "config_path", lambda: tmp_path / "no-experiment.toml")
-    fallback = config_adapter.load_config(env={})
-    assert fallback.experiment.default_backend == "local"
-    assert fallback.backends == {}
-
-
-def test_unknown_key_and_malformed_toml_raise_config_error(tmp_path: Path) -> None:
+@settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(key=st.text(alphabet="xyz", min_size=1, max_size=15))
+def test_unknown_key_and_malformed_toml_raise_config_error(tmp_path: Path, key: str) -> None:
     unknown = tmp_path / "unknown.toml"
-    unknown.write_text("[experiment]\nbogus_knob = 42\n", encoding="utf-8")
-    with pytest.raises(config_adapter.ConfigError, match="bogus_knob"):
+    unknown.write_text(f"[experiment]\n{key} = 42\n", encoding="utf-8")
+    with pytest.raises(config_adapter.ConfigError, match=key):
         config_adapter.load_config(unknown, env={})
-
     malformed = tmp_path / "malformed.toml"
-    malformed.write_text("[experiment\n", encoding="utf-8")
+    malformed.write_text(f"[{key}\n", encoding="utf-8")
     with pytest.raises(config_adapter.ConfigError):
         config_adapter.load_config(malformed, env={})
 

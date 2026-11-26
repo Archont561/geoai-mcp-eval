@@ -3,20 +3,32 @@
 from __future__ import annotations
 
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from experiment.adapters import run_store
 
 
-def test_run_store_roundtrips_json_jsonl_pins_and_discovery(tmp_path: Path) -> None:
+@settings(max_examples=30, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(first=st.integers(-10000, 10000), second=st.integers(-10000, 10000))
+def test_run_store_roundtrips_json_jsonl_pins_and_discovery(
+    tmp_path: Path, first: int, second: int
+) -> None:
+    with TemporaryDirectory(dir=tmp_path) as directory:
+        _exercise_roundtrip(Path(directory), first, second)
+
+
+def _exercise_roundtrip(tmp_path: Path, first: int, second: int) -> None:
     target = run_store.write_json(
-        tmp_path / "sub" / "data.json", {"b": 1, "a": 2}, trailing_newline=True
+        tmp_path / "sub" / "data.json", {"b": first, "a": second}, trailing_newline=True
     )
     assert target.read_text(encoding="utf-8").endswith("\n")
-    assert run_store.read_json(target) == {"a": 2, "b": 1}
-    assert run_store.read_json_mapping(target) == {"a": 2, "b": 1}
+    assert run_store.read_json(target) == {"a": second, "b": first}
+    assert run_store.read_json_mapping(target) == {"a": second, "b": first}
 
     bad = run_store.write_text(tmp_path / "bad.json", "{not-json")
     assert run_store.read_json_mapping(bad) is None
@@ -24,8 +36,8 @@ def test_run_store_roundtrips_json_jsonl_pins_and_discovery(tmp_path: Path) -> N
     assert run_store.read_json_mapping(non_dict) is None
 
     jsonl = tmp_path / "events.jsonl"
-    run_store.append_jsonl(jsonl, {"seq": 1, "kind": "a"})
-    run_store.append_jsonl(jsonl, {"seq": 2, "kind": "b"})
+    run_store.append_jsonl(jsonl, {"seq": first, "kind": "a"})
+    run_store.append_jsonl(jsonl, {"seq": second, "kind": "b"})
     assert len(run_store.read_text(jsonl).splitlines()) == 2
 
     run_store.write_jsonl(tmp_path / "manifest.jsonl", [{"id": 1}, {"id": 2}])
@@ -48,7 +60,21 @@ def test_run_store_roundtrips_json_jsonl_pins_and_discovery(tmp_path: Path) -> N
     assert len(str(hashes[0]["sha256"])) == 64
 
 
-def test_canonical_cell_layout_helpers_and_discovery(tmp_path: Path) -> None:
+@settings(max_examples=30, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(
+    repetition=st.integers(1, 100),
+    task=st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=12),
+)
+def test_canonical_cell_layout_helpers_and_discovery(
+    tmp_path: Path, repetition: int, task: str
+) -> None:
+    with TemporaryDirectory(dir=tmp_path) as directory:
+        _exercise_layout(Path(directory), repetition, task)
+
+
+def _exercise_layout(tmp_path: Path, repetition: int, task: str) -> None:
+    name = run_store.cell_dir_name("A", task, repetition)
+    assert run_store.parse_cell_dir_name(name) == ("A", task, repetition)
     assert run_store.cell_dir_name("A", "analysis-de9im-001", 2) == "cell-A-analysis-de9im-001-r2"
     assert run_store.parse_cell_dir_name("cell-B-prep-axis-order-001-r3") == (
         "B",

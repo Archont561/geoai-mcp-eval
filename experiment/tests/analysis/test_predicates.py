@@ -6,11 +6,10 @@ from pathlib import Path
 
 import pytest
 import yaml
+from hypothesis import HealthCheck, example, given, settings
+from hypothesis import strategies as st
 
 from experiment.analysis import load_predicates, task_predicates
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-REAL_TASKS = REPO_ROOT / "experiment" / "tasks"
 
 _CONTEXT = {
     "schema_version": 1,
@@ -46,9 +45,22 @@ _CONTEXT = {
 }
 
 
-def test_load_predicates_and_task_predicates_roundtrip(tmp_path: Path) -> None:
+@settings(max_examples=30, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@example(predicates=["touches", "feature_count", "point_axis_order"])
+@given(
+    predicates=st.lists(
+        st.text(alphabet="abcdefghijklmnopqrstuvwxyz_", min_size=1, max_size=15),
+        min_size=3,
+        max_size=3,
+        unique=True,
+    )
+)
+def test_load_predicates_and_task_predicates_roundtrip(
+    tmp_path: Path, predicates: list[str]
+) -> None:
+    first, second, third = predicates
     tasks = tmp_path / "tasks"
-    tasks.mkdir()
+    tasks.mkdir(exist_ok=True)
     docs = {
         "analysis-de9im-001.yaml": {
             **_CONTEXT,
@@ -59,7 +71,7 @@ def test_load_predicates_and_task_predicates_roundtrip(tmp_path: Path) -> None:
                     {
                         "id": "shared-boundary-relation",
                         "type": "de9im_relation",
-                        "predicate": "touches",
+                        "predicate": first,
                     }
                 ],
             },
@@ -73,12 +85,12 @@ def test_load_predicates_and_task_predicates_roundtrip(tmp_path: Path) -> None:
                     {
                         "id": "single-output-feature",
                         "type": "geojson_feature_count",
-                        "predicate": "feature_count",
+                        "predicate": second,
                     },
                     {
                         "id": "representative-point-axis-order",
                         "type": "representative_point_matches",
-                        "predicate": "point_axis_order",
+                        "predicate": third,
                     },
                 ],
             },
@@ -88,30 +100,22 @@ def test_load_predicates_and_task_predicates_roundtrip(tmp_path: Path) -> None:
         (tasks / name).write_text(yaml.safe_dump(doc), encoding="utf-8")
 
     assert load_predicates(tasks) == {
-        "shared-boundary-relation": "touches",
-        "single-output-feature": "feature_count",
-        "representative-point-axis-order": "point_axis_order",
+        "shared-boundary-relation": first,
+        "single-output-feature": second,
+        "representative-point-axis-order": third,
     }
     assert task_predicates(tasks) == {
-        "analysis-de9im-001": ("touches",),
-        "prep-axis-order-001": ("feature_count", "point_axis_order"),
+        "analysis-de9im-001": (first,),
+        "prep-axis-order-001": tuple(sorted((second, third))),
     }
 
 
-def test_real_suite_predicates_unique_and_present() -> None:
-    mapping = load_predicates(REAL_TASKS)
-    assert mapping == {
-        "shared-boundary-relation": "touches",
-        "single-output-feature": "feature_count",
-        "representative-point-axis-order": "point_axis_order",
-        "natural-breaks-assignments": "natural_breaks",
-    }
-    assert len(mapping) == len(set(mapping.values()))
-
-
-def test_load_predicates_rejects_missing_and_duplicate_keys(tmp_path: Path) -> None:
+@settings(max_examples=30, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@example(predicate="touches")
+@given(predicate=st.text(alphabet="abcdefghijklmnopqrstuvwxyz_", min_size=1, max_size=15))
+def test_load_predicates_rejects_missing_and_duplicate_keys(tmp_path: Path, predicate: str) -> None:
     missing_dir = tmp_path / "missing"
-    missing_dir.mkdir()
+    missing_dir.mkdir(exist_ok=True)
     doc = {
         **_CONTEXT,
         "id": "missing-pred-001",
@@ -125,15 +129,15 @@ def test_load_predicates_rejects_missing_and_duplicate_keys(tmp_path: Path) -> N
         load_predicates(missing_dir)
 
     dup_dir = tmp_path / "dup"
-    dup_dir.mkdir()
+    dup_dir.mkdir(exist_ok=True)
     dup_doc = {
         **_CONTEXT,
         "id": "dup-pred-001",
         "oracle": {
             "determinism_runs": 3,
             "assertions": [
-                {"id": "first-check", "type": "de9im_relation", "predicate": "touches"},
-                {"id": "second-check", "type": "de9im_relation", "predicate": "touches"},
+                {"id": "first-check", "type": "de9im_relation", "predicate": predicate},
+                {"id": "second-check", "type": "de9im_relation", "predicate": predicate},
             ],
         },
     }

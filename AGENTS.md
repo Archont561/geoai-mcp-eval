@@ -46,7 +46,7 @@ Before acting on each user request, compare its intent and context with the `nam
 
 ```bash
 pixi run tools check        # alint + ruff + pytest + rumdl
-pixi run tools run prose    # Vale technical/scientific prose checks (downloads presets)
+pixi run tools run prose    # Vale technical/scientific prose checks (vendored presets)
 pixi run tools ls           # sanity: task graph loads
 ```
 

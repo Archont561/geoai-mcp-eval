@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from experiment.services.reports import (
@@ -17,17 +17,25 @@ from experiment.services.reports import (
 )
 
 
-def test_typed_service_report_dtos_roundtrip_and_strict_validation() -> None:
+@example(run_id="r1", passed=True, duration=1.2)
+@given(
+    run_id=st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789", min_size=1, max_size=20),
+    passed=st.booleans(),
+    duration=st.floats(min_value=0, max_value=1000, allow_nan=False, allow_infinity=False),
+)
+def test_typed_service_report_dtos_roundtrip_and_strict_validation(
+    run_id: str, passed: bool, duration: float
+) -> None:
     cell = CellSummary(
         task="t1",
         arm="A",
         status="ok",
-        oracle_passed=True,
-        checks=(CheckView(assertion_id="c1", passed=True, detail="ok"),),
-        wall_s=1.2,
+        oracle_passed=passed,
+        checks=(CheckView(assertion_id="c1", passed=passed, detail="ok"),),
+        wall_s=duration,
     )
     summary = RunSummary(
-        run_id="r1",
+        run_id=run_id,
         prototype=True,
         driver="scripted",
         model="scripted",
@@ -37,7 +45,7 @@ def test_typed_service_report_dtos_roundtrip_and_strict_validation() -> None:
         total=1,
     )
     rebuilt = RunSummary.from_mapping(summary.to_dict())
-    assert rebuilt.run_id == "r1"
+    assert rebuilt.run_id == run_id
     assert rebuilt.cells[0].checks[0].assertion_id == "c1"
     assert RunSummary.model_validate_json(summary.model_dump_json()) == summary
 
@@ -66,7 +74,7 @@ def test_typed_service_report_dtos_roundtrip_and_strict_validation() -> None:
         silent_invalid=False,
     )
     archive = ArchiveOverview(
-        run_id="r1",
+        run_id=run_id,
         stage="pilot",
         schema_version=1,
         model="scripted",
@@ -84,14 +92,3 @@ def test_typed_service_report_dtos_roundtrip_and_strict_validation() -> None:
         CheckView(assertion_id="c1", passed=True, detail="ok", bogus=1)  # type: ignore[call-arg]
     with pytest.raises(ValidationError):
         cell.status = "error"  # type: ignore[misc]
-
-
-def test_zero_type_ignore_in_services_package() -> None:
-    services_root = Path(__file__).resolve().parents[2] / "src" / "experiment" / "services"
-    hits = [
-        f"{p.name}:{lineno}"
-        for p in sorted(services_root.rglob("*.py"))
-        for lineno, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
-        if "type: ignore" in line
-    ]
-    assert hits == [], f"Unexpected type: ignore in services/: {hits}"

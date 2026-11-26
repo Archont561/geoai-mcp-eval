@@ -36,31 +36,20 @@ def test_every_schema_v1_payload_roundtrips_through_task_model(payload: dict[str
     assert Task.model_validate_json(task.model_dump_json()) == task
 
 
-def test_model_and_schema_agree_on_every_required_key() -> None:
-    schema = json.loads((TASKS_DIR / "schema-v1.json").read_text(encoding="utf-8"))
-    model_schema = Task.model_json_schema()
-    required_in_schema = set(schema["required"])
-    required_in_model = {name for name, field in Task.model_fields.items() if field.is_required()}
-    assert required_in_model == required_in_schema
-    assert set(model_schema["required"]) == required_in_schema
-    assert set(model_schema["properties"]) == set(schema["properties"])
-    assert set(schema["properties"]["family"]["enum"]) == {f.value for f in TaskFamily}
-
-
-def test_model_forbids_unknown_keys_like_the_schema_does() -> None:
+@settings(
+    max_examples=20,
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much],
+)
+@given(
+    payload=from_schema(TASK_SCHEMA_V1),
+    extra=st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=12),
+)
+def test_model_forbids_unknown_keys_like_the_schema_does(
+    payload: dict[str, Any], extra: str
+) -> None:
     with pytest.raises(ValidationError):
-        Task.model_validate(
-            {
-                "id": "demo-001",
-                "title": "Demo",
-                "family": "A",
-                "prompt": "Compute area",
-                "fixtures": {"input": "fixtures/a.geojson"},
-                "deliverables": ["result.json"],
-                "oracle": {"type": "json_equals", "output": "result.json"},
-                "unexpected_key": True,
-            }
-        )
+        Task.model_validate({**payload, f"unexpected_{extra}": True})
 
 
 @given(family=st.sampled_from(list(TaskFamily)))

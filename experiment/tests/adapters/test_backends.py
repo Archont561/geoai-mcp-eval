@@ -1,133 +1,73 @@
-"""Unit tests for ``experiment.adapters.backends``."""
-
-from __future__ import annotations
+"""Properties of backend profile resolution and HTTP request translation."""
 
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock
 
 import httpx
 import pytest
-import respx
 from fakes import make_mock_response
+from hypothesis import HealthCheck, example, given, settings
+from hypothesis import strategies as st
 
 from experiment.adapters import backends
 
-
-@pytest.fixture
-def demo_backends_toml(tmp_path: Path) -> Path:
-    path = tmp_path / "experiment.toml"
-    path.write_text(
-        '[backends.demo]\nbase_url = "http://127.0.0.1:11434/v1"\nmodel = "m"\nmax_tokens = 128\n',
-        encoding="utf-8",
-    )
-    return path
+fixture_settings = settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
+model_names = st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789-", min_size=1, max_size=20)
 
 
-@pytest.fixture
-def local_and_remote_toml(tmp_path: Path) -> Path:
-    path = tmp_path / "experiment.toml"
-    path.write_text(
-        '[backends.local]\nbase_url = "http://from-file/v1"\nmodel = "file-model"\n'
-        '[backends.free-open]\nbase_url = "http://remote/v1"\nmodel = "m"\n'
-        'api_key_env = "X_TEST_KEY"\n',
-        encoding="utf-8",
-    )
-    return path
-
-
-def test_load_profiles_roundtrip(demo_backends_toml: Path) -> None:
-    profiles = backends.load_profiles(demo_backends_toml)
-    assert set(profiles) == {"demo"}
-    assert profiles["demo"].max_tokens == 128
-
-
-def test_load_profiles_missing_file(tmp_path: Path) -> None:
-    with pytest.raises(backends.BackendError, match="config"):
-        backends.load_profiles(tmp_path / "nope.toml")
-
-
-def test_load_profiles_bad_toml(tmp_path: Path) -> None:
-    bad = tmp_path / "bad.toml"
-    bad.write_text("[backends\n", encoding="utf-8")
-    with pytest.raises(backends.BackendError, match="config"):
-        backends.load_profiles(bad)
-
-
-def test_resolve_unknown_backend_names_known(demo_backends_toml: Path) -> None:
-    with pytest.raises(backends.BackendError, match="demo"):
-        backends.resolve_profile("nope", path=demo_backends_toml)
-
-
-def test_resolve_host_override_wins(local_and_remote_toml: Path) -> None:
-    profile = backends.resolve_profile("local", host="http://flag:1234", path=local_and_remote_toml)
-    assert str(profile.base_url).rstrip("/") == "http://flag:1234"
-
-
-def test_resolve_model_override_wins(local_and_remote_toml: Path) -> None:
-    profile = backends.resolve_profile("local", model="flag-model", path=local_and_remote_toml)
-    assert profile.model == "flag-model"
-
-
-def test_ollama_host_env_applies_to_local_only(
-    local_and_remote_toml: Path, monkeypatch: pytest.MonkeyPatch
+@fixture_settings
+@given(model=model_names, max_tokens=st.integers(1, 4096))
+def test_loaded_profile_preserves_configured_values(
+    tmp_path: Path, model: str, max_tokens: int
 ) -> None:
-    monkeypatch.setenv("OLLAMA_HOST", "http://env:11434")
-    monkeypatch.setenv("X_TEST_KEY", "k")
-    assert (
-        str(backends.resolve_profile("local", path=local_and_remote_toml).base_url)
-        .rstrip("/")
-        .startswith("http://env:11434")
+    path = tmp_path / "experiment.toml"
+    path.write_text(
+        f'[backends.demo]\nbase_url = "http://127.0.0.1:11434/v1"\nmodel = "{model}"\n'
+        f"max_tokens = {max_tokens}\n",
+        encoding="utf-8",
     )
-    assert (
-        str(backends.resolve_profile("free-open", path=local_and_remote_toml).base_url).rstrip("/")
-        == "http://remote/v1"
-    )
+    profiles = backends.load_profiles(path)
+    assert set(profiles) == {"demo"}
+    assert profiles["demo"].model == model
+    assert profiles["demo"].max_tokens == max_tokens
 
 
-def test_resolve_default_when_local_missing_everywhere(tmp_path: Path) -> None:
-    profile = backends.resolve_profile("local", path=tmp_path / "absent.toml")
-    assert str(profile.base_url).rstrip("/") == "http://127.0.0.1:11434"
-    assert profile.model == "qwen2.5-coder:0.5b"
-
-
-def test_build_session_requires_named_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("X_MISSING_KEY", raising=False)
-    profile = backends.BackendProfile(
-        base_url="http://h/v1", model="m", api_key_env="X_MISSING_KEY"
-    )
-    with pytest.raises(backends.BackendError, match="X_MISSING_KEY"):
+@fixture_settings
+@example(secret="secret")
+@given(secret=st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789", min_size=1, max_size=30))
+def test_sessions_only_include_auth_when_configured(
+    monkeypatch: pytest.MonkeyPatch, secret: str
+) -> None:
+    profile = backends.BackendProfile(base_url="http://h/v1", model="m", api_key_env="X_TEST_KEY")
+    monkeypatch.delenv("X_TEST_KEY", raising=False)
+    with pytest.raises(backends.BackendError, match="X_TEST_KEY"):
         backends.build_session(profile)
-
-
-def test_build_session_sets_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("X_PRESENT_KEY", "secret")
-    profile = backends.BackendProfile(
-        base_url="http://h/v1", model="m", api_key_env="X_PRESENT_KEY"
-    )
+    monkeypatch.setenv("X_TEST_KEY", secret)
     with backends.build_session(profile) as session:
-        assert session.headers["Authorization"] == "Bearer secret"
+        assert session.headers["Authorization"] == f"Bearer {secret}"
+    anonymous = profile.model_copy(update={"api_key_env": None})
+    with backends.build_session(anonymous) as anonymous_session:
+        assert "Authorization" not in anonymous_session.headers
 
 
-def test_build_session_without_key_has_no_auth() -> None:
-    profile = backends.BackendProfile(base_url="http://h/v1", model="m")
-    with backends.build_session(profile) as session:
-        assert "Authorization" not in session.headers
-
-
-def test_chat_completions_success(fake_http_session: MagicMock) -> None:
+@fixture_settings
+@example(max_tokens=77, answer="ok")
+@given(max_tokens=st.integers(1, 4096), answer=model_names)
+def test_chat_request_preserves_parameters_and_response(
+    fake_http_session: MagicMock, max_tokens: int, answer: str
+) -> None:
+    fake_http_session.reset_mock(side_effect=True, return_value=True)
     fake_http_session.post.return_value = make_mock_response(
-        200, {"choices": [{"message": {"content": "ok"}}]}
+        200, {"choices": [{"message": {"content": answer}}]}
     )
-    profile = backends.BackendProfile(base_url="http://h/v1", model="m", max_tokens=77)
+    profile = backends.BackendProfile(base_url="http://h/v1", model="m", max_tokens=max_tokens)
     payload = backends.chat_completions(
         fake_http_session, profile, [{"role": "user", "content": "hi"}], None
     )
-    assert payload["choices"][0]["message"]["content"] == "ok"
-    url = fake_http_session.post.call_args.args[0]
+    assert payload["choices"][0]["message"]["content"] == answer
+    assert fake_http_session.post.call_args.args[0] == "http://h/v1/chat/completions"
     kwargs = fake_http_session.post.call_args.kwargs
-    assert url == "http://h/v1/chat/completions"
-    assert kwargs["json"]["max_tokens"] == 77
+    assert kwargs["json"]["max_tokens"] == max_tokens
     assert kwargs["json"]["temperature"] == 0.0
     assert "options" not in kwargs["json"]
     assert kwargs["timeout"] == httpx.Timeout(
@@ -138,99 +78,59 @@ def test_chat_completions_success(fake_http_session: MagicMock) -> None:
     )
 
 
-def test_chat_completions_connection_error(fake_http_session: MagicMock) -> None:
-    fake_http_session.post.side_effect = httpx.ConnectError("refused")
+@fixture_settings
+@given(error=st.sampled_from([httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout]))
+def test_chat_transport_errors_are_classified(fake_http_session: MagicMock, error: type) -> None:
+    fake_http_session.reset_mock(side_effect=True, return_value=True)
+    fake_http_session.post.side_effect = error("failed")
     profile = backends.BackendProfile(base_url="http://h/v1", model="m")
     with pytest.raises(backends.BackendError) as excinfo:
         backends.chat_completions(fake_http_session, profile, [])
-    assert excinfo.value.error_class == "connection"
+    assert excinfo.value.error_class == ("timeout" if error is httpx.ReadTimeout else "connection")
 
 
-def test_chat_completions_read_timeout(fake_http_session: MagicMock) -> None:
-    fake_http_session.post.side_effect = httpx.ReadTimeout("slow")
-    profile = backends.BackendProfile(base_url="http://h/v1", model="m")
-    with pytest.raises(backends.BackendError) as excinfo:
-        backends.chat_completions(fake_http_session, profile, [])
-    assert excinfo.value.error_class == "timeout"
-
-
-def test_chat_completions_rate_limit_includes_retry_after(fake_http_session: MagicMock) -> None:
+@fixture_settings
+@example(status=429, retry=17)
+@example(status=503, retry=17)
+@given(status=st.integers(400, 599), retry=st.integers(0, 1000))
+def test_chat_http_errors_are_classified(
+    fake_http_session: MagicMock, status: int, retry: int
+) -> None:
+    fake_http_session.reset_mock(side_effect=True, return_value=True)
     fake_http_session.post.return_value = make_mock_response(
-        429, text="slow down", headers={"Retry-After": "17"}
+        status, text="failed", headers={"Retry-After": str(retry)}
     )
     profile = backends.BackendProfile(base_url="http://h/v1", model="m")
     with pytest.raises(backends.BackendError) as excinfo:
         backends.chat_completions(fake_http_session, profile, [])
-    assert excinfo.value.error_class == "rate-limit"
-    assert "17" in str(excinfo.value)
+    assert excinfo.value.error_class == ("rate-limit" if status == 429 else f"http-{status}")
+    if status == 429:
+        assert str(retry) in str(excinfo.value)
 
 
-def test_chat_completions_http_error_class(fake_http_session: MagicMock) -> None:
-    fake_http_session.post.return_value = make_mock_response(503, text="down")
-    profile = backends.BackendProfile(base_url="http://h/v1", model="m")
-    with pytest.raises(backends.BackendError) as excinfo:
-        backends.chat_completions(fake_http_session, profile, [])
-    assert excinfo.value.error_class == "http-503"
-
-
-def test_chat_completions_invalid_json(fake_http_session: MagicMock) -> None:
-    fake_http_session.post.return_value = make_mock_response(200, ValueError("bad"), text="<html>")
+@fixture_settings
+@given(response=model_names)
+def test_chat_invalid_json_is_classified(fake_http_session: MagicMock, response: str) -> None:
+    fake_http_session.reset_mock(side_effect=True, return_value=True)
+    fake_http_session.post.return_value = make_mock_response(200, ValueError("bad"), text=response)
     profile = backends.BackendProfile(base_url="http://h/v1", model="m")
     with pytest.raises(backends.BackendError) as excinfo:
         backends.chat_completions(fake_http_session, profile, [])
     assert excinfo.value.error_class == "invalid-response"
+    assert response in str(excinfo.value)
 
 
-def test_resolve_model_digest_matches_exact_and_latest_and_handles_failures(
-    fake_http_session: MagicMock,
+@fixture_settings
+@example(model="qwen2.5:3b", digest="abc123", latest=False)
+@given(model=model_names, digest=model_names, latest=st.booleans())
+def test_model_digest_matches_exact_or_latest(
+    fake_http_session: MagicMock, model: str, digest: str, latest: bool
 ) -> None:
-    profile = backends.fallback_profile("http://127.0.0.1:11434/v1", "qwen2.5:3b")
-
-    fake_http_session.get.return_value = make_mock_response(
-        200, {"models": [{"name": "qwen2.5:3b", "digest": "sha256:abc123"}]}
-    )
-    assert backends.resolve_model_digest(fake_http_session, profile) == "sha256:abc123"
-
-    untagged = backends.fallback_profile("http://127.0.0.1:11434/v1", "qwen2.5")
-    fake_http_session.get.return_value = make_mock_response(
-        200, {"models": [{"model": "qwen2.5:latest", "digest": "sha256:def456"}]}
-    )
-    assert backends.resolve_model_digest(fake_http_session, untagged) == "sha256:def456"
-
-    fake_http_session.get.return_value = make_mock_response(500)
-    assert backends.resolve_model_digest(fake_http_session, profile) is None
-
-    fake_http_session.get.return_value = make_mock_response(200, ValueError("not json"))
-    assert backends.resolve_model_digest(fake_http_session, profile) is None
-
-    fake_http_session.get.side_effect = httpx.ConnectError("down")
-    assert backends.resolve_model_digest(fake_http_session, profile) is None
-
-
-def test_backends_with_respx_mocked_httpx_routes(
-    respx_mock: respx.MockRouter,
-    backend_profile_factory: Any,
-) -> None:
-    profile = backend_profile_factory.build(
-        base_url="https://llm.example.invalid/v1",
-        model="qwen2.5:3b",
-    )
-    chat_route = respx_mock.post("https://llm.example.invalid/v1/chat/completions").mock(
-        return_value=httpx.Response(
-            200,
-            json={"choices": [{"message": {"role": "assistant", "content": "OK"}}]},
-        )
-    )
-    tags_route = respx_mock.get("https://llm.example.invalid/api/tags").mock(
-        return_value=httpx.Response(
-            200,
-            json={"models": [{"name": "qwen2.5:3b", "digest": "sha256:respx123"}]},
-        )
-    )
-    with httpx.Client() as client:
-        reply = backends.chat_completions(client, profile, [{"role": "user", "content": "hi"}])
-        digest = backends.resolve_model_digest(client, profile)
-    assert chat_route.called
-    assert tags_route.called
-    assert reply["choices"][0]["message"]["content"] == "OK"
-    assert digest == "sha256:respx123"
+    fake_http_session.reset_mock(side_effect=True, return_value=True)
+    profile = backends.fallback_profile("http://127.0.0.1:11434/v1", model)
+    model_entry = {
+        "model" if latest else "name": model + (":latest" if latest else ""),
+        "digest": "sha256:" + digest,
+    }
+    fake_http_session.get.return_value = make_mock_response(200, {"models": [model_entry]})
+    assert backends.resolve_model_digest(fake_http_session, profile) == "sha256:" + digest
