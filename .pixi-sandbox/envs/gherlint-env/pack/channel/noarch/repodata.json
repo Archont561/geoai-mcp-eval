@@ -1,0 +1,107 @@
+{
+  "info": {
+    "subdir": "noarch"
+  },
+  "packages": {},
+  "packages.conda": {
+    "ca-certificates-2026.11.20-hbd8a1cb_0.conda": {
+      "build": "hbd8a1cb_0",
+      "build_number": 0,
+      "depends": [
+        "__unix"
+      ],
+      "license": "ISC",
+      "md5": "05f63e1cbcb57e737619f989a2b8c8b3",
+      "name": "ca-certificates",
+      "noarch": "generic",
+      "purls": [],
+      "run_exports": {},
+      "sha256": "8c104262bf331b14478e36c6cedd63b558d4b7ff96f218742a91878353edeed1",
+      "size": 123617,
+      "subdir": "noarch",
+      "timestamp": 1795239311426,
+      "version": "2026.11.20"
+    },
+    "pydantic-1.10.22-pyh3cfb1c2_0.conda": {
+      "build": "pyh3cfb1c2_0",
+      "build_number": 0,
+      "depends": [
+        "python >=3.10",
+        "typing_extensions >=4.2.0"
+      ],
+      "license": "MIT",
+      "license_family": "MIT",
+      "md5": "2aa2384cdd325356830840678adbefdc",
+      "name": "pydantic",
+      "noarch": "python",
+      "purls": [
+        "pkg:pypi/pydantic?source=hash-mapping"
+      ],
+      "run_exports": {},
+      "sha256": "8660b2660ed19ac7aea35cce1bb62be4e56fa41cc41018fefd27d8f53f536943",
+      "size": 137813,
+      "subdir": "noarch",
+      "timestamp": 1756237920671,
+      "version": "1.10.22"
+    },
+    "python_abi-3.15-9_cp315.conda": {
+      "build": "9_cp315",
+      "build_number": 9,
+      "constrains": [
+        "python 3.15.* *_cp315"
+      ],
+      "depends": [],
+      "license": "BSD-3-Clause",
+      "license_family": "BSD",
+      "md5": "b23461631fe2abdbade0cb64babe7344",
+      "name": "python_abi",
+      "noarch": "generic",
+      "purls": [],
+      "run_exports": {},
+      "sha256": "976c4a6db967a62385aa633daaab19a929f986b979a7ad836b8b70e15ca7aefd",
+      "size": 6800,
+      "subdir": "noarch",
+      "timestamp": 1788302827589,
+      "version": "3.15"
+    },
+    "typing_extensions-4.16.0-pyhcf101f3_0.conda": {
+      "build": "pyhcf101f3_0",
+      "build_number": 0,
+      "depends": [
+        "python >=3.10",
+        "python"
+      ],
+      "license": "PSF-2.0",
+      "license_family": "PSF",
+      "md5": "c70ad746c22219b9700931707482992c",
+      "name": "typing_extensions",
+      "noarch": "python",
+      "purls": [
+        "pkg:pypi/typing-extensions?source=hash-mapping"
+      ],
+      "run_exports": {},
+      "sha256": "2d888f90af0686044882c74193ec80a90ec1943145d94a7b1b048958acda1848",
+      "size": 52631,
+      "subdir": "noarch",
+      "timestamp": 1783002732887,
+      "version": "4.16.0"
+    },
+    "tzdata-2026e-h5d301ff_0.conda": {
+      "build": "h5d301ff_0",
+      "build_number": 0,
+      "depends": [],
+      "license": "LicenseRef-Public-Domain",
+      "md5": "abccc3810d2b97e570dee487f2b46e38",
+      "name": "tzdata",
+      "noarch": "generic",
+      "purls": [],
+      "run_exports": {},
+      "sha256": "2b7ca858879f183ce2dcc65b300f48a0133d5430550f35b23d80d405a0788dbf",
+      "size": 119208,
+      "subdir": "noarch",
+      "timestamp": 1792758382821,
+      "version": "2026e"
+    }
+  },
+  "repodata_version": 2
+}
