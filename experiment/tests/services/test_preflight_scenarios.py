@@ -42,81 +42,38 @@ def preflight(backend_check_config: BackendCheckConfig) -> dict:
     return {"config": backend_check_config}
 
 
+def assert_failure(preflight: dict, kind: str, exit_code: int) -> BackendCheckError:
+    error = preflight["error"]
+    assert error.kind == kind
+    assert backend_check_exit_code(error.kind) == exit_code
+    return error
+
+
+@pytest.fixture
+def rate_limit_error():
+    import httpx
+    from openrouter.errors import OpenRouterError
+
+    req = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+    resp = httpx.Response(429, text="rate limited", headers={"Retry-After": "1"}, request=req)
+    return OpenRouterError("HTTP 429: rate limited", raw_response=resp, body="rate limited")
+
+
+@pytest.fixture
+def forbidden_openrouter_error() -> OpenRouterError:
+    req = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+    resp = httpx.Response(403, text="forbidden", request=req)
+    return OpenRouterError("HTTP 403: forbidden", raw_response=resp, body="forbidden")
+
+
+# Step definitions follow feature and scenario order; shared steps appear at first use.
+
+# backend-preflight.feature — A reachable model responds successfully
+
+
 @given("a working connection and the requested model")
 def working_backend() -> None:
     """The shared fixtures provide a healthy tunnel and model endpoint."""
-
-
-@given("the remote host cannot be reached")
-def unreachable_host(fake_ssh_forwarder: MagicMock) -> None:
-    fake_ssh_forwarder.start.side_effect = sshtunnel.BaseSSHTunnelForwarderError(
-        "Could not resolve hostname"
-    )
-
-
-@given("the connection tunnel is inactive")
-def inactive_tunnel(fake_ssh_forwarder: MagicMock) -> None:
-    fake_ssh_forwarder.is_active = False
-
-
-@given("the configured tunnel connection is missing")
-def missing_tunnel(preflight: dict, tmp_path: Path) -> None:
-    preflight["config"] = preflight["config"].model_copy(
-        update={"control_path": tmp_path / "does-not-exist.sock"}
-    )
-
-
-@given("the backend has only a different model")
-def wrong_model(preflight: dict, ok_http_session: MagicMock) -> None:
-    preflight["config"] = preflight["config"].model_copy(update={"poll_timeout_s": 0.01})
-    models = make_mock_response(200, {"data": [{"id": "other:1b"}]})
-    tags = make_mock_response(200, {"models": [{"name": "other:1b", "digest": "sha256:other"}]})
-    ok_http_session.get.side_effect = lambda url, **_kw: (
-        models if url.endswith("/v1/models") else tags
-    )
-
-
-@given("the backend rejects the credentials")
-def invalid_credentials(ok_http_session: MagicMock) -> None:
-    ok_http_session.get.side_effect = None
-    ok_http_session.get.return_value = make_mock_response(401, text="invalid api key")
-
-
-@given("temporary overload followed by a rate-limited response")
-def transient_errors(ok_http_session: MagicMock) -> None:
-    models = [
-        make_mock_response(503, text="overloaded"),
-        make_mock_response(200, {"data": [{"id": "qwen2.5:3b"}]}),
-    ]
-    tags = make_mock_response(
-        200, {"models": [{"name": "qwen2.5:3b", "digest": "sha256:pinned123"}]}
-    )
-    ok_http_session.get.side_effect = lambda url, **_kw: (
-        models.pop(0) if url.endswith("/v1/models") else tags
-    )
-    ok_http_session.post.side_effect = [
-        make_mock_response(429, text="slow down"),
-        make_mock_response(
-            200,
-            {
-                "choices": [
-                    {"message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}
-                ]
-            },
-        ),
-    ]
-
-
-@given("the backend rejects the response as too long")
-def response_too_long(ok_http_session: MagicMock) -> None:
-    ok_http_session.post.return_value = make_mock_response(
-        400, text="maximum context length / token limit exceeded"
-    )
-
-
-@given("the backend returns an empty test response")
-def empty_response(ok_http_session: MagicMock) -> None:
-    ok_http_session.post.return_value = make_mock_response(200, {"choices": []})
 
 
 @when("the researcher checks backend readiness")
@@ -145,17 +102,33 @@ def ready_with_digest(preflight: dict) -> None:
     assert BackendCheckResult.model_validate_json(result.model_dump_json()) == result
 
 
-def assert_failure(preflight: dict, kind: str, exit_code: int) -> BackendCheckError:
-    error = preflight["error"]
-    assert error.kind == kind
-    assert backend_check_exit_code(error.kind) == exit_code
-    return error
+@then("one test response was requested")
+def one_response(ok_http_session: MagicMock) -> None:
+    assert ok_http_session.post.call_count == 1
+
+
+# backend-preflight.feature — The remote host cannot be reached
+
+
+@given("the remote host cannot be reached")
+def unreachable_host(fake_ssh_forwarder: MagicMock) -> None:
+    fake_ssh_forwarder.start.side_effect = sshtunnel.BaseSSHTunnelForwarderError(
+        "Could not resolve hostname"
+    )
 
 
 @then("the report identifies an unreachable remote host")
 def host_error(preflight: dict) -> None:
     error = assert_failure(preflight, "ssh-unreachable", EXIT_SSH_UNREACHABLE)
     assert "gpu-box" in str(error)
+
+
+# backend-preflight.feature — The existing tunnel is inactive
+
+
+@given("the connection tunnel is inactive")
+def inactive_tunnel(fake_ssh_forwarder: MagicMock) -> None:
+    fake_ssh_forwarder.is_active = False
 
 
 @then("the report identifies an unavailable tunnel")
@@ -165,29 +138,32 @@ def tunnel_error(preflight: dict, fake_ssh_forwarder: MagicMock) -> None:
         fake_ssh_forwarder.stop.assert_called_once()
 
 
+# backend-preflight.feature — The existing tunnel connection is missing
+
+
+@given("the configured tunnel connection is missing")
+def missing_tunnel(preflight: dict, tmp_path: Path) -> None:
+    preflight["config"] = preflight["config"].model_copy(
+        update={"control_path": tmp_path / "does-not-exist.sock"}
+    )
+
+
+# backend-preflight.feature — The requested model is absent
+
+
+@given("the backend has only a different model")
+def wrong_model(preflight: dict, ok_http_session: MagicMock) -> None:
+    preflight["config"] = preflight["config"].model_copy(update={"poll_timeout_s": 0.01})
+    models = make_mock_response(200, {"data": [{"id": "other:1b"}]})
+    tags = make_mock_response(200, {"models": [{"name": "other:1b", "digest": "sha256:other"}]})
+    ok_http_session.get.side_effect = lambda url, **_kw: (
+        models if url.endswith("/v1/models") else tags
+    )
+
+
 @then("the report identifies the missing model")
 def model_error(preflight: dict) -> None:
     assert_failure(preflight, "model-absent", EXIT_MODEL_ABSENT)
-
-
-@then("the report identifies a credentials error")
-def auth_error(preflight: dict) -> None:
-    assert_failure(preflight, "auth-error", EXIT_AUTH_CLIENT)
-
-
-@then("the report identifies the model's token limit")
-def token_error(preflight: dict) -> None:
-    assert_failure(preflight, "token-limit", EXIT_TOKEN_LIMIT)
-
-
-@then("the report identifies a rejected response")
-def completion_error(preflight: dict) -> None:
-    assert_failure(preflight, "completion-rejected", EXIT_COMPLETION_REJECTED)
-
-
-@then("one test response was requested")
-def one_response(ok_http_session: MagicMock) -> None:
-    assert ok_http_session.post.call_count == 1
 
 
 @then("no test response was requested")
@@ -195,168 +171,113 @@ def no_response(ok_http_session: MagicMock) -> None:
     ok_http_session.post.assert_not_called()
 
 
-@then("the test response was requested twice")
-def two_responses(ok_http_session: MagicMock) -> None:
-    assert ok_http_session.post.call_count == 2
+# backend-preflight.feature — The local model service responds to preparation and readiness checks
 
 
-@then("the model list was requested only once")
-def one_model_request(ok_http_session: MagicMock) -> None:
-    assert ok_http_session.get.call_count == 1
+@given("a local model service with a prepared model", target_fixture="local_model_service")
+def prepared_local_service(monkeypatch: pytest.MonkeyPatch) -> dict:
+    from experiment.adapters import ollama
+
+    client = MagicMock()
+    client.list.return_value = {"models": [{"model": "qwen2.5:3b", "digest": "sha256:sdk123"}]}
+    client.pull.return_value = {"status": "success"}
+    client.generate.return_value = {"response": "OK"}
+    monkeypatch.setattr(ollama, "build_client", lambda *_a, **_kw: client)
+    return {"client": client}
 
 
-@given("a remote connection with a named user and custom port")
-def configured_remote_connection(preflight: dict, fake_ssh_forwarder: MagicMock) -> None:
-    preflight["forwarder"] = fake_ssh_forwarder
-    preflight["forwarder"].local_bind_port = 41234
+@when("the researcher checks and prepares the local service")
+def check_prepared_local_service(local_model_service: dict, tmp_path: Path) -> None:
+    from experiment.adapters import ollama
+
+    local_model_service["running"] = ollama.serve_running()
+    local_model_service["ready"] = ollama.wait_ready(attempts=1, sleep_s=0)
+    local_model_service["owner"] = ollama.start_ollama("/usr/bin/ollama", tmp_path / "serve.log")
+    local_model_service["pull"] = ollama.pull_model("/usr/bin/ollama", "qwen2.5:3b")
+    local_model_service["response"] = ollama.smoke_generate("qwen2.5:3b")
+    local_model_service["digest"] = ollama.list_model_digest("/usr/bin/ollama", "qwen2.5:3b")
 
 
-@when("the researcher opens and closes the connection")
-def use_remote_connection(preflight: dict) -> None:
-    from experiment.adapters.ssh_tunnel import ManagedSshTunnel, TunnelSpec
-
-    def factory(**kwargs: object) -> MagicMock:
-        preflight["connection_options"] = kwargs
-        return preflight["forwarder"]
-
-    with ManagedSshTunnel(
-        TunnelSpec(ssh_host="alice@gpu.example.org:2222", ssh_password="pw"),
-        forwarder_factory=factory,
-    ) as tunnel:
-        preflight["active_during_use"] = tunnel.is_active
-        preflight["port_during_use"] = tunnel.local_bind_port
-    preflight["tunnel"] = tunnel
+@then("model readiness, identity, and a test response are available")
+def prepared_local_service_responds(local_model_service: dict) -> None:
+    assert local_model_service["running"] is True and local_model_service["ready"] is True
+    assert local_model_service["owner"] is None and local_model_service["pull"] == 0
+    assert local_model_service["response"] == {"response": "OK"}
+    assert local_model_service["digest"] == "sha256:sdk123"
 
 
-@then("the connection uses the requested remote host and user")
-def connection_target(preflight: dict) -> None:
-    assert preflight["connection_options"]["ssh_address_or_host"] == ("gpu.example.org", 2222)
-    assert preflight["connection_options"]["ssh_username"] == "alice"
-    preflight["forwarder"].start.assert_called_once()
-    assert preflight["active_during_use"]
-    assert preflight["port_during_use"] == 41234
+# backend-preflight.feature — An unavailable local service can be started and stopped safely
 
 
-@then("its local port is released after use")
-def connection_released(preflight: dict) -> None:
-    preflight["forwarder"].stop.assert_called_once()
-    assert preflight["tunnel"].local_bind_port is None
-    assert not preflight["tunnel"].is_active
+@given("a local model service that cannot be reached", target_fixture="unavailable_local_service")
+def local_service_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> dict:
+    import ollama as ollama_sdk
+
+    from experiment.adapters import ollama
+
+    client = MagicMock()
+    client.list.side_effect = ollama_sdk.RequestError("down")
+    client.pull.side_effect = ollama_sdk.ResponseError("pull failed", status_code=500)
+    monkeypatch.setattr(ollama, "build_client", lambda *_a, **_kw: client)
+    return {"client": client, "events": []}
 
 
-@given("a remote connection whose forwarding cannot start")
-def forwarding_failure(fake_ssh_forwarder: MagicMock) -> None:
-    fake_ssh_forwarder.start.side_effect = sshtunnel.HandlerSSHTunnelForwarderError("bind refused")
+@when("the researcher prepares and then stops the local service")
+def prepare_and_stop_local_service(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, unavailable_local_service: dict
+) -> None:
+    import subprocess
 
-
-@given("a remote connection that rejects authentication")
-def ssh_authentication_failure(fake_ssh_forwarder: MagicMock) -> None:
-    import paramiko
-
-    fake_ssh_forwarder.start.side_effect = paramiko.SSHException("auth failed")
-
-
-@given("a compatible model service with a pinned model", target_fixture="compatible_service")
-def compatible_model_service(respx_mock):
     import httpx
 
-    chat = respx_mock.post("https://llm.example.invalid/v1/chat/completions").mock(
-        return_value=httpx.Response(
-            200, json={"choices": [{"message": {"role": "assistant", "content": "OK"}}]}
+    from experiment.adapters import ollama
+
+    state = unavailable_local_service
+    state["running"] = ollama.serve_running()
+    state["ready"] = ollama.wait_ready(attempts=2, sleep_s=0, sleep=lambda _s: None)
+    state["pull"] = ollama.pull_model("/usr/bin/ollama", "qwen2.5:3b")
+    state["digest"] = ollama.list_model_digest("/usr/bin/ollama", "qwen2.5:3b")
+    events = state["events"]
+
+    class FakeProc:
+        def terminate(self) -> None:
+            events.append("terminate")
+
+        def wait(self, timeout: float | None = None) -> int:
+            events.append(f"wait:{timeout}")
+            raise subprocess.TimeoutExpired(cmd="ollama", timeout=timeout or 0)
+
+        def kill(self) -> None:
+            events.append("kill")
+
+    monkeypatch.setattr(ollama.subprocess, "Popen", lambda *_a, **_kw: FakeProc())
+    owner = ollama.start_ollama("/usr/bin/ollama", tmp_path / "logs/ollama.log")
+    assert owner is not None
+    ollama.stop_ollama(owner)
+    state["closed"] = owner.log_handle.closed
+
+    def broken_call(*_a, **_kw):
+        raise httpx.ConnectError("refused")
+
+    with pytest.raises(ollama.HttpTransportError):
+        ollama.request_with_retry(
+            broken_call,
+            "http://127.0.0.1:11434/v1/models",
+            ollama.RetryPolicy(timeout=(1.0, 2.0), retries=0),
         )
-    )
-    tags = respx_mock.get("https://llm.example.invalid/api/tags").mock(
-        return_value=httpx.Response(
-            200, json={"models": [{"name": "qwen2.5:3b", "digest": "sha256:respx123"}]}
-        )
-    )
-    models = respx_mock.get("https://llm.example.invalid/v1/models").mock(
-        return_value=httpx.Response(200, json={"data": [{"id": "qwen2.5:3b"}]})
-    )
-    return {"chat": chat, "tags": tags, "models": models}
 
 
-@when("the researcher requests a response and model identity")
-def request_response_and_identity(compatible_service: dict) -> None:
-    import httpx
-
-    from experiment.adapters import backends
-
-    profile = backends.fallback_profile("https://llm.example.invalid/v1", "qwen2.5:3b")
-    with httpx.Client() as client:
-        compatible_service["reply"] = backends.chat_completions(
-            client, profile, [{"role": "user", "content": "hi"}]
-        )
-        compatible_service["digest"] = backends.resolve_model_digest(client, profile)
+@then("failures are reported and the owned service is stopped safely")
+def local_service_failures_reported(unavailable_local_service: dict) -> None:
+    state = unavailable_local_service
+    assert state["running"] is False and state["ready"] is False
+    assert state["pull"] == 1 and state["digest"] == "unavailable"
+    assert state["events"] == ["terminate", "wait:10", "kill"]
+    assert state["closed"] is True
 
 
-@then("the service returns the response and the pinned identity")
-def response_and_identity_are_returned(compatible_service: dict) -> None:
-    assert compatible_service["chat"].called
-    assert compatible_service["tags"].called
-    assert compatible_service["reply"]["choices"][0]["message"]["content"] == "OK"
-    assert compatible_service["digest"] == "sha256:respx123"
-
-
-@given("the readiness check reports a pinned model is ready")
-def ready_result_for_cli(monkeypatch: pytest.MonkeyPatch) -> None:
-    from experiment.services import backend_check
-
-    monkeypatch.setattr(
-        backend_check,
-        "run_backend_check",
-        lambda _cfg: BackendCheckResult(
-            status="READY",
-            backend="remote-ollama",
-            model="qwen2.5:3b",
-            digest="sha256:pinned123",
-            base_url="http://127.0.0.1:11435/v1",
-        ),
-    )
-
-
-@given("the readiness check reports a disconnected tunnel")
-def disconnected_result_for_cli(monkeypatch: pytest.MonkeyPatch) -> None:
-    from experiment.services import backend_check
-
-    def fail(_cfg):
-        raise BackendCheckError("tunnel-dead", "socket closed", "restart ssh")
-
-    monkeypatch.setattr(backend_check, "run_backend_check", fail)
-
-
-@when("I ask for a backend readiness report", target_fixture="cli_readiness")
-def request_cli_readiness():
-    from typer.testing import CliRunner
-
-    from experiment.cli import app
-
-    return CliRunner().invoke(app, ["env", "backend-check", "--ssh-host", "gpu-box"])
-
-
-@then("the action succeeds")
-def cli_readiness_succeeds(cli_readiness) -> None:
-    assert cli_readiness.exit_code == 0, cli_readiness.output
-
-
-@then("the report shows the ready model identity")
-def cli_readiness_identity(cli_readiness) -> None:
-    assert "READY" in cli_readiness.output and "sha256:pinned123" in cli_readiness.output
-
-
-@then("the readiness action reports a disconnected tunnel status")
-def cli_readiness_disconnected(cli_readiness) -> None:
-    assert cli_readiness.exit_code == EXIT_TUNNEL_DEAD
-
-
-@pytest.fixture
-def rate_limit_error():
-    import httpx
-    from openrouter.errors import OpenRouterError
-
-    req = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
-    resp = httpx.Response(429, text="rate limited", headers={"Retry-After": "1"}, request=req)
-    return OpenRouterError("HTTP 429: rate limited", raw_response=resp, body="rate limited")
+# backend-preflight.feature — A hosted model recovers from rate limiting and hides an invalid
+# credential
 
 
 @given("a hosted model that first limits requests and then responds")
@@ -452,124 +373,7 @@ def hosted_model_outcome_is_safe(hosted_model_outcome: dict) -> None:
     assert hosted_model_outcome["auth_calls"] == 1
 
 
-@when("the researcher probes the available model and requests a test response")
-def probe_compatible_service(compatible_service: dict) -> None:
-    import httpx
-
-    from experiment.adapters import backends
-
-    profile = backends.fallback_profile("https://llm.example.invalid/v1", "qwen2.5:3b")
-    with httpx.Client() as client:
-        probe = HttpBackendProbe(profile, session=client, sleep=lambda _: None)
-        compatible_service["models_found"] = probe.list_model_ids()
-        compatible_service["pinned"] = probe.resolve_model_digest()
-        probe.verify_tiny_completion(max_tokens=8)
-
-
-@then("the probe identifies the model and its pinned version")
-def compatible_probe_identifies_model(compatible_service: dict) -> None:
-    assert "qwen2.5:3b" in compatible_service["models_found"]
-    assert compatible_service["pinned"] == "sha256:respx123"
-    assert compatible_service["models"].called and compatible_service["chat"].called
-
-
-@given("a local model service with a prepared model", target_fixture="local_model_service")
-def prepared_local_service(monkeypatch: pytest.MonkeyPatch) -> dict:
-    from experiment.adapters import ollama
-
-    client = MagicMock()
-    client.list.return_value = {"models": [{"model": "qwen2.5:3b", "digest": "sha256:sdk123"}]}
-    client.pull.return_value = {"status": "success"}
-    client.generate.return_value = {"response": "OK"}
-    monkeypatch.setattr(ollama, "build_client", lambda *_a, **_kw: client)
-    return {"client": client}
-
-
-@when("the researcher checks and prepares the local service")
-def check_prepared_local_service(local_model_service: dict, tmp_path: Path) -> None:
-    from experiment.adapters import ollama
-
-    local_model_service["running"] = ollama.serve_running()
-    local_model_service["ready"] = ollama.wait_ready(attempts=1, sleep_s=0)
-    local_model_service["owner"] = ollama.start_ollama("/usr/bin/ollama", tmp_path / "serve.log")
-    local_model_service["pull"] = ollama.pull_model("/usr/bin/ollama", "qwen2.5:3b")
-    local_model_service["response"] = ollama.smoke_generate("qwen2.5:3b")
-    local_model_service["digest"] = ollama.list_model_digest("/usr/bin/ollama", "qwen2.5:3b")
-
-
-@then("model readiness, identity, and a test response are available")
-def prepared_local_service_responds(local_model_service: dict) -> None:
-    assert local_model_service["running"] is True and local_model_service["ready"] is True
-    assert local_model_service["owner"] is None and local_model_service["pull"] == 0
-    assert local_model_service["response"] == {"response": "OK"}
-    assert local_model_service["digest"] == "sha256:sdk123"
-
-
-@given("a local model service that cannot be reached", target_fixture="unavailable_local_service")
-def local_service_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> dict:
-    import ollama as ollama_sdk
-
-    from experiment.adapters import ollama
-
-    client = MagicMock()
-    client.list.side_effect = ollama_sdk.RequestError("down")
-    client.pull.side_effect = ollama_sdk.ResponseError("pull failed", status_code=500)
-    monkeypatch.setattr(ollama, "build_client", lambda *_a, **_kw: client)
-    return {"client": client, "events": []}
-
-
-@when("the researcher prepares and then stops the local service")
-def prepare_and_stop_local_service(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, unavailable_local_service: dict
-) -> None:
-    import subprocess
-
-    import httpx
-
-    from experiment.adapters import ollama
-
-    state = unavailable_local_service
-    state["running"] = ollama.serve_running()
-    state["ready"] = ollama.wait_ready(attempts=2, sleep_s=0, sleep=lambda _s: None)
-    state["pull"] = ollama.pull_model("/usr/bin/ollama", "qwen2.5:3b")
-    state["digest"] = ollama.list_model_digest("/usr/bin/ollama", "qwen2.5:3b")
-    events = state["events"]
-
-    class FakeProc:
-        def terminate(self) -> None:
-            events.append("terminate")
-
-        def wait(self, timeout: float | None = None) -> int:
-            events.append(f"wait:{timeout}")
-            raise subprocess.TimeoutExpired(cmd="ollama", timeout=timeout or 0)
-
-        def kill(self) -> None:
-            events.append("kill")
-
-    monkeypatch.setattr(ollama.subprocess, "Popen", lambda *_a, **_kw: FakeProc())
-    owner = ollama.start_ollama("/usr/bin/ollama", tmp_path / "logs/ollama.log")
-    assert owner is not None
-    ollama.stop_ollama(owner)
-    state["closed"] = owner.log_handle.closed
-
-    def broken_call(*_a, **_kw):
-        raise httpx.ConnectError("refused")
-
-    with pytest.raises(ollama.HttpTransportError):
-        ollama.request_with_retry(
-            broken_call,
-            "http://127.0.0.1:11434/v1/models",
-            ollama.RetryPolicy(timeout=(1.0, 2.0), retries=0),
-        )
-
-
-@then("failures are reported and the owned service is stopped safely")
-def local_service_failures_reported(unavailable_local_service: dict) -> None:
-    state = unavailable_local_service
-    assert state["running"] is False and state["ready"] is False
-    assert state["pull"] == 1 and state["digest"] == "unavailable"
-    assert state["events"] == ["terminate", "wait:10", "kill"]
-    assert state["closed"] is True
+# backend-preflight.feature — A local model retries temporary overload and returns a tool call
 
 
 @given("a local model endpoint experiencing temporary overload")
@@ -634,6 +438,27 @@ def exercise_local_chat(
     }
 
 
+@then("the response retains the tool call and token usage")
+def local_chat_preserves_usage(local_chat_outcome: dict) -> None:
+    turn = local_chat_outcome["turn"]
+    assert local_chat_outcome["first_calls"] == 2
+    arguments = local_chat_outcome["first_kwargs"]["messages"][1]["tool_calls"][0]["function"]
+    assert arguments["arguments"] == {"x": 1}
+    assert local_chat_outcome["reply"]["usage"] == {
+        "prompt_tokens": 40,
+        "completion_tokens": 12,
+        "total_tokens": 52,
+    }
+    assert len(turn.tool_calls) == 1
+    assert turn.tool_calls[0].name == "filter_features"
+    assert turn.tool_calls[0].arguments == {"iso": "POL"}
+    assert "usage" not in local_chat_outcome["final"]
+    assert local_chat_outcome["final"]["choices"][0]["message"]["content"] == "final answer"
+
+
+# backend-preflight.feature — Invalid requests and timeouts are reported by the local model
+
+
 @when("the researcher requests a local model response", target_fixture="local_chat_errors")
 def exercise_local_chat_failures(
     ollama_profile: BackendProfile,
@@ -663,46 +488,17 @@ def exercise_local_chat_failures(
     return err400.value.error_class, invalid_request_calls, err_to.value.error_class
 
 
-@then("the response retains the tool call and token usage")
-def local_chat_preserves_usage(local_chat_outcome: dict) -> None:
-    turn = local_chat_outcome["turn"]
-    assert local_chat_outcome["first_calls"] == 2
-    arguments = local_chat_outcome["first_kwargs"]["messages"][1]["tool_calls"][0]["function"]
-    assert arguments["arguments"] == {"x": 1}
-    assert local_chat_outcome["reply"]["usage"] == {
-        "prompt_tokens": 40,
-        "completion_tokens": 12,
-        "total_tokens": 52,
-    }
-    assert len(turn.tool_calls) == 1
-    assert turn.tool_calls[0].name == "filter_features"
-    assert turn.tool_calls[0].arguments == {"iso": "POL"}
-    assert "usage" not in local_chat_outcome["final"]
-    assert local_chat_outcome["final"]["choices"][0]["message"]["content"] == "final answer"
-
-
 @then("the failures are classified and invalid requests are not retried")
 def local_chat_errors_classified(local_chat_errors: tuple[str, int, str]) -> None:
     assert local_chat_errors == ("http-400", 1, "timeout")
 
 
+# backend-preflight.feature — Local model readiness survives temporary overload
+
+
 @given("a local model readiness probe with a temporary service failure")
 def local_probe_context(fake_ollama_sdk_client: MagicMock) -> None:
     assert fake_ollama_sdk_client is not None
-
-
-@given("local and hosted model providers with simulated failures")
-def failed_providers_context(
-    fake_ollama_sdk_client: MagicMock, fake_openrouter_sdk_client: MagicMock
-) -> None:
-    assert fake_ollama_sdk_client is not None and fake_openrouter_sdk_client is not None
-
-
-@pytest.fixture
-def forbidden_openrouter_error() -> OpenRouterError:
-    req = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
-    resp = httpx.Response(403, text="forbidden", request=req)
-    return OpenRouterError("HTTP 403: forbidden", raw_response=resp, body="forbidden")
 
 
 @when(
@@ -749,6 +545,28 @@ def local_provider_readiness(
         "auth_calls": auth_client.list.call_count,
         "token_kind": e_tok.value.kind,
     }
+
+
+@then("the probe reports the model identity and classifies invalid requests")
+def local_provider_probe_succeeded(provider_success: dict) -> None:
+    assert provider_success == {
+        "models": {"qwen2.5:3b"},
+        "digest": "sha256:aaa111",
+        "list_calls": 3,
+        "auth_kind": "auth-error",
+        "auth_calls": 1,
+        "token_kind": "token-limit",
+    }
+
+
+# backend-preflight.feature — Provider readiness reports connection and response failures
+
+
+@given("local and hosted model providers with simulated failures")
+def failed_providers_context(
+    fake_ollama_sdk_client: MagicMock, fake_openrouter_sdk_client: MagicMock
+) -> None:
+    assert fake_ollama_sdk_client is not None and fake_openrouter_sdk_client is not None
 
 
 @when("the researcher checks both providers", target_fixture="provider_failures")
@@ -806,18 +624,6 @@ def provider_failure_checks(
     return {"kinds": kinds, "client": fake_openrouter_sdk_client}
 
 
-@then("the probe reports the model identity and classifies invalid requests")
-def local_provider_probe_succeeded(provider_success: dict) -> None:
-    assert provider_success == {
-        "models": {"qwen2.5:3b"},
-        "digest": "sha256:aaa111",
-        "list_calls": 3,
-        "auth_kind": "auth-error",
-        "auth_calls": 1,
-        "token_kind": "token-limit",
-    }
-
-
 @then("their readiness failures are classified and owned resources are released")
 def provider_failures_were_handled(provider_failures: dict) -> None:
     assert provider_failures["kinds"] == [
@@ -828,6 +634,417 @@ def provider_failures_were_handled(provider_failures: dict) -> None:
         "completion-rejected",
     ]
     provider_failures["client"].__exit__.assert_called_once()
+
+
+# backend-preflight.feature — Explicit model settings override the local environment and saved
+# profile
+
+
+@given(
+    "local and hosted service profiles and a local service environment setting",
+    target_fixture="service_configuration",
+)
+def service_profiles_with_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
+    path = tmp_path / "services.toml"
+    path.write_text(
+        '[backends.local]\nbase_url = "http://from-file/v1"\nmodel = "file-model"\n'
+        '[backends.free-open]\nbase_url = "http://remote/v1"\nmodel = "m"\n'
+        'api_key_env = "X_TEST_KEY"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OLLAMA_HOST", "http://env:11434")
+    return {"path": path}
+
+
+@when("the researcher selects a local service with explicit host and model settings")
+def select_explicit_service(service_configuration: dict) -> None:
+    from experiment.adapters import backends
+
+    path = service_configuration["path"]
+    service_configuration["environment"] = backends.resolve_profile("local", path=path)
+    service_configuration["hosted"] = backends.resolve_profile("free-open", path=path)
+    service_configuration["explicit"] = backends.resolve_profile(
+        "local", host="http://chosen:12345", model="chosen-model", path=path
+    )
+
+
+@then("the explicit settings take precedence over the environment and saved profile")
+def explicit_service_takes_precedence(service_configuration: dict) -> None:
+    assert str(service_configuration["environment"].base_url).rstrip("/") == "http://env:11434"
+    explicit = service_configuration["explicit"]
+    assert str(explicit.base_url).rstrip("/") == "http://chosen:12345"
+    assert explicit.model == "chosen-model"
+
+
+@then("the local environment does not change the hosted service")
+def hosted_service_is_independent(service_configuration: dict) -> None:
+    assert str(service_configuration["hosted"].base_url).rstrip("/") == "http://remote/v1"
+
+
+# backend-preflight.feature — A local service has a safe default when configuration is absent
+
+
+@given(
+    "no saved service configuration or local service environment setting",
+    target_fixture="service_configuration",
+)
+def missing_service_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    return {"path": tmp_path / "missing.toml"}
+
+
+@when("the researcher selects the default local service")
+def select_default_service(service_configuration: dict) -> None:
+    from experiment.adapters import backends
+
+    service_configuration["profile"] = backends.resolve_profile(
+        "local", path=service_configuration["path"]
+    )
+
+
+@then("the default local address and model are used")
+def default_service_is_available(service_configuration: dict) -> None:
+    profile = service_configuration["profile"]
+    assert str(profile.base_url).rstrip("/") == "http://127.0.0.1:11434"
+    assert profile.model == "qwen2.5-coder:0.5b"
+
+
+# backend-preflight.feature — Damaged or missing service configuration is reported
+
+
+@given(parsers.parse("{problem} service configuration"), target_fixture="service_configuration")
+def broken_service_configuration(problem: str, tmp_path: Path) -> dict:
+    path = tmp_path / "services.toml"
+    if problem == "malformed":
+        path.write_text("[invalid\n", encoding="utf-8")
+    return {"path": path}
+
+
+@when("the researcher loads service configuration")
+def load_broken_service_configuration(service_configuration: dict) -> None:
+    from experiment.adapters import backends
+
+    with pytest.raises(backends.BackendError) as error:
+        backends.load_profiles(service_configuration["path"])
+    service_configuration["error"] = error.value
+
+
+@then("the configuration failure is reported")
+def service_configuration_failure_reported(service_configuration: dict) -> None:
+    assert "config" in str(service_configuration["error"])
+
+
+# backend-preflight.feature — An unknown service profile names the available choice
+
+
+@given("a saved model service profile", target_fixture="service_configuration")
+def saved_service_profile(tmp_path: Path) -> dict:
+    path = tmp_path / "services.toml"
+    path.write_text(
+        '[backends.demo]\nbase_url = "http://example.invalid/v1"\nmodel = "demo"\n',
+        encoding="utf-8",
+    )
+    return {"path": path}
+
+
+@when("the researcher selects an unknown service profile")
+def select_unknown_profile(service_configuration: dict) -> None:
+    from experiment.adapters import backends
+
+    with pytest.raises(backends.BackendError) as error:
+        backends.resolve_profile("nope", path=service_configuration["path"])
+    service_configuration["error"] = error.value
+
+
+@then("the error identifies the available profile")
+def available_profile_named(service_configuration: dict) -> None:
+    assert "demo" in str(service_configuration["error"])
+
+
+# backend-preflight.feature — Hosted provider errors receive a matching diagnosis
+
+
+@given(parsers.parse("a hosted provider reports {failure}"), target_fixture="hosted_failure")
+def reported_hosted_failure(failure: str) -> tuple[OpenRouterError, bool]:
+    cases = {
+        "unauthorized credentials": (401, "unauthorized", False),
+        "an exceeded context window": (400, "context_length exceeded", True),
+        "an exhausted quota": (429, "quota", True),
+        "a missing model": (404, "missing model", False),
+        "an unavailable service": (502, "bad gateway", False),
+    }
+    status, body, completion = cases[failure]
+    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+    error = OpenRouterError(
+        f"HTTP {status}: {body}",
+        raw_response=httpx.Response(status, text=body, request=request),
+        body=body,
+    )
+    return error, completion
+
+
+@when("the researcher checks the reported provider failure", target_fixture="hosted_diagnosis")
+def diagnose_hosted_failure(
+    hosted_failure: tuple[OpenRouterError, bool], openrouter_profile: BackendProfile
+) -> str:
+    error, completion = hosted_failure
+    kind, _, _ = openrouter_adapter.classify_probe_error(
+        error,
+        openrouter_profile.model_copy(update={"retries": 0}),
+        "sk-or-test-key",
+        for_completion=completion,
+    )
+    return kind
+
+
+@then(parsers.parse("the readiness diagnosis identifies {diagnosis}"))
+def hosted_failure_is_diagnosed(hosted_diagnosis: str, diagnosis: str) -> None:
+    assert (
+        hosted_diagnosis
+        == {
+            "a credential problem": "auth-error",
+            "a token limit": "token-limit",
+            "a request problem": "client-error",
+            "a connection problem": "tunnel-dead",
+        }[diagnosis]
+    )
+
+
+# backend-preflight.feature — A ready backend is reported with its model identity
+
+
+@given("the readiness check reports a pinned model is ready")
+def ready_result_for_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    from experiment.services import backend_check
+
+    monkeypatch.setattr(
+        backend_check,
+        "run_backend_check",
+        lambda _cfg: BackendCheckResult(
+            status="READY",
+            backend="remote-ollama",
+            model="qwen2.5:3b",
+            digest="sha256:pinned123",
+            base_url="http://127.0.0.1:11435/v1",
+        ),
+    )
+
+
+@when("I ask for a backend readiness report", target_fixture="cli_readiness")
+def request_cli_readiness():
+    from typer.testing import CliRunner
+
+    from experiment.cli import app
+
+    return CliRunner().invoke(app, ["env", "backend-check", "--ssh-host", "gpu-box"])
+
+
+@then("the action succeeds")
+def cli_readiness_succeeds(cli_readiness) -> None:
+    assert cli_readiness.exit_code == 0, cli_readiness.output
+
+
+@then("the report shows the ready model identity")
+def cli_readiness_identity(cli_readiness) -> None:
+    assert "READY" in cli_readiness.output and "sha256:pinned123" in cli_readiness.output
+
+
+# backend-preflight.feature — A disconnected tunnel produces a failing readiness status
+
+
+@given("the readiness check reports a disconnected tunnel")
+def disconnected_result_for_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    from experiment.services import backend_check
+
+    def fail(_cfg):
+        raise BackendCheckError("tunnel-dead", "socket closed", "restart ssh")
+
+    monkeypatch.setattr(backend_check, "run_backend_check", fail)
+
+
+@then("the readiness action reports a disconnected tunnel status")
+def cli_readiness_disconnected(cli_readiness) -> None:
+    assert cli_readiness.exit_code == EXIT_TUNNEL_DEAD
+
+
+# backend-preflight.feature — A compatible service passes a complete readiness probe
+
+
+@given("a compatible model service with a pinned model", target_fixture="compatible_service")
+def compatible_model_service(respx_mock):
+    import httpx
+
+    chat = respx_mock.post("https://llm.example.invalid/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200, json={"choices": [{"message": {"role": "assistant", "content": "OK"}}]}
+        )
+    )
+    tags = respx_mock.get("https://llm.example.invalid/api/tags").mock(
+        return_value=httpx.Response(
+            200, json={"models": [{"name": "qwen2.5:3b", "digest": "sha256:respx123"}]}
+        )
+    )
+    models = respx_mock.get("https://llm.example.invalid/v1/models").mock(
+        return_value=httpx.Response(200, json={"data": [{"id": "qwen2.5:3b"}]})
+    )
+    return {"chat": chat, "tags": tags, "models": models}
+
+
+@when("the researcher probes the available model and requests a test response")
+def probe_compatible_service(compatible_service: dict) -> None:
+    import httpx
+
+    from experiment.adapters import backends
+
+    profile = backends.fallback_profile("https://llm.example.invalid/v1", "qwen2.5:3b")
+    with httpx.Client() as client:
+        probe = HttpBackendProbe(profile, session=client, sleep=lambda _: None)
+        compatible_service["models_found"] = probe.list_model_ids()
+        compatible_service["pinned"] = probe.resolve_model_digest()
+        probe.verify_tiny_completion(max_tokens=8)
+
+
+@then("the probe identifies the model and its pinned version")
+def compatible_probe_identifies_model(compatible_service: dict) -> None:
+    assert "qwen2.5:3b" in compatible_service["models_found"]
+    assert compatible_service["pinned"] == "sha256:respx123"
+    assert compatible_service["models"].called and compatible_service["chat"].called
+
+
+# backend-preflight.feature — A researcher gets a model reply and its version from the service
+
+
+@when("the researcher requests a response and model identity")
+def request_response_and_identity(compatible_service: dict) -> None:
+    import httpx
+
+    from experiment.adapters import backends
+
+    profile = backends.fallback_profile("https://llm.example.invalid/v1", "qwen2.5:3b")
+    with httpx.Client() as client:
+        compatible_service["reply"] = backends.chat_completions(
+            client, profile, [{"role": "user", "content": "hi"}]
+        )
+        compatible_service["digest"] = backends.resolve_model_digest(client, profile)
+
+
+@then("the service returns the response and the pinned identity")
+def response_and_identity_are_returned(compatible_service: dict) -> None:
+    assert compatible_service["chat"].called
+    assert compatible_service["tags"].called
+    assert compatible_service["reply"]["choices"][0]["message"]["content"] == "OK"
+    assert compatible_service["digest"] == "sha256:respx123"
+
+
+# backend-preflight.feature — A model identity cannot be retrieved
+
+
+@given(parsers.parse("a model service whose identity lookup encounters {problem}"))
+def model_identity_lookup_failure(problem: str, fake_http_session: MagicMock) -> None:
+    if problem == "a service error":
+        fake_http_session.get.return_value = make_mock_response(500)
+    elif problem == "an unreadable reply":
+        fake_http_session.get.return_value = make_mock_response(200, ValueError("not json"))
+    elif problem == "a disconnected service":
+        fake_http_session.get.side_effect = httpx.ConnectError("down")
+    else:
+        raise ValueError(f"Unknown lookup problem: {problem}")
+
+
+@when("the researcher requests the model identity", target_fixture="unavailable_model_identity")
+def request_unavailable_model_identity(fake_http_session: MagicMock) -> str | None:
+    from experiment.adapters import backends
+
+    profile = backends.fallback_profile("http://127.0.0.1:11434/v1", "qwen2.5:3b")
+    return backends.resolve_model_digest(fake_http_session, profile)
+
+
+@then("no model version is reported")
+def model_identity_unavailable(unavailable_model_identity: str | None) -> None:
+    assert unavailable_model_identity is None
+
+
+# backend-preflight.feature — The backend is temporarily overloaded and rate limited
+
+
+@given("temporary overload followed by a rate-limited response")
+def transient_errors(ok_http_session: MagicMock) -> None:
+    models = [
+        make_mock_response(503, text="overloaded"),
+        make_mock_response(200, {"data": [{"id": "qwen2.5:3b"}]}),
+    ]
+    tags = make_mock_response(
+        200, {"models": [{"name": "qwen2.5:3b", "digest": "sha256:pinned123"}]}
+    )
+    ok_http_session.get.side_effect = lambda url, **_kw: (
+        models.pop(0) if url.endswith("/v1/models") else tags
+    )
+    ok_http_session.post.side_effect = [
+        make_mock_response(429, text="slow down"),
+        make_mock_response(
+            200,
+            {
+                "choices": [
+                    {"message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}
+                ]
+            },
+        ),
+    ]
+
+
+@then("the test response was requested twice")
+def two_responses(ok_http_session: MagicMock) -> None:
+    assert ok_http_session.post.call_count == 2
+
+
+# backend-preflight.feature — The backend rejects the credentials
+
+
+@given("the backend rejects the credentials")
+def invalid_credentials(ok_http_session: MagicMock) -> None:
+    ok_http_session.get.side_effect = None
+    ok_http_session.get.return_value = make_mock_response(401, text="invalid api key")
+
+
+@then("the report identifies a credentials error")
+def auth_error(preflight: dict) -> None:
+    assert_failure(preflight, "auth-error", EXIT_AUTH_CLIENT)
+
+
+@then("the model list was requested only once")
+def one_model_request(ok_http_session: MagicMock) -> None:
+    assert ok_http_session.get.call_count == 1
+
+
+# backend-preflight.feature — The requested response exceeds the model's limit
+
+
+@given("the backend rejects the response as too long")
+def response_too_long(ok_http_session: MagicMock) -> None:
+    ok_http_session.post.return_value = make_mock_response(
+        400, text="maximum context length / token limit exceeded"
+    )
+
+
+@then("the report identifies the model's token limit")
+def token_error(preflight: dict) -> None:
+    assert_failure(preflight, "token-limit", EXIT_TOKEN_LIMIT)
+
+
+# backend-preflight.feature — The backend returns no usable response
+
+
+@given("the backend returns an empty test response")
+def empty_response(ok_http_session: MagicMock) -> None:
+    ok_http_session.post.return_value = make_mock_response(200, {"choices": []})
+
+
+@then("the report identifies a rejected response")
+def completion_error(preflight: dict) -> None:
+    assert_failure(preflight, "completion-rejected", EXIT_COMPLETION_REJECTED)
+
+
+# backend-preflight.feature — A healthy connection and model can be checked independently
 
 
 @given("a ready model and an available remote connection", target_fixture="independent_probes")
@@ -859,6 +1076,9 @@ def independent_readiness_verified(independent_probes: dict) -> None:
         max_tokens=config.max_tokens
     )
     independent_probes["probe"].close.assert_not_called()
+
+
+# backend-preflight.feature — Configuration and response errors receive distinct readiness statuses
 
 
 @given("readiness checks with missing configuration or failed responses")
@@ -928,6 +1148,9 @@ def failure_statuses_and_retries(readiness_failure_results: list[tuple[int, int 
     ]
 
 
+# backend-preflight.feature — A hosted provider can report readiness
+
+
 @given("a hosted provider with the requested model", target_fixture="hosted_ready_probe")
 def hosted_provider_with_model(
     monkeypatch: pytest.MonkeyPatch,
@@ -960,184 +1183,61 @@ def hosted_provider_ready(hosted_ready_probe: dict) -> None:
     assert hosted_ready_probe["result"].digest == hosted_ready_probe["model"]
 
 
-@given(parsers.parse("a hosted provider reports {failure}"), target_fixture="hosted_failure")
-def reported_hosted_failure(failure: str) -> tuple[OpenRouterError, bool]:
-    cases = {
-        "unauthorized credentials": (401, "unauthorized", False),
-        "an exceeded context window": (400, "context_length exceeded", True),
-        "an exhausted quota": (429, "quota", True),
-        "a missing model": (404, "missing model", False),
-        "an unavailable service": (502, "bad gateway", False),
-    }
-    status, body, completion = cases[failure]
-    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
-    error = OpenRouterError(
-        f"HTTP {status}: {body}",
-        raw_response=httpx.Response(status, text=body, request=request),
-        body=body,
-    )
-    return error, completion
+# backend-preflight.feature — A configured remote connection is opened and closed
 
 
-@when("the researcher checks the reported provider failure", target_fixture="hosted_diagnosis")
-def diagnose_hosted_failure(
-    hosted_failure: tuple[OpenRouterError, bool], openrouter_profile: BackendProfile
-) -> str:
-    error, completion = hosted_failure
-    kind, _, _ = openrouter_adapter.classify_probe_error(
-        error,
-        openrouter_profile.model_copy(update={"retries": 0}),
-        "sk-or-test-key",
-        for_completion=completion,
-    )
-    return kind
+@given("a remote connection with a named user and custom port")
+def configured_remote_connection(preflight: dict, fake_ssh_forwarder: MagicMock) -> None:
+    preflight["forwarder"] = fake_ssh_forwarder
+    preflight["forwarder"].local_bind_port = 41234
 
 
-@then(parsers.parse("the readiness diagnosis identifies {diagnosis}"))
-def hosted_failure_is_diagnosed(hosted_diagnosis: str, diagnosis: str) -> None:
-    assert (
-        hosted_diagnosis
-        == {
-            "a credential problem": "auth-error",
-            "a token limit": "token-limit",
-            "a request problem": "client-error",
-            "a connection problem": "tunnel-dead",
-        }[diagnosis]
-    )
+@when("the researcher opens and closes the connection")
+def use_remote_connection(preflight: dict) -> None:
+    from experiment.adapters.ssh_tunnel import ManagedSshTunnel, TunnelSpec
+
+    def factory(**kwargs: object) -> MagicMock:
+        preflight["connection_options"] = kwargs
+        return preflight["forwarder"]
+
+    with ManagedSshTunnel(
+        TunnelSpec(ssh_host="alice@gpu.example.org:2222", ssh_password="pw"),
+        forwarder_factory=factory,
+    ) as tunnel:
+        preflight["active_during_use"] = tunnel.is_active
+        preflight["port_during_use"] = tunnel.local_bind_port
+    preflight["tunnel"] = tunnel
 
 
-@given(
-    "local and hosted service profiles and a local service environment setting",
-    target_fixture="service_configuration",
-)
-def service_profiles_with_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
-    path = tmp_path / "services.toml"
-    path.write_text(
-        '[backends.local]\nbase_url = "http://from-file/v1"\nmodel = "file-model"\n'
-        '[backends.free-open]\nbase_url = "http://remote/v1"\nmodel = "m"\n'
-        'api_key_env = "X_TEST_KEY"\n',
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("OLLAMA_HOST", "http://env:11434")
-    return {"path": path}
+@then("the connection uses the requested remote host and user")
+def connection_target(preflight: dict) -> None:
+    assert preflight["connection_options"]["ssh_address_or_host"] == ("gpu.example.org", 2222)
+    assert preflight["connection_options"]["ssh_username"] == "alice"
+    preflight["forwarder"].start.assert_called_once()
+    assert preflight["active_during_use"]
+    assert preflight["port_during_use"] == 41234
 
 
-@when("the researcher selects a local service with explicit host and model settings")
-def select_explicit_service(service_configuration: dict) -> None:
-    from experiment.adapters import backends
-
-    path = service_configuration["path"]
-    service_configuration["environment"] = backends.resolve_profile("local", path=path)
-    service_configuration["hosted"] = backends.resolve_profile("free-open", path=path)
-    service_configuration["explicit"] = backends.resolve_profile(
-        "local", host="http://chosen:12345", model="chosen-model", path=path
-    )
+@then("its local port is released after use")
+def connection_released(preflight: dict) -> None:
+    preflight["forwarder"].stop.assert_called_once()
+    assert preflight["tunnel"].local_bind_port is None
+    assert not preflight["tunnel"].is_active
 
 
-@then("the explicit settings take precedence over the environment and saved profile")
-def explicit_service_takes_precedence(service_configuration: dict) -> None:
-    assert str(service_configuration["environment"].base_url).rstrip("/") == "http://env:11434"
-    explicit = service_configuration["explicit"]
-    assert str(explicit.base_url).rstrip("/") == "http://chosen:12345"
-    assert explicit.model == "chosen-model"
+# backend-preflight.feature — Port forwarding fails while opening a remote connection
 
 
-@then("the local environment does not change the hosted service")
-def hosted_service_is_independent(service_configuration: dict) -> None:
-    assert str(service_configuration["hosted"].base_url).rstrip("/") == "http://remote/v1"
+@given("a remote connection whose forwarding cannot start")
+def forwarding_failure(fake_ssh_forwarder: MagicMock) -> None:
+    fake_ssh_forwarder.start.side_effect = sshtunnel.HandlerSSHTunnelForwarderError("bind refused")
 
 
-@given(
-    "no saved service configuration or local service environment setting",
-    target_fixture="service_configuration",
-)
-def missing_service_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
-    monkeypatch.delenv("OLLAMA_HOST", raising=False)
-    return {"path": tmp_path / "missing.toml"}
+# backend-preflight.feature — Remote connection authentication fails
 
 
-@when("the researcher selects the default local service")
-def select_default_service(service_configuration: dict) -> None:
-    from experiment.adapters import backends
+@given("a remote connection that rejects authentication")
+def ssh_authentication_failure(fake_ssh_forwarder: MagicMock) -> None:
+    import paramiko
 
-    service_configuration["profile"] = backends.resolve_profile(
-        "local", path=service_configuration["path"]
-    )
-
-
-@then("the default local address and model are used")
-def default_service_is_available(service_configuration: dict) -> None:
-    profile = service_configuration["profile"]
-    assert str(profile.base_url).rstrip("/") == "http://127.0.0.1:11434"
-    assert profile.model == "qwen2.5-coder:0.5b"
-
-
-@given(parsers.parse("{problem} service configuration"), target_fixture="service_configuration")
-def broken_service_configuration(problem: str, tmp_path: Path) -> dict:
-    path = tmp_path / "services.toml"
-    if problem == "malformed":
-        path.write_text("[invalid\n", encoding="utf-8")
-    return {"path": path}
-
-
-@when("the researcher loads service configuration")
-def load_broken_service_configuration(service_configuration: dict) -> None:
-    from experiment.adapters import backends
-
-    with pytest.raises(backends.BackendError) as error:
-        backends.load_profiles(service_configuration["path"])
-    service_configuration["error"] = error.value
-
-
-@then("the configuration failure is reported")
-def service_configuration_failure_reported(service_configuration: dict) -> None:
-    assert "config" in str(service_configuration["error"])
-
-
-@given("a saved model service profile", target_fixture="service_configuration")
-def saved_service_profile(tmp_path: Path) -> dict:
-    path = tmp_path / "services.toml"
-    path.write_text(
-        '[backends.demo]\nbase_url = "http://example.invalid/v1"\nmodel = "demo"\n',
-        encoding="utf-8",
-    )
-    return {"path": path}
-
-
-@when("the researcher selects an unknown service profile")
-def select_unknown_profile(service_configuration: dict) -> None:
-    from experiment.adapters import backends
-
-    with pytest.raises(backends.BackendError) as error:
-        backends.resolve_profile("nope", path=service_configuration["path"])
-    service_configuration["error"] = error.value
-
-
-@then("the error identifies the available profile")
-def available_profile_named(service_configuration: dict) -> None:
-    assert "demo" in str(service_configuration["error"])
-
-
-@given(parsers.parse("a model service whose identity lookup encounters {problem}"))
-def model_identity_lookup_failure(problem: str, fake_http_session: MagicMock) -> None:
-    if problem == "a service error":
-        fake_http_session.get.return_value = make_mock_response(500)
-    elif problem == "an unreadable reply":
-        fake_http_session.get.return_value = make_mock_response(200, ValueError("not json"))
-    elif problem == "a disconnected service":
-        fake_http_session.get.side_effect = httpx.ConnectError("down")
-    else:
-        raise ValueError(f"Unknown lookup problem: {problem}")
-
-
-@when("the researcher requests the model identity", target_fixture="unavailable_model_identity")
-def request_unavailable_model_identity(fake_http_session: MagicMock) -> str | None:
-    from experiment.adapters import backends
-
-    profile = backends.fallback_profile("http://127.0.0.1:11434/v1", "qwen2.5:3b")
-    return backends.resolve_model_digest(fake_http_session, profile)
-
-
-@then("no model version is reported")
-def model_identity_unavailable(unavailable_model_identity: str | None) -> None:
-    assert unavailable_model_identity is None
+    fake_ssh_forwarder.start.side_effect = paramiko.SSHException("auth failed")
