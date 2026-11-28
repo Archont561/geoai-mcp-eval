@@ -34,3 +34,13 @@ a mirrored property module or an explicit feature mapping. The property check
 rejects tests whose only generated inputs are fixed values, but automated checks
 can't establish that a property is meaningful or that a feature preserves every
 previous behavioral assertion; reviewers must check both.
+
+## Step-definition layout
+
+Keep scenario-module step definitions in feature and scenario order, following
+the steps from top to bottom rather than grouping all Given, When, and Then
+bindings separately. Label groups with their feature and first scenario. A step
+used by multiple scenarios is defined once, at its first use; common steps may
+also live in shared fixture or step modules. Keep helper functions and fixtures
+separate from scenario step groups. When a scenario changes, update the nearby
+bindings without duplicating shared definitions.

@@ -36,144 +36,9 @@ def archive_data(
     return {"trial": trial, "run": run, "files": files}
 
 
-@given("a trial with recorded evidence", target_fixture="trial_data")
-def recorded_evidence(archive_data: dict) -> dict:
-    return archive_data
+# Step definitions follow feature and scenario order; shared steps appear at first use.
 
-
-@given("an archive with one recorded trial", target_fixture="trial_data")
-def recorded_archive(tmp_path: Path, archive_data: dict) -> dict:
-    trial_data = archive_data
-    path = tmp_path / "good.zip"
-    RunArchive.write(
-        path, trial_data["run"], trial_files={trial_data["trial"].trial_id: trial_data["files"]}
-    )
-    trial_data["good"] = path
-    return trial_data
-
-
-@given("the saved trial result has been altered", target_fixture="altered_archive")
-def alter_result(tmp_path: Path, trial_data: dict) -> Path:
-    path = tmp_path / "tampered.zip"
-    target = f"trials/{trial_data['trial'].trial_id}/result.json"
-    with (
-        zipfile.ZipFile(trial_data["good"], "r") as source,
-        zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as dest,
-    ):
-        for info in source.infolist():
-            data = b'{"relation": "tampered"}' if info.filename == target else source.read(info)
-            dest.writestr(info.filename, data)
-    return path
-
-
-@when("the researcher opens the altered archive", target_fixture="archive")
-def open_archive(altered_archive: Path):
-    with RunArchive.open(altered_archive) as archive:
-        yield archive
-
-
-@then("the unchanged transcript remains readable")
-def transcript_readable(archive: RunArchive, trial_data: dict) -> None:
-    assert len(archive.trial(trial_data["trial"].trial_id).transcript) == 2
-
-
-@then("reading the altered result reports an integrity failure")
-def altered_result_rejected(archive: RunArchive, trial_data: dict) -> None:
-    with pytest.raises(ArchiveIntegrityError, match="SHA-256 mismatch"):
-        _ = archive.trial(trial_data["trial"].trial_id).deliverable
-
-
-@then("verifying the whole archive reports an integrity failure")
-def altered_archive_rejected(archive: RunArchive) -> None:
-    with pytest.raises(ArchiveIntegrityError, match="SHA-256 mismatch"):
-        archive.verify_all()
-
-
-@when("the researcher packs the run without that evidence", target_fixture="packing_error")
-def pack_without_evidence(tmp_path: Path, trial_data: dict) -> Exception | None:
-    try:
-        RunArchive.write(tmp_path / "incomplete.zip", trial_data["run"], trial_files={})
-    except ArchiveIntegrityError as exc:
-        return exc
-    return None
-
-
-@then("packing reports that required evidence is missing")
-def missing_evidence_reported(packing_error: Exception | None) -> None:
-    assert isinstance(packing_error, ArchiveIntegrityError)
-    assert "missing bytes" in str(packing_error)
-
-
-@given("run preparation and two separate trial fragments", target_fixture="fragments")
-def two_fragments(tmp_path: Path, archive_data: dict) -> dict:
-    trial_a = archive_data["trial"]
-    meas_a = next(iter(archive_data["run"].measurements.values()))
-    files = archive_data["files"]
-    key_b = trial_a.key.model_copy(
-        update={"paradigm": Paradigm.CODEGEN, "enforcement_level": EnforcementLevel.NONE}
-    )
-    trial_b = trial_a.model_copy(
-        update={
-            "key": key_b,
-            "treatment": Treatment(
-                paradigm=Paradigm.CODEGEN, enforcement_level=EnforcementLevel.NONE
-            ),
-        }
-    )
-    meas_b = meas_a.model_copy(update={"key": key_b, "trial_id": key_b.slug})
-    paths = [tmp_path / "preflight.zip", tmp_path / "a.zip", tmp_path / "b.zip"]
-    RunArchive.write(
-        paths[0],
-        ExperimentRun(
-            run_id="run-merge",
-            stage="pilot",
-            provenance=RunProvenance(environment=EnvironmentPin(repo_sha="cafebabe")),
-        ),
-    )
-    for path, trial, measurement in zip(
-        paths[1:], (trial_a, trial_b), (meas_a, meas_b), strict=True
-    ):
-        RunArchive.write(
-            path,
-            ExperimentRun(
-                run_id="run-merge",
-                stage="pilot",
-                trials={trial.trial_id: trial},
-                measurements={measurement.trial_id: measurement},
-            ),
-            trial_files={trial.trial_id: dict(files)},
-        )
-    return {"paths": paths, "trial_ids": [trial_a.trial_id, trial_b.trial_id]}
-
-
-@when("the researcher combines the fragments into an archive", target_fixture="merged")
-def combine_fragments(tmp_path: Path, fragments: dict) -> dict:
-    path = tmp_path / "merged.zip"
-    run = RunArchive.merge_archives(
-        path,
-        fragments["paths"],
-        expected_trials=fragments["trial_ids"],
-        summary_markdown="# Merged Run\n",
-    )
-    return {"path": path, "run": run}
-
-
-@then("the combined run retains its preparation details and both trials")
-def merged_preparation_and_trials(merged: dict, fragments: dict) -> None:
-    run = merged["run"]
-    assert run.provenance.environment.repo_sha == "cafebabe"
-    assert run.instrument_audit is not None
-    assert run.instrument_audit.complete is True
-    assert sorted(run.trials) == sorted(fragments["trial_ids"])
-
-
-@then("the archive verifies and both trial results remain available")
-def merged_evidence_available(merged: dict, fragments: dict) -> None:
-    with RunArchive.open(merged["path"]) as archive:
-        archive.verify_all()
-        assert archive.summary_markdown() == "# Merged Run\n"
-        for trial_id in fragments["trial_ids"]:
-            assert archive.trial(trial_id).deliverable == {"relation": "touches", "passed": True}
+# run-archives.feature — A researcher archives and inspects a completed run
 
 
 @given("a completed scripted experiment run", target_fixture="completed_run")
@@ -215,6 +80,9 @@ def completed_run_identified(completed_run: dict) -> None:
     assert overview.schema_version == 1
     assert overview.trial_count == 1
     assert ArchiveOverview.model_validate_json(overview.model_dump_json()) == overview
+
+
+# run-archives.feature — Incomplete evidence is reported while the archive and summary are preserved
 
 
 @given("a harvest containing only one completed trial", target_fixture="incomplete_harvest")
@@ -301,6 +169,28 @@ def allow_incomplete_evidence(incomplete_harvest: dict) -> None:
     incomplete_harvest.update(packed=packed, shown=shown, zip_summary=zip_summary, prune=prune)
 
 
+@then("the incomplete archive remains inspectable")
+def incomplete_archive_is_inspectable(incomplete_harvest: dict) -> None:
+    import json
+
+    data = incomplete_harvest
+    assert data["archive"].is_file()
+    assert data["packed"].exit_code == 0, data["packed"].output
+    summary = json.loads((data["harvest"] / "summary.json").read_text(encoding="utf-8"))
+    assert summary["complete"] is False
+    assert "analysis-de9im-001/A/rep-1" in summary["logged_cells"]
+    assert data["shown"].exit_code == 0, data["shown"].output
+    markdown = (data["harvest"] / "summary.md").read_text(encoding="utf-8")
+    assert all(text in markdown for text in ("rid-h", "deadbeef", "INCOMPLETE"))
+    assert data["step_summary"].read_text(encoding="utf-8").endswith(markdown)
+    assert data["zip_summary"].exit_code == 0 and "rid-h" in data["zip_summary"].output
+    assert data["prune"].exit_code == 0
+    assert json.loads(data["prune"].stdout) == {"kept": "experiment-run-rid-h", "deleted": []}
+
+
+# run-archives.feature — A workflow summary can be produced through the task runner
+
+
 @given("harvest environment details for a workflow run", target_fixture="workflow_summary_data")
 def workflow_summary_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     harvest = tmp_path / "harvest"
@@ -328,6 +218,9 @@ def workflow_summary_identifies_run(workflow_summary_data: Path, workflow_summar
         workflow_summary_result.stdout + workflow_summary_result.stderr
     )
     assert "manifest-e2e" in (workflow_summary_data / "summary.md").read_text(encoding="utf-8")
+
+
+# run-archives.feature — Cleanup retains the requested archive using the hosting run identifier
 
 
 @given(
@@ -363,23 +256,7 @@ def cleanup_retains_archive(cleanup: list) -> None:
     assert cleanup == [("experiment-run-45499999-deadbeef", "45499999")]
 
 
-@then("the incomplete archive remains inspectable")
-def incomplete_archive_is_inspectable(incomplete_harvest: dict) -> None:
-    import json
-
-    data = incomplete_harvest
-    assert data["archive"].is_file()
-    assert data["packed"].exit_code == 0, data["packed"].output
-    summary = json.loads((data["harvest"] / "summary.json").read_text(encoding="utf-8"))
-    assert summary["complete"] is False
-    assert "analysis-de9im-001/A/rep-1" in summary["logged_cells"]
-    assert data["shown"].exit_code == 0, data["shown"].output
-    markdown = (data["harvest"] / "summary.md").read_text(encoding="utf-8")
-    assert all(text in markdown for text in ("rid-h", "deadbeef", "INCOMPLETE"))
-    assert data["step_summary"].read_text(encoding="utf-8").endswith(markdown)
-    assert data["zip_summary"].exit_code == 0 and "rid-h" in data["zip_summary"].output
-    assert data["prune"].exit_code == 0
-    assert json.loads(data["prune"].stdout) == {"kept": "experiment-run-rid-h", "deleted": []}
+# run-archives.feature — Archive notices distinguish runnable code from an incomplete model response
 
 
 @given(
@@ -474,6 +351,84 @@ def codegen_hosted_notices(hosted_notices: str) -> None:
     assert by_rep[2]["rc"] is None
 
 
+# run-archives.feature — A researcher combines two trial fragments
+
+
+@given("run preparation and two separate trial fragments", target_fixture="fragments")
+def two_fragments(tmp_path: Path, archive_data: dict) -> dict:
+    trial_a = archive_data["trial"]
+    meas_a = next(iter(archive_data["run"].measurements.values()))
+    files = archive_data["files"]
+    key_b = trial_a.key.model_copy(
+        update={"paradigm": Paradigm.CODEGEN, "enforcement_level": EnforcementLevel.NONE}
+    )
+    trial_b = trial_a.model_copy(
+        update={
+            "key": key_b,
+            "treatment": Treatment(
+                paradigm=Paradigm.CODEGEN, enforcement_level=EnforcementLevel.NONE
+            ),
+        }
+    )
+    meas_b = meas_a.model_copy(update={"key": key_b, "trial_id": key_b.slug})
+    paths = [tmp_path / "preflight.zip", tmp_path / "a.zip", tmp_path / "b.zip"]
+    RunArchive.write(
+        paths[0],
+        ExperimentRun(
+            run_id="run-merge",
+            stage="pilot",
+            provenance=RunProvenance(environment=EnvironmentPin(repo_sha="cafebabe")),
+        ),
+    )
+    for path, trial, measurement in zip(
+        paths[1:], (trial_a, trial_b), (meas_a, meas_b), strict=True
+    ):
+        RunArchive.write(
+            path,
+            ExperimentRun(
+                run_id="run-merge",
+                stage="pilot",
+                trials={trial.trial_id: trial},
+                measurements={measurement.trial_id: measurement},
+            ),
+            trial_files={trial.trial_id: dict(files)},
+        )
+    return {"paths": paths, "trial_ids": [trial_a.trial_id, trial_b.trial_id]}
+
+
+@when("the researcher combines the fragments into an archive", target_fixture="merged")
+def combine_fragments(tmp_path: Path, fragments: dict) -> dict:
+    path = tmp_path / "merged.zip"
+    run = RunArchive.merge_archives(
+        path,
+        fragments["paths"],
+        expected_trials=fragments["trial_ids"],
+        summary_markdown="# Merged Run\n",
+    )
+    return {"path": path, "run": run}
+
+
+@then("the combined run retains its preparation details and both trials")
+def merged_preparation_and_trials(merged: dict, fragments: dict) -> None:
+    run = merged["run"]
+    assert run.provenance.environment.repo_sha == "cafebabe"
+    assert run.instrument_audit is not None
+    assert run.instrument_audit.complete is True
+    assert sorted(run.trials) == sorted(fragments["trial_ids"])
+
+
+@then("the archive verifies and both trial results remain available")
+def merged_evidence_available(merged: dict, fragments: dict) -> None:
+    with RunArchive.open(merged["path"]) as archive:
+        archive.verify_all()
+        assert archive.summary_markdown() == "# Merged Run\n"
+        for trial_id in fragments["trial_ids"]:
+            assert archive.trial(trial_id).deliverable == {"relation": "touches", "passed": True}
+
+
+# run-archives.feature — A researcher opens an archive and reads its trial evidence
+
+
 @given(
     "a complete archived trial with provenance and a summary",
     target_fixture="complete_archived_trial",
@@ -544,6 +499,9 @@ def complete_trial_is_verified(complete_archived_trial: dict, complete_archive: 
     archive.verify_all()
 
 
+# run-archives.feature — An archived trial has no optional evidence
+
+
 @given("an archived trial without optional evidence", target_fixture="empty_archived_trial")
 def archive_trial_without_evidence(tmp_path: Path) -> dict:
     from experiment.domain.run import TrialKey
@@ -580,3 +538,77 @@ def absent_evidence_is_reported(empty_archived_trial: dict, empty_archive: RunAr
         handle.read_bytes("missing.json")
     with pytest.raises(KeyError, match="unknown trial_id"):
         archive.trial("no/such/trial/rep-1")
+
+
+# run-archives.feature — A saved trial result has been altered
+
+
+@given("an archive with one recorded trial", target_fixture="trial_data")
+def recorded_archive(tmp_path: Path, archive_data: dict) -> dict:
+    trial_data = archive_data
+    path = tmp_path / "good.zip"
+    RunArchive.write(
+        path, trial_data["run"], trial_files={trial_data["trial"].trial_id: trial_data["files"]}
+    )
+    trial_data["good"] = path
+    return trial_data
+
+
+@given("the saved trial result has been altered", target_fixture="altered_archive")
+def alter_result(tmp_path: Path, trial_data: dict) -> Path:
+    path = tmp_path / "tampered.zip"
+    target = f"trials/{trial_data['trial'].trial_id}/result.json"
+    with (
+        zipfile.ZipFile(trial_data["good"], "r") as source,
+        zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as dest,
+    ):
+        for info in source.infolist():
+            data = b'{"relation": "tampered"}' if info.filename == target else source.read(info)
+            dest.writestr(info.filename, data)
+    return path
+
+
+@when("the researcher opens the altered archive", target_fixture="archive")
+def open_archive(altered_archive: Path):
+    with RunArchive.open(altered_archive) as archive:
+        yield archive
+
+
+@then("the unchanged transcript remains readable")
+def transcript_readable(archive: RunArchive, trial_data: dict) -> None:
+    assert len(archive.trial(trial_data["trial"].trial_id).transcript) == 2
+
+
+@then("reading the altered result reports an integrity failure")
+def altered_result_rejected(archive: RunArchive, trial_data: dict) -> None:
+    with pytest.raises(ArchiveIntegrityError, match="SHA-256 mismatch"):
+        _ = archive.trial(trial_data["trial"].trial_id).deliverable
+
+
+@then("verifying the whole archive reports an integrity failure")
+def altered_archive_rejected(archive: RunArchive) -> None:
+    with pytest.raises(ArchiveIntegrityError, match="SHA-256 mismatch"):
+        archive.verify_all()
+
+
+# run-archives.feature — Required trial evidence is missing during packing
+
+
+@given("a trial with recorded evidence", target_fixture="trial_data")
+def recorded_evidence(archive_data: dict) -> dict:
+    return archive_data
+
+
+@when("the researcher packs the run without that evidence", target_fixture="packing_error")
+def pack_without_evidence(tmp_path: Path, trial_data: dict) -> Exception | None:
+    try:
+        RunArchive.write(tmp_path / "incomplete.zip", trial_data["run"], trial_files={})
+    except ArchiveIntegrityError as exc:
+        return exc
+    return None
+
+
+@then("packing reports that required evidence is missing")
+def missing_evidence_reported(packing_error: Exception | None) -> None:
+    assert isinstance(packing_error, ArchiveIntegrityError)
+    assert "missing bytes" in str(packing_error)

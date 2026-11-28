@@ -16,6 +16,109 @@ ROOT = Path(__file__).resolve().parents[3]
 scenarios(str(ROOT / "experiment" / "features" / "experiment-runs.feature"))
 
 
+@pytest.fixture
+def codegen_run() -> dict:
+    return {}
+
+
+def set_codegen_reply(monkeypatch: pytest.MonkeyPatch, content: str) -> None:
+    from experiment.adapters import backends
+
+    reply = {"choices": [{"message": {"role": "assistant", "content": content}}]}
+    monkeypatch.setattr(backends, "chat_completions", MagicMock(return_value=reply))
+
+
+def _unavailable_pilot_model(monkeypatch: pytest.MonkeyPatch, *, fails: bool) -> dict:
+    from experiment.adapters import ollama
+
+    digests = iter(["unknown", "sha256:pulled999"])
+    pulled = []
+    monkeypatch.setattr(ollama, "list_model_digest", lambda *_a, **_kw: next(digests))
+    monkeypatch.setattr(
+        ollama, "pull_model", lambda _bin, model: (pulled.append(model), int(fails))[1]
+    )
+    return {"pulled": pulled, "fails": fails}
+
+
+# Step definitions follow feature and scenario order; shared steps appear at first use.
+
+# experiment-runs.feature — The study uses the ratified instructions for each model approach
+
+
+@given("the study's model instructions")
+def study_instructions() -> None:
+    """The study instructions are supplied by the application."""
+
+
+@when("the researcher checks the instruction versions", target_fixture="instruction_versions")
+def check_instruction_versions() -> dict:
+    from experiment.domain.prompts import ARM_A_SYSTEM_PROMPT, ARM_B_SYSTEM_PROMPT, prompt_sha256
+
+    return {
+        "typed": ARM_A_SYSTEM_PROMPT,
+        "code": ARM_B_SYSTEM_PROMPT,
+        "code_digest": prompt_sha256(ARM_B_SYSTEM_PROMPT),
+        "typed_digest": prompt_sha256(ARM_A_SYSTEM_PROMPT),
+    }
+
+
+@then("the code-generation instructions match the ratified version")
+def code_instructions_are_ratified(instruction_versions: dict) -> None:
+    assert instruction_versions["code_digest"] == (
+        "5c44378126c5b889a159b7524ea83bf0d365f45854ee2559b38230851ac1c985"
+    )
+    assert len(instruction_versions["code"].encode("utf-8")) == 418
+
+
+@then("the typed-tool instructions require use of the provided tools")
+def typed_instructions_are_constrained(instruction_versions: dict) -> None:
+    assert "provided tools only" in instruction_versions["typed"]
+    assert len(instruction_versions["typed_digest"]) == 64
+
+
+# experiment-runs.feature — A missing local model is downloaded before its identity is resolved
+
+
+@given("a pilot model that is not available locally", target_fixture="pilot_model")
+def missing_pilot_model(monkeypatch: pytest.MonkeyPatch) -> dict:
+    return _unavailable_pilot_model(monkeypatch, fails=False)
+
+
+@when("the researcher prepares the model for a pilot run")
+def prepare_pilot_model(pilot_model: dict) -> None:
+    from experiment.services.workflow_pilot import resolve_pilot_digest
+
+    if pilot_model["fails"]:
+        with pytest.raises(RuntimeError) as failure:
+            resolve_pilot_digest("ollama", "qwen2.5:3b")
+        pilot_model["error"] = str(failure.value)
+    else:
+        pilot_model["digest"] = resolve_pilot_digest("ollama", "qwen2.5:3b")
+
+
+@then("the model is downloaded and its identity is resolved")
+def pilot_model_downloaded(pilot_model: dict) -> None:
+    assert pilot_model["pulled"] == ["qwen2.5:3b"]
+    assert pilot_model["digest"] == "sha256:pulled999"
+
+
+# experiment-runs.feature — A failed model download stops pilot preparation
+
+
+@given("a pilot model whose download fails", target_fixture="pilot_model")
+def failing_pilot_model(monkeypatch: pytest.MonkeyPatch) -> dict:
+    return _unavailable_pilot_model(monkeypatch, fails=True)
+
+
+@then("pilot preparation reports the download failure")
+def pilot_download_failed(pilot_model: dict) -> None:
+    assert pilot_model["pulled"] == ["qwen2.5:3b"]
+    assert "ollama pull qwen2.5:3b failed (exit 1)" in pilot_model["error"]
+
+
+# experiment-runs.feature — A model uses a GIS tool before giving its result
+
+
 @given("a model response requesting geographic feature information")
 def model_requests_feature_info(fake_chat_gateway: MagicMock) -> None:
     tool_reply = {
@@ -66,54 +169,7 @@ def typed_result_saved(fake_cell_workspace: MagicMock) -> None:
     assert fake_cell_workspace.deliverables == [{"relation": "touches", "de9im": "FF2F11212"}]
 
 
-@given("a model supplies code for a geographic result")
-def model_supplies_code(fake_chat_gateway: MagicMock, fake_code_sandbox: MagicMock) -> None:
-    fake_chat_gateway.complete.return_value = {
-        "choices": [
-            {"message": {"role": "assistant", "content": "```python\nprint('{\"ok\": 1}')\n```"}}
-        ],
-        "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
-    }
-    fake_code_sandbox.execute.return_value = SandboxExecution(
-        returncode=0, stdout='{"ok": 1}\n', stderr=""
-    )
-
-
-@when(
-    "the researcher runs two trials of the same code-generation condition",
-    target_fixture="repeated_request",
-)
-def run_codegen_twice(
-    sample_cell_request: CellRequest, fake_harness_ports: HarnessPorts
-) -> CellRequest:
-    first = sample_cell_request.model_copy(
-        update={"arm": "B", "model_digest": "sha256:pin", "cache_stats": CacheStats()}
-    )
-    ollama_arm_b(first, ports=fake_harness_ports)
-    second = first.model_copy(update={"cache_stats": CacheStats()})
-    ollama_arm_b(second, ports=fake_harness_ports)
-    return second
-
-
-@then("the generated code runs against the task fixture")
-def code_uses_fixture(fake_code_sandbox: MagicMock, fake_cell_workspace: MagicMock) -> None:
-    # Cached model responses are reused; each cell must still execute the code.
-    assert fake_code_sandbox.execute.call_count == 2
-    for call in fake_code_sandbox.execute.call_args_list:
-        assert call.args == ("print('{\"ok\": 1}')\n",)
-        assert call.kwargs == {"fixture_src": fake_cell_workspace.fixture_path}
-
-
-@then("the result is saved")
-def code_result_saved(fake_cell_workspace: MagicMock) -> None:
-    assert fake_cell_workspace.deliverables == [{"ok": 1}, {"ok": 1}]
-
-
-@then("the second trial reuses the first model response")
-def model_response_reused(repeated_request: CellRequest, fake_chat_gateway: MagicMock) -> None:
-    assert fake_chat_gateway.complete.call_count == 1
-    assert repeated_request.cache_stats is not None
-    assert repeated_request.cache_stats.hits == 1
+# experiment-runs.feature — A typed-tool trial records and grades a geographic result
 
 
 @given("a model requests a geographic tool and then returns a result", target_fixture="budget_run")
@@ -160,58 +216,23 @@ def budget_model_responses(
     return {"cell": tmp_path, "chat": chat}
 
 
-@given("the trial has enough tokens for both responses")
-def sufficient_budget(budget_run: dict) -> None:
-    budget_run["limit"] = 250
-
-
-@given("the first response exceeds the trial's token budget")
-def insufficient_budget(budget_run: dict, monkeypatch: pytest.MonkeyPatch) -> None:
-    from experiment.adapters.mcp.client import McpToolSession
-
-    budget_run["limit"] = 50
-    budget_run["tool"] = MagicMock(
-        side_effect=AssertionError("tool must not execute after the token budget is exceeded")
-    )
-    monkeypatch.setattr(McpToolSession, "call_tool", budget_run["tool"])
-
-
-@when("the researcher runs the trial with its budget")
-def run_with_budget(budget_run: dict, sample_cell_request: CellRequest) -> None:
+@when("the researcher runs a typed-tool trial end to end")
+def run_typed_integration(budget_run: dict, sample_cell_request: CellRequest) -> None:
     from experiment.services import runs
 
-    budget_run["result"] = runs.run_cell(
-        sample_cell_request.model_copy(
-            update={
-                "cell": budget_run["cell"],
-                "run_id": "budget-run",
-                "max_cell_tokens": budget_run["limit"],
-            }
-        )
+    budget_run["result"] = runs.run_cell(sample_cell_request)
+
+
+@then("the result passes grading and the tool use is recorded")
+def typed_integration_result(budget_run: dict, sample_cell_request: CellRequest) -> None:
+    assert budget_run["result"]["status"] == "ok"
+    assert budget_run["result"]["oracle_passed"] is True
+    assert "feature_info" in (sample_cell_request.cell / "transcript.jsonl").read_text(
+        encoding="utf-8"
     )
 
 
-@then("the trial completes and records the combined token usage")
-def budget_success(budget_run: dict) -> None:
-    result = budget_run["result"]
-    assert result["status"] == "ok"
-    assert result["usage"]["total_tokens"] == 200
-    assert budget_run["chat"].call_count == 2
-
-
-@then("the trial is stopped for exceeding its budget")
-def budget_exceeded(budget_run: dict) -> None:
-    result = budget_run["result"]
-    assert result["status"] == "aborted"
-    assert result["abort_reason"] == "token_cap_exceeded"
-    assert result["usage"]["total_tokens"] == 80
-    assert result["usage"]["cap_exceeded"] is True
-    assert budget_run["chat"].call_count == 1
-
-
-@then("the requested geographic tool is not executed")
-def tool_not_executed(budget_run: dict) -> None:
-    budget_run["tool"].assert_not_called()
+# experiment-runs.feature — An unavailable tool is recorded without losing the model's final answer
 
 
 @given(
@@ -270,168 +291,7 @@ def unavailable_tool_recorded(unavailable_tool_run: dict, sample_cell_request: C
     )
 
 
-@when("the researcher runs a typed-tool trial end to end")
-def run_typed_integration(budget_run: dict, sample_cell_request: CellRequest) -> None:
-    from experiment.services import runs
-
-    budget_run["result"] = runs.run_cell(sample_cell_request)
-
-
-@then("the result passes grading and the tool use is recorded")
-def typed_integration_result(budget_run: dict, sample_cell_request: CellRequest) -> None:
-    assert budget_run["result"]["status"] == "ok"
-    assert budget_run["result"]["oracle_passed"] is True
-    assert "feature_info" in (sample_cell_request.cell / "transcript.jsonl").read_text(
-        encoding="utf-8"
-    )
-
-
-@pytest.fixture
-def codegen_run() -> dict:
-    return {}
-
-
-def set_codegen_reply(monkeypatch: pytest.MonkeyPatch, content: str) -> None:
-    from experiment.adapters import backends
-
-    reply = {"choices": [{"message": {"role": "assistant", "content": content}}]}
-    monkeypatch.setattr(backends, "chat_completions", MagicMock(return_value=reply))
-
-
-@given("the model supplies executable code that inspects its input workspace")
-def isolated_code_reply(monkeypatch: pytest.MonkeyPatch) -> None:
-    code = (
-        "import json, os\n"
-        "assert os.listdir('.') == ['input.geojson']\n"
-        "fx = json.load(open('input.geojson'))\n"
-        "assert fx['type'] == 'FeatureCollection'\n"
-        "print(json.dumps({'relation': 'touches', 'de9im': 'FF2F11212'}))\n"
-    )
-    set_codegen_reply(monkeypatch, f"```python\n{code}```")
-
-
-@given(parsers.parse("the model supplies executable code in the {style} presentation style"))
-def alternative_code_reply(monkeypatch: pytest.MonkeyPatch, style: str) -> None:
-    code = "import json\nprint(json.dumps({'relation': 'touches', 'de9im': 'FF2F11212'}))\n"
-    label = {"short name": "py", "unlabelled": ""}[style]
-    set_codegen_reply(monkeypatch, f"```{label}\n{code}```")
-
-
-@given(parsers.parse("the model supplies {response} instead of executable code"))
-def non_code_reply(monkeypatch: pytest.MonkeyPatch, response: str) -> None:
-    contents = {
-        "a plain apology": "no code here, sorry",
-        "a formatted result": '```json\n{"relation": "touches", "de9im": "FF2F11212"}\n```',
-    }
-    set_codegen_reply(monkeypatch, contents[response])
-
-
-@when("the researcher runs a code-generation trial end to end")
-def run_codegen_integration(codegen_run: dict, sample_cell_request: CellRequest) -> None:
-    from experiment.services import runs
-
-    codegen_run["result"] = runs.run_cell(sample_cell_request.model_copy(update={"arm": "B"}))
-
-
-@then("the generated result passes grading")
-def codegen_passes(codegen_run: dict) -> None:
-    assert codegen_run["result"]["oracle_passed"] is True
-
-
-@then("the result passes grading and the input is not left in the trial directory")
-def isolated_codegen_result(codegen_run: dict, sample_cell_request: CellRequest) -> None:
-    codegen_passes(codegen_run)
-    assert not (sample_cell_request.cell / "input.geojson").exists()
-
-
-@then("the trial fails grading without saving a result")
-def non_code_not_graded(codegen_run: dict, sample_cell_request: CellRequest) -> None:
-    assert codegen_run["result"]["oracle_passed"] is False
-    assert not (sample_cell_request.cell / "result.json").exists()
-
-
-@then("the transcript explains that executable code was missing")
-def missing_code_recorded(sample_cell_request: CellRequest) -> None:
-    transcript = (sample_cell_request.cell / "transcript.jsonl").read_text(encoding="utf-8")
-    assert "no python block found" in transcript
-    assert "<string>" not in transcript
-
-
-@given("the study's model instructions")
-def study_instructions() -> None:
-    """The study instructions are supplied by the application."""
-
-
-@when("the researcher checks the instruction versions", target_fixture="instruction_versions")
-def check_instruction_versions() -> dict:
-    from experiment.domain.prompts import ARM_A_SYSTEM_PROMPT, ARM_B_SYSTEM_PROMPT, prompt_sha256
-
-    return {
-        "typed": ARM_A_SYSTEM_PROMPT,
-        "code": ARM_B_SYSTEM_PROMPT,
-        "code_digest": prompt_sha256(ARM_B_SYSTEM_PROMPT),
-        "typed_digest": prompt_sha256(ARM_A_SYSTEM_PROMPT),
-    }
-
-
-@then("the code-generation instructions match the ratified version")
-def code_instructions_are_ratified(instruction_versions: dict) -> None:
-    assert instruction_versions["code_digest"] == (
-        "5c44378126c5b889a159b7524ea83bf0d365f45854ee2559b38230851ac1c985"
-    )
-    assert len(instruction_versions["code"].encode("utf-8")) == 418
-
-
-@then("the typed-tool instructions require use of the provided tools")
-def typed_instructions_are_constrained(instruction_versions: dict) -> None:
-    assert "provided tools only" in instruction_versions["typed"]
-    assert len(instruction_versions["typed_digest"]) == 64
-
-
-def _unavailable_pilot_model(monkeypatch: pytest.MonkeyPatch, *, fails: bool) -> dict:
-    from experiment.adapters import ollama
-
-    digests = iter(["unknown", "sha256:pulled999"])
-    pulled = []
-    monkeypatch.setattr(ollama, "list_model_digest", lambda *_a, **_kw: next(digests))
-    monkeypatch.setattr(
-        ollama, "pull_model", lambda _bin, model: (pulled.append(model), int(fails))[1]
-    )
-    return {"pulled": pulled, "fails": fails}
-
-
-@given("a pilot model that is not available locally", target_fixture="pilot_model")
-def missing_pilot_model(monkeypatch: pytest.MonkeyPatch) -> dict:
-    return _unavailable_pilot_model(monkeypatch, fails=False)
-
-
-@given("a pilot model whose download fails", target_fixture="pilot_model")
-def failing_pilot_model(monkeypatch: pytest.MonkeyPatch) -> dict:
-    return _unavailable_pilot_model(monkeypatch, fails=True)
-
-
-@when("the researcher prepares the model for a pilot run")
-def prepare_pilot_model(pilot_model: dict) -> None:
-    from experiment.services.workflow_pilot import resolve_pilot_digest
-
-    if pilot_model["fails"]:
-        with pytest.raises(RuntimeError) as failure:
-            resolve_pilot_digest("ollama", "qwen2.5:3b")
-        pilot_model["error"] = str(failure.value)
-    else:
-        pilot_model["digest"] = resolve_pilot_digest("ollama", "qwen2.5:3b")
-
-
-@then("the model is downloaded and its identity is resolved")
-def pilot_model_downloaded(pilot_model: dict) -> None:
-    assert pilot_model["pulled"] == ["qwen2.5:3b"]
-    assert pilot_model["digest"] == "sha256:pulled999"
-
-
-@then("pilot preparation reports the download failure")
-def pilot_download_failed(pilot_model: dict) -> None:
-    assert pilot_model["pulled"] == ["qwen2.5:3b"]
-    assert "ollama pull qwen2.5:3b failed (exit 1)" in pilot_model["error"]
+# experiment-runs.feature — Multiple geographic operations share one tool session
 
 
 @given("a researcher opens a geographic tool session", target_fixture="live_tool_session")
@@ -469,6 +329,9 @@ def geographic_tools_available(live_tool_session: dict) -> None:
     assert {"feature_info", "relate_de9im", "jenks_breaks"} <= names
 
 
+# experiment-runs.feature — An unknown geographic operation is reported
+
+
 @given("a geographic operation that is not advertised")
 def unknown_geographic_operation() -> None:
     from experiment import gis_ops
@@ -490,29 +353,60 @@ def unknown_operation_identified(unknown_operation_result) -> None:
     assert "bogus_tool" in str(unknown_operation_result)
 
 
-@given("a trial whose driver fails unexpectedly", target_fixture="failing_driver")
-def failing_cell_driver(monkeypatch: pytest.MonkeyPatch, sample_cell_request: CellRequest) -> dict:
-    from experiment.services import runs
+# experiment-runs.feature — A repeated code-generation condition reuses the model reply
 
-    monkeypatch.setitem(
-        runs._DRIVER_DISPATCH,
-        ("scripted", "A"),
-        MagicMock(side_effect=RuntimeError("driver exploded")),
+
+@given("a model supplies code for a geographic result")
+def model_supplies_code(fake_chat_gateway: MagicMock, fake_code_sandbox: MagicMock) -> None:
+    fake_chat_gateway.complete.return_value = {
+        "choices": [
+            {"message": {"role": "assistant", "content": "```python\nprint('{\"ok\": 1}')\n```"}}
+        ],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
+    }
+    fake_code_sandbox.execute.return_value = SandboxExecution(
+        returncode=0, stdout='{"ok": 1}\n', stderr=""
     )
-    return {"request": sample_cell_request.model_copy(update={"driver": "scripted"})}
 
 
-@when("the researcher executes that trial")
-def execute_failing_driver(failing_driver: dict) -> None:
-    from experiment.services import runs
+@when(
+    "the researcher runs two trials of the same code-generation condition",
+    target_fixture="repeated_request",
+)
+def run_codegen_twice(
+    sample_cell_request: CellRequest, fake_harness_ports: HarnessPorts
+) -> CellRequest:
+    first = sample_cell_request.model_copy(
+        update={"arm": "B", "model_digest": "sha256:pin", "cache_stats": CacheStats()}
+    )
+    ollama_arm_b(first, ports=fake_harness_ports)
+    second = first.model_copy(update={"cache_stats": CacheStats()})
+    ollama_arm_b(second, ports=fake_harness_ports)
+    return second
 
-    failing_driver["result"] = runs.run_cell(failing_driver["request"])
+
+@then("the generated code runs against the task fixture")
+def code_uses_fixture(fake_code_sandbox: MagicMock, fake_cell_workspace: MagicMock) -> None:
+    # Cached model responses are reused; each cell must still execute the code.
+    assert fake_code_sandbox.execute.call_count == 2
+    for call in fake_code_sandbox.execute.call_args_list:
+        assert call.args == ("print('{\"ok\": 1}')\n",)
+        assert call.kwargs == {"fixture_src": fake_cell_workspace.fixture_path}
 
 
-@then("the trial records a failed status and failed grading")
-def cell_failure_is_recorded(failing_driver: dict) -> None:
-    assert failing_driver["result"]["status"] == "error"
-    assert failing_driver["result"]["oracle_passed"] is False
+@then("the result is saved")
+def code_result_saved(fake_cell_workspace: MagicMock) -> None:
+    assert fake_cell_workspace.deliverables == [{"ok": 1}, {"ok": 1}]
+
+
+@then("the second trial reuses the first model response")
+def model_response_reused(repeated_request: CellRequest, fake_chat_gateway: MagicMock) -> None:
+    assert fake_chat_gateway.complete.call_count == 1
+    assert repeated_request.cache_stats is not None
+    assert repeated_request.cache_stats.hits == 1
+
+
+# experiment-runs.feature — Changing or omitting model identity prevents unsafe reuse
 
 
 @given("a model response and a shared response cache", target_fixture="identity_cache")
@@ -599,6 +493,9 @@ def only_matching_identity_reused(identity_cache: dict) -> None:
     ]
 
 
+# experiment-runs.feature — A failed model response is not stored for reuse
+
+
 @given("a model service that fails the response request", target_fixture="failed_cached_cell")
 def failed_model_service(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sample_cell_request: CellRequest
@@ -642,6 +539,37 @@ def failed_response_not_cached(failed_cached_cell: dict) -> None:
     assert CompletionCache(failed_cached_cell["cache"]).count() == 0
 
 
+# experiment-runs.feature — A driver fails unexpectedly
+
+
+@given("a trial whose driver fails unexpectedly", target_fixture="failing_driver")
+def failing_cell_driver(monkeypatch: pytest.MonkeyPatch, sample_cell_request: CellRequest) -> dict:
+    from experiment.services import runs
+
+    monkeypatch.setitem(
+        runs._DRIVER_DISPATCH,
+        ("scripted", "A"),
+        MagicMock(side_effect=RuntimeError("driver exploded")),
+    )
+    return {"request": sample_cell_request.model_copy(update={"driver": "scripted"})}
+
+
+@when("the researcher executes that trial")
+def execute_failing_driver(failing_driver: dict) -> None:
+    from experiment.services import runs
+
+    failing_driver["result"] = runs.run_cell(failing_driver["request"])
+
+
+@then("the trial records a failed status and failed grading")
+def cell_failure_is_recorded(failing_driver: dict) -> None:
+    assert failing_driver["result"]["status"] == "error"
+    assert failing_driver["result"]["oracle_passed"] is False
+
+
+# experiment-runs.feature — A scripted run records its results without claiming token use
+
+
 @given("a scripted boundary-relation run", target_fixture="scripted_boundary_run")
 def scripted_boundary(tmp_path: Path) -> dict:
     from experiment.services import runs
@@ -679,6 +607,77 @@ def scripted_usage_unavailable(scripted_boundary_run: dict) -> None:
         for line in transcript.splitlines()
         if line.strip()
     )
+
+
+# experiment-runs.feature — Generated code sees only its input and produces a graded result
+
+
+@given("the model supplies executable code that inspects its input workspace")
+def isolated_code_reply(monkeypatch: pytest.MonkeyPatch) -> None:
+    code = (
+        "import json, os\n"
+        "assert os.listdir('.') == ['input.geojson']\n"
+        "fx = json.load(open('input.geojson'))\n"
+        "assert fx['type'] == 'FeatureCollection'\n"
+        "print(json.dumps({'relation': 'touches', 'de9im': 'FF2F11212'}))\n"
+    )
+    set_codegen_reply(monkeypatch, f"```python\n{code}```")
+
+
+@when("the researcher runs a code-generation trial end to end")
+def run_codegen_integration(codegen_run: dict, sample_cell_request: CellRequest) -> None:
+    from experiment.services import runs
+
+    codegen_run["result"] = runs.run_cell(sample_cell_request.model_copy(update={"arm": "B"}))
+
+
+@then("the result passes grading and the input is not left in the trial directory")
+def isolated_codegen_result(codegen_run: dict, sample_cell_request: CellRequest) -> None:
+    codegen_passes(codegen_run)
+    assert not (sample_cell_request.cell / "input.geojson").exists()
+
+
+# experiment-runs.feature — Supported code presentation styles produce a result
+
+
+@given(parsers.parse("the model supplies executable code in the {style} presentation style"))
+def alternative_code_reply(monkeypatch: pytest.MonkeyPatch, style: str) -> None:
+    code = "import json\nprint(json.dumps({'relation': 'touches', 'de9im': 'FF2F11212'}))\n"
+    label = {"short name": "py", "unlabelled": ""}[style]
+    set_codegen_reply(monkeypatch, f"```{label}\n{code}```")
+
+
+@then("the generated result passes grading")
+def codegen_passes(codegen_run: dict) -> None:
+    assert codegen_run["result"]["oracle_passed"] is True
+
+
+# experiment-runs.feature — Responses without executable code do not produce a result
+
+
+@given(parsers.parse("the model supplies {response} instead of executable code"))
+def non_code_reply(monkeypatch: pytest.MonkeyPatch, response: str) -> None:
+    contents = {
+        "a plain apology": "no code here, sorry",
+        "a formatted result": '```json\n{"relation": "touches", "de9im": "FF2F11212"}\n```',
+    }
+    set_codegen_reply(monkeypatch, contents[response])
+
+
+@then("the trial fails grading without saving a result")
+def non_code_not_graded(codegen_run: dict, sample_cell_request: CellRequest) -> None:
+    assert codegen_run["result"]["oracle_passed"] is False
+    assert not (sample_cell_request.cell / "result.json").exists()
+
+
+@then("the transcript explains that executable code was missing")
+def missing_code_recorded(sample_cell_request: CellRequest) -> None:
+    transcript = (sample_cell_request.cell / "transcript.jsonl").read_text(encoding="utf-8")
+    assert "no python block found" in transcript
+    assert "<string>" not in transcript
+
+
+# experiment-runs.feature — A generated script receives its own temporary workspace
 
 
 @given("a geographic input for a generated script", target_fixture="sandbox_input")
@@ -720,6 +719,9 @@ def sandbox_cleanup(isolated_result, sandbox_input: Path) -> None:
     }
 
 
+# experiment-runs.feature — Geographic libraries run cleanly in the isolated workspace
+
+
 @when(
     "the researcher runs a geographic-library script in isolation",
     target_fixture="geographic_result",
@@ -742,3 +744,63 @@ def isolated_geographic_libraries():
 def geographic_script_succeeds(geographic_result) -> None:
     assert geographic_result.returncode == 0, geographic_result.stderr
     assert geographic_result.stderr == ""
+
+
+# experiment-runs.feature — A trial within its budget records the total model usage
+
+
+@given("the trial has enough tokens for both responses")
+def sufficient_budget(budget_run: dict) -> None:
+    budget_run["limit"] = 250
+
+
+@when("the researcher runs the trial with its budget")
+def run_with_budget(budget_run: dict, sample_cell_request: CellRequest) -> None:
+    from experiment.services import runs
+
+    budget_run["result"] = runs.run_cell(
+        sample_cell_request.model_copy(
+            update={
+                "cell": budget_run["cell"],
+                "run_id": "budget-run",
+                "max_cell_tokens": budget_run["limit"],
+            }
+        )
+    )
+
+
+@then("the trial completes and records the combined token usage")
+def budget_success(budget_run: dict) -> None:
+    result = budget_run["result"]
+    assert result["status"] == "ok"
+    assert result["usage"]["total_tokens"] == 200
+    assert budget_run["chat"].call_count == 2
+
+
+# experiment-runs.feature — Exceeding the budget stops the trial before the requested tool runs
+
+
+@given("the first response exceeds the trial's token budget")
+def insufficient_budget(budget_run: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    from experiment.adapters.mcp.client import McpToolSession
+
+    budget_run["limit"] = 50
+    budget_run["tool"] = MagicMock(
+        side_effect=AssertionError("tool must not execute after the token budget is exceeded")
+    )
+    monkeypatch.setattr(McpToolSession, "call_tool", budget_run["tool"])
+
+
+@then("the trial is stopped for exceeding its budget")
+def budget_exceeded(budget_run: dict) -> None:
+    result = budget_run["result"]
+    assert result["status"] == "aborted"
+    assert result["abort_reason"] == "token_cap_exceeded"
+    assert result["usage"]["total_tokens"] == 80
+    assert result["usage"]["cap_exceeded"] is True
+    assert budget_run["chat"].call_count == 1
+
+
+@then("the requested geographic tool is not executed")
+def tool_not_executed(budget_run: dict) -> None:
+    budget_run["tool"].assert_not_called()

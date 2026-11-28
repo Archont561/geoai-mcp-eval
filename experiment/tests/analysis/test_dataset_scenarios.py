@@ -25,6 +25,37 @@ TASKS = ROOT / "experiment" / "tasks"
 scenarios(str(ROOT / "experiment" / "features" / "analysis-dataset.feature"))
 
 
+@pytest.fixture
+def remote_client(tmp_path: Path, fake_pygithub: tuple[MagicMock, MagicMock]):
+    gh, http_client = fake_pygithub
+    client = GitHubRunClient(
+        repo="Archont561/geoai-mcp-eval",
+        token="ghp_test_secret",
+        cache_dir=tmp_path / "cache",
+        transport=GitHubTransport(github_client=gh, http_client=http_client),
+    )
+    return {"client": client, "http": http_client}
+
+
+@pytest.fixture
+def repository_issue(tmp_path: Path, fake_pygithub: tuple[MagicMock, MagicMock]) -> dict:
+    gh, http = fake_pygithub
+    return {
+        "github": gh,
+        "http": http,
+        "client": GitHubRunClient(
+            repo="org/repo",
+            cache_dir=tmp_path / "cache",
+            transport=GitHubTransport(github_client=gh, http_client=http),
+        ),
+    }
+
+
+# Step definitions follow feature and scenario order; shared steps appear at first use.
+
+# analysis-dataset.feature — A pilot archive supplies tables and trial evidence
+
+
 @given("an archive of a completed pilot run", target_fixture="archive")
 def pilot_archive(packed_pilot_zip: Path) -> Path:
     return packed_pilot_zip
@@ -88,161 +119,7 @@ def trial_evidence(dataset: RunDataset) -> None:
     assert handle.deliverable is not None
 
 
-@pytest.fixture
-def remote_client(tmp_path: Path, fake_pygithub: tuple[MagicMock, MagicMock]):
-    gh, http_client = fake_pygithub
-    client = GitHubRunClient(
-        repo="Archont561/geoai-mcp-eval",
-        token="ghp_test_secret",
-        cache_dir=tmp_path / "cache",
-        transport=GitHubTransport(github_client=gh, http_client=http_client),
-    )
-    return {"client": client, "http": http_client}
-
-
-@given("a repository with a completed pilot run", target_fixture="remote")
-def repository_with_run(remote_client: dict) -> dict:
-    return remote_client
-
-
-@given("a locally cached pilot run", target_fixture="remote")
-def cached_run(remote_client: dict) -> dict:
-    remote_client["cached_path"] = remote_client["client"].download_run(987654321)
-    assert remote_client["http"].get.call_count == 2
-    return remote_client
-
-
-@given("a locally cached pilot run that has become damaged", target_fixture="remote")
-def damaged_cached_run(remote_client: dict) -> dict:
-    cached_run(remote_client)
-    remote_client["cached_path"].write_bytes(b"corrupted-not-a-zip")
-    return remote_client
-
-
-@when("the researcher lists and loads its latest run")
-def list_and_load_latest(remote: dict) -> None:
-    remote["runs"] = remote["client"].list_runs(limit=5, branch="main")
-    with remote["client"].load_latest(branch="main") as dataset:
-        remote["measurement_count"] = len(dataset.measurements_df())
-
-
-@then("the run's identity and six trial measurements are available")
-def run_identity_and_measurements(remote: dict) -> None:
-    assert len(remote["runs"]) == 1
-    assert remote["runs"][0].database_id == 987654321
-    assert remote["runs"][0].head_sha == "deadbeef"
-    assert remote["measurement_count"] == 6
-
-
-@then("the download does not expose credentials to the storage host")
-def redirected_download_strips_credentials(remote: dict) -> None:
-    http = remote["http"]
-    assert http.get.call_count == 2
-    assert http.get.call_args_list[0].kwargs["headers"]["Authorization"] == "Bearer ghp_test_secret"
-    assert "headers" not in http.get.call_args_list[1].kwargs
-
-
-@when("the researcher loads that run again")
-def reload_cached_run(remote: dict) -> None:
-    with remote["client"].load_run(987654321) as dataset:
-        remote["measurement_count"] = len(dataset.measurements_df())
-
-
-@then("all six trial measurements are available without another download")
-def cache_was_used(remote: dict) -> None:
-    assert remote["measurement_count"] == 6
-    assert remote["http"].get.call_count == 2
-
-
-@when("the researcher refreshes that run")
-def refresh_cached_run(remote: dict) -> None:
-    remote["path"] = remote["client"].download_run(987654321, cache=CachePolicy.REFRESH)
-
-
-@then("the archive is downloaded again")
-def archive_downloaded_again(remote: dict) -> None:
-    assert remote["path"].is_file()
-    assert remote["http"].get.call_count == 4
-
-
-@when("the researcher retrieves that run")
-def retrieve_damaged_run(remote: dict) -> None:
-    remote["path"] = remote["client"].download_run(987654321, cache=CachePolicy.USE)
-
-
-@then("a fresh archive replaces the damaged copy")
-def damaged_copy_replaced(remote: dict) -> None:
-    assert remote["path"].is_file()
-    assert remote["http"].get.call_count == 4
-    with RunArchive.open(remote["path"]) as archive:
-        archive.verify_all()
-
-
-@when(
-    "the researcher opens it directly without connecting to the repository",
-    target_fixture="offline",
-)
-def load_offline(archive: Path, tmp_path: Path) -> dict:
-    client = GitHubRunClient(cache_dir=tmp_path / "cache")
-    with client.load_zip(archive) as dataset:
-        run_id = dataset.run.run_id
-    with RunArchive.open(archive) as run_archive:
-        wrapped = RunDataset.from_archive(run_archive)
-        count = len(wrapped.measurements_df())
-    return {"run_id": run_id, "count": count}
-
-
-@then("the pilot run and its six measurements are available")
-def offline_measurements(offline: dict) -> None:
-    assert offline == {"run_id": "pilot-001", "count": 6}
-
-
-@given(
-    "a repository that redirects archive downloads to a storage service", target_fixture="redirect"
-)
-def redirected_repository(
-    tmp_path: Path,
-    packed_pilot_zip: Path,
-    fake_pygithub: tuple[MagicMock, MagicMock],
-    respx_mock: respx.MockRouter,
-) -> dict:
-    gh, _http = fake_pygithub
-    artifact = gh.get_repo.return_value.get_workflow_run.return_value.get_artifacts.return_value[0]
-    api_route = respx_mock.get(artifact.archive_download_url).mock(
-        return_value=httpx.Response(
-            302, headers={"Location": "https://blob.example.invalid/sas/987654321.zip"}
-        )
-    )
-    outer = _wrap_in_outer_artifact_zip(packed_pilot_zip, "experiment-run-987654321-deadbeef.zip")
-    blob_route = respx_mock.get("https://blob.example.invalid/sas/987654321.zip").mock(
-        return_value=httpx.Response(200, content=outer)
-    )
-    client = GitHubRunClient(
-        repo="Archont561/geoai-mcp-eval",
-        token="ghp_respx_secret",
-        cache_dir=tmp_path / "cache",
-        transport=GitHubTransport(github_client=gh),
-    )
-    return {"client": client, "api": api_route, "blob": blob_route}
-
-
-@when("the researcher loads the run from the repository")
-def load_redirected_run(redirect: dict) -> None:
-    with redirect["client"].load_run(987654321) as dataset:
-        redirect["count"] = len(dataset.measurements_df())
-
-
-@then("all six trial measurements are available")
-def redirected_measurements(redirect: dict) -> None:
-    assert redirect["count"] == 6
-
-
-@then("repository credentials are absent from the storage request")
-def redirect_credentials_protected(redirect: dict) -> None:
-    assert redirect["api"].called
-    assert redirect["blob"].called
-    assert redirect["api"].calls.last.request.headers["authorization"] == "Bearer ghp_respx_secret"
-    assert "authorization" not in redirect["blob"].calls.last.request.headers
+# analysis-dataset.feature — An unrecognised grading check cannot be classified
 
 
 @given("a run with a grading check unknown to the task suite", target_fixture="memory_run")
@@ -304,6 +181,9 @@ def unknown_check_rejected(table_errors: list[str]) -> None:
     assert all("mystery-assertion" in error for error in table_errors)
 
 
+# analysis-dataset.feature — Trial evidence cannot be opened from an in-memory run
+
+
 @when("the researcher requests its trial evidence", target_fixture="trial_error")
 def request_memory_trial(memory_run: dict) -> str:
     try:
@@ -316,6 +196,9 @@ def request_memory_trial(memory_run: dict) -> str:
 @then("the request explains that an archive is required")
 def archive_required(trial_error: str) -> None:
     assert "zip-backed" in trial_error
+
+
+# analysis-dataset.feature — An empty preparation run yields an empty summary
 
 
 @given("an empty preparation run", target_fixture="memory_run")
@@ -334,6 +217,172 @@ def request_empty_summary(memory_run: dict):
 def empty_summary(summary) -> None:
     assert summary.empty
     assert list(summary.columns) == list(CELL_SUMMARY_COLUMNS)
+
+
+# analysis-dataset.feature — The latest successful run is available for analysis
+
+
+@given("a repository with a completed pilot run", target_fixture="remote")
+def repository_with_run(remote_client: dict) -> dict:
+    return remote_client
+
+
+@when("the researcher lists and loads its latest run")
+def list_and_load_latest(remote: dict) -> None:
+    remote["runs"] = remote["client"].list_runs(limit=5, branch="main")
+    with remote["client"].load_latest(branch="main") as dataset:
+        remote["measurement_count"] = len(dataset.measurements_df())
+
+
+@then("the run's identity and six trial measurements are available")
+def run_identity_and_measurements(remote: dict) -> None:
+    assert len(remote["runs"]) == 1
+    assert remote["runs"][0].database_id == 987654321
+    assert remote["runs"][0].head_sha == "deadbeef"
+    assert remote["measurement_count"] == 6
+
+
+@then("the download does not expose credentials to the storage host")
+def redirected_download_strips_credentials(remote: dict) -> None:
+    http = remote["http"]
+    assert http.get.call_count == 2
+    assert http.get.call_args_list[0].kwargs["headers"]["Authorization"] == "Bearer ghp_test_secret"
+    assert "headers" not in http.get.call_args_list[1].kwargs
+
+
+# analysis-dataset.feature — A previously downloaded run is reused
+
+
+@given("a locally cached pilot run", target_fixture="remote")
+def cached_run(remote_client: dict) -> dict:
+    remote_client["cached_path"] = remote_client["client"].download_run(987654321)
+    assert remote_client["http"].get.call_count == 2
+    return remote_client
+
+
+@when("the researcher loads that run again")
+def reload_cached_run(remote: dict) -> None:
+    with remote["client"].load_run(987654321) as dataset:
+        remote["measurement_count"] = len(dataset.measurements_df())
+
+
+@then("all six trial measurements are available without another download")
+def cache_was_used(remote: dict) -> None:
+    assert remote["measurement_count"] == 6
+    assert remote["http"].get.call_count == 2
+
+
+# analysis-dataset.feature — A researcher requests a fresh copy
+
+
+@when("the researcher refreshes that run")
+def refresh_cached_run(remote: dict) -> None:
+    remote["path"] = remote["client"].download_run(987654321, cache=CachePolicy.REFRESH)
+
+
+@then("the archive is downloaded again")
+def archive_downloaded_again(remote: dict) -> None:
+    assert remote["path"].is_file()
+    assert remote["http"].get.call_count == 4
+
+
+# analysis-dataset.feature — A damaged local copy is replaced
+
+
+@given("a locally cached pilot run that has become damaged", target_fixture="remote")
+def damaged_cached_run(remote_client: dict) -> dict:
+    cached_run(remote_client)
+    remote_client["cached_path"].write_bytes(b"corrupted-not-a-zip")
+    return remote_client
+
+
+@when("the researcher retrieves that run")
+def retrieve_damaged_run(remote: dict) -> None:
+    remote["path"] = remote["client"].download_run(987654321, cache=CachePolicy.USE)
+
+
+@then("a fresh archive replaces the damaged copy")
+def damaged_copy_replaced(remote: dict) -> None:
+    assert remote["path"].is_file()
+    assert remote["http"].get.call_count == 4
+    with RunArchive.open(remote["path"]) as archive:
+        archive.verify_all()
+
+
+# analysis-dataset.feature — A local archive can be analysed without a network
+
+
+@when(
+    "the researcher opens it directly without connecting to the repository",
+    target_fixture="offline",
+)
+def load_offline(archive: Path, tmp_path: Path) -> dict:
+    client = GitHubRunClient(cache_dir=tmp_path / "cache")
+    with client.load_zip(archive) as dataset:
+        run_id = dataset.run.run_id
+    with RunArchive.open(archive) as run_archive:
+        wrapped = RunDataset.from_archive(run_archive)
+        count = len(wrapped.measurements_df())
+    return {"run_id": run_id, "count": count}
+
+
+@then("the pilot run and its six measurements are available")
+def offline_measurements(offline: dict) -> None:
+    assert offline == {"run_id": "pilot-001", "count": 6}
+
+
+# analysis-dataset.feature — A redirected archive download keeps credentials private
+
+
+@given(
+    "a repository that redirects archive downloads to a storage service", target_fixture="redirect"
+)
+def redirected_repository(
+    tmp_path: Path,
+    packed_pilot_zip: Path,
+    fake_pygithub: tuple[MagicMock, MagicMock],
+    respx_mock: respx.MockRouter,
+) -> dict:
+    gh, _http = fake_pygithub
+    artifact = gh.get_repo.return_value.get_workflow_run.return_value.get_artifacts.return_value[0]
+    api_route = respx_mock.get(artifact.archive_download_url).mock(
+        return_value=httpx.Response(
+            302, headers={"Location": "https://blob.example.invalid/sas/987654321.zip"}
+        )
+    )
+    outer = _wrap_in_outer_artifact_zip(packed_pilot_zip, "experiment-run-987654321-deadbeef.zip")
+    blob_route = respx_mock.get("https://blob.example.invalid/sas/987654321.zip").mock(
+        return_value=httpx.Response(200, content=outer)
+    )
+    client = GitHubRunClient(
+        repo="Archont561/geoai-mcp-eval",
+        token="ghp_respx_secret",
+        cache_dir=tmp_path / "cache",
+        transport=GitHubTransport(github_client=gh),
+    )
+    return {"client": client, "api": api_route, "blob": blob_route}
+
+
+@when("the researcher loads the run from the repository")
+def load_redirected_run(redirect: dict) -> None:
+    with redirect["client"].load_run(987654321) as dataset:
+        redirect["count"] = len(dataset.measurements_df())
+
+
+@then("all six trial measurements are available")
+def redirected_measurements(redirect: dict) -> None:
+    assert redirect["count"] == 6
+
+
+@then("repository credentials are absent from the storage request")
+def redirect_credentials_protected(redirect: dict) -> None:
+    assert redirect["api"].called
+    assert redirect["blob"].called
+    assert redirect["api"].calls.last.request.headers["authorization"] == "Bearer ghp_respx_secret"
+    assert "authorization" not in redirect["blob"].calls.last.request.headers
+
+
+# analysis-dataset.feature — The pilot suite defines a unique predicate for each grading check
 
 
 @given("the published pilot task suite")
@@ -359,18 +408,7 @@ def pilot_predicates_are_unique(predicates: dict[str, str]) -> None:
     assert len(predicates) == len(set(predicates.values()))
 
 
-@pytest.fixture
-def repository_issue(tmp_path: Path, fake_pygithub: tuple[MagicMock, MagicMock]) -> dict:
-    gh, http = fake_pygithub
-    return {
-        "github": gh,
-        "http": http,
-        "client": GitHubRunClient(
-            repo="org/repo",
-            cache_dir=tmp_path / "cache",
-            transport=GitHubTransport(github_client=gh, http_client=http),
-        ),
-    }
+# analysis-dataset.feature — Repository credentials are rejected
 
 
 @given("a repository that rejects the researcher's credentials")
@@ -382,16 +420,70 @@ def rejected_repository_credentials(repository_issue: dict) -> None:
     )
 
 
+@when("the researcher lists its runs")
+def list_repository_runs(repository_issue: dict) -> None:
+    from experiment.analysis import GitHubRunError
+
+    try:
+        repository_issue["runs"] = repository_issue["client"].list_runs()
+    except GitHubRunError as exc:
+        repository_issue["error"] = str(exc)
+
+
+@then("the repository access error is reported")
+def repository_access_error(repository_issue: dict) -> None:
+    assert "GitHub API error" in repository_issue["error"]
+
+
+# analysis-dataset.feature — No successful run is available
+
+
 @given("a repository without a completed successful run")
 def repository_without_runs(repository_issue: dict) -> None:
     repo = repository_issue["github"].get_repo.return_value
     repo.get_workflow.return_value.get_runs.return_value = []
 
 
+@when("the researcher requests the latest run")
+def request_latest_repository_run(repository_issue: dict) -> None:
+    from experiment.analysis import GitHubRunError
+
+    try:
+        repository_issue["client"].load_latest()
+    except GitHubRunError as exc:
+        repository_issue["error"] = str(exc)
+
+
+@then("the absence of a successful run is reported")
+def no_successful_run_error(repository_issue: dict) -> None:
+    assert "no successful completed runs" in repository_issue["error"]
+
+
+# analysis-dataset.feature — A run has no matching experiment archive
+
+
 @given("a run without an experiment archive")
 def run_without_archive(repository_issue: dict) -> None:
     repo = repository_issue["github"].get_repo.return_value
     repo.get_workflow_run.return_value.get_artifacts.return_value = []
+
+
+@when("the researcher retrieves its archive")
+def retrieve_repository_archive(repository_issue: dict) -> None:
+    from experiment.analysis import GitHubRunError
+
+    try:
+        repository_issue["archive"] = repository_issue["client"].download_run(987654321)
+    except GitHubRunError as exc:
+        repository_issue["error"] = str(exc)
+
+
+@then("the missing experiment archive is reported")
+def missing_experiment_archive_error(repository_issue: dict) -> None:
+    assert "no experiment-run" in repository_issue["error"]
+
+
+# analysis-dataset.feature — An archive cannot be downloaded safely
 
 
 @given(parsers.parse("a run whose archive download encounters {problem}"))
@@ -409,6 +501,20 @@ def archive_download_problem(repository_issue: dict, problem: str) -> None:
     http.get.return_value = responses[problem]
 
 
+@then(parsers.parse("the download reports {explanation}"))
+def archive_download_error(repository_issue: dict, explanation: str) -> None:
+    expected = {
+        "an artifact download failure": "artifact download failed",
+        "an invalid archive": "not a valid zip",
+        "an unavailable download": "HTTP 404",
+        "an incomplete redirect": "missing Location",
+    }
+    assert expected[explanation] in repository_issue["error"]
+
+
+# analysis-dataset.feature — Repository identity is unavailable
+
+
 @given("no repository is configured for analysis")
 def no_repository_configured(
     repository_issue: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -424,6 +530,14 @@ def no_repository_configured(
     )
 
 
+@then("the missing repository configuration is reported")
+def missing_repository_error(repository_issue: dict) -> None:
+    assert "repository not configured" in repository_issue["error"]
+
+
+# analysis-dataset.feature — A local checkout identifies its repository
+
+
 @given("a checkout with a configured GitHub repository")
 def checkout_with_repository(
     repository_issue: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -437,6 +551,15 @@ def checkout_with_repository(
     )
     repo = repository_issue["github"].get_repo.return_value
     repo.get_workflow.return_value.get_runs.return_value = []
+
+
+@then("the configured repository is used without requiring a command-line client")
+def configured_checkout_repository(repository_issue: dict) -> None:
+    assert repository_issue["runs"] == []
+    repository_issue["github"].get_repo.assert_called_once_with("Archont561/geoai-mcp-eval")
+
+
+# analysis-dataset.feature — A direct archive download uses the configured environment credentials
 
 
 @given("a direct archive download with environment credentials")
@@ -456,79 +579,15 @@ def direct_download_with_environment_credentials(
     )
 
 
-@when("the researcher lists its runs")
-def list_repository_runs(repository_issue: dict) -> None:
-    from experiment.analysis import GitHubRunError
-
-    try:
-        repository_issue["runs"] = repository_issue["client"].list_runs()
-    except GitHubRunError as exc:
-        repository_issue["error"] = str(exc)
-
-
-@when("the researcher requests the latest run")
-def request_latest_repository_run(repository_issue: dict) -> None:
-    from experiment.analysis import GitHubRunError
-
-    try:
-        repository_issue["client"].load_latest()
-    except GitHubRunError as exc:
-        repository_issue["error"] = str(exc)
-
-
-@when("the researcher retrieves its archive")
-def retrieve_repository_archive(repository_issue: dict) -> None:
-    from experiment.analysis import GitHubRunError
-
-    try:
-        repository_issue["archive"] = repository_issue["client"].download_run(987654321)
-    except GitHubRunError as exc:
-        repository_issue["error"] = str(exc)
-
-
-@then("the repository access error is reported")
-def repository_access_error(repository_issue: dict) -> None:
-    assert "GitHub API error" in repository_issue["error"]
-
-
-@then("the absence of a successful run is reported")
-def no_successful_run_error(repository_issue: dict) -> None:
-    assert "no successful completed runs" in repository_issue["error"]
-
-
-@then("the missing experiment archive is reported")
-def missing_experiment_archive_error(repository_issue: dict) -> None:
-    assert "no experiment-run" in repository_issue["error"]
-
-
-@then(parsers.parse("the download reports {explanation}"))
-def archive_download_error(repository_issue: dict, explanation: str) -> None:
-    expected = {
-        "an artifact download failure": "artifact download failed",
-        "an invalid archive": "not a valid zip",
-        "an unavailable download": "HTTP 404",
-        "an incomplete redirect": "missing Location",
-    }
-    assert expected[explanation] in repository_issue["error"]
-
-
-@then("the missing repository configuration is reported")
-def missing_repository_error(repository_issue: dict) -> None:
-    assert "repository not configured" in repository_issue["error"]
-
-
-@then("the configured repository is used without requiring a command-line client")
-def configured_checkout_repository(repository_issue: dict) -> None:
-    assert repository_issue["runs"] == []
-    repository_issue["github"].get_repo.assert_called_once_with("Archont561/geoai-mcp-eval")
-
-
 @then("the archive is saved and the credentials are sent to the repository")
 def direct_archive_uses_environment_credentials(repository_issue: dict) -> None:
     assert repository_issue["archive"].name == "experiment-run-987654321-deadbeef.zip"
     assert repository_issue["http"].get.call_args.kwargs["headers"]["Authorization"] == (
         "Bearer gho_env_token"
     )
+
+
+# analysis-dataset.feature — Downloaded runs have a default local cache
 
 
 @given("the default analysis settings")

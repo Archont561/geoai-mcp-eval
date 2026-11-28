@@ -17,3 +17,13 @@ when adding scenarios: use domain language, group acceptance criteria under
 rules, keep scenarios independent and focused, and bind them to executable
 steps. The architecture gate also checks that scenarios are bound and that
 non-BDD tests use Hypothesis properties, apart from the structural and smoke gates.
+
+## Step-definition layout
+
+Keep scenario-module step definitions in feature and scenario order, following
+the steps from top to bottom rather than grouping all Given, When, and Then
+bindings separately. Label groups with their feature and first scenario. A step
+used by multiple scenarios is defined once, at its first use; common steps may
+also live in shared fixture or step modules. Keep helper functions and fixtures
+separate from scenario step groups. When a scenario changes, update the nearby
+bindings without duplicating shared definitions.
